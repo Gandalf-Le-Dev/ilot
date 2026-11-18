@@ -25,7 +25,7 @@ func (skillFlag) BeforeApply(app *kong.Kong) error {
 }
 
 func installAgentSkill(homeDir string) error {
-	skillFile := filepath.Join(homeDir, ".claude", "skills", "dev", "SKILL.md")
+	skillFile := filepath.Join(homeDir, ".claude", "skills", "ilot", "SKILL.md")
 	installed, err := os.ReadFile(skillFile)
 	if err == nil && bytes.Equal(installed, []byte(agentSkill)) {
 		return nil
@@ -39,13 +39,13 @@ func installAgentSkill(homeDir string) error {
 	return os.WriteFile(skillFile, []byte(agentSkill), 0o644)
 }
 
-// The install never stops dev boot: without the skill, the apps still have to start.
+// The install never stops ilot boot: without the skill, the apps still have to start.
 func installAgentSkillOrWarn(homeDirOf func() (string, error), warnings io.Writer) {
 	homeDir, err := homeDirOf()
 	if err == nil {
 		err = installAgentSkill(homeDir)
 	}
 	if err != nil {
-		fmt.Fprintf(warnings, "warning: install the dev skill: %v\n", err)
+		fmt.Fprintf(warnings, "warning: install the ilot skill: %v\n", err)
 	}
 }

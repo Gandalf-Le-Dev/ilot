@@ -1,15 +1,16 @@
-package devctl
+package ilotctl
 
 import (
 	"cmp"
-	"dev/internal/appconfig"
-	"dev/internal/processcompose"
-	"dev/internal/stack"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 func (controller *Controller) binDir(stackName string) string {
@@ -128,7 +129,7 @@ func (controller *Controller) watcherSpec(stacks stackSet, watchedInstance insta
 	}, true, nil
 }
 
-// An app with a build rebuilds before the restart, in its checkout, like dev start does.
+// An app with a build rebuilds before the restart, in its checkout, like ilot start does.
 // A failed build keeps the running app. The lock serializes the builds of the stack:
 // apps that share a binary, such as internalapi and publicapi, would otherwise write it at the same time.
 func (controller *Controller) watcherCommand(stacks stackSet, watchedInstance instance, app appconfig.App) (string, error) {
@@ -200,7 +201,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 	repoCheckoutDir := func(repoName string) (string, error) {
 		checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 		if checkoutDir == "" {
-			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/dev/env.yaml", appInstance.processName(), repoName, repoName)
+			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", appInstance.processName(), repoName, repoName)
 		}
 		return checkoutDir, nil
 	}

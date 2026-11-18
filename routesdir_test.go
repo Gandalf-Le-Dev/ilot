@@ -5,14 +5,14 @@ import "testing"
 func TestRoutesDirFromMountsFindsTheTraefikRoutesBindSource(t *testing.T) {
 	mountsJSON := []byte(`[
 		{"Type":"bind","Source":"/var/run/docker.sock","Destination":"/var/run/docker.sock"},
-		{"Type":"bind","Source":"/home/user/devbox/platform/devbox/devproxy/routes","Destination":"/etc/traefik/routes"}
+		{"Type":"bind","Source":"/home/user/devbox/platform/devbox/ilotproxy/routes","Destination":"/etc/traefik/routes"}
 	]`)
 
 	routesDir, err := routesDirFromMounts(mountsJSON)
 	if err != nil {
 		t.Fatalf("routesDirFromMounts: %v", err)
 	}
-	if routesDir != "/home/user/devbox/platform/devbox/devproxy/routes" {
+	if routesDir != "/home/user/devbox/platform/devbox/ilotproxy/routes" {
 		t.Errorf("routesDir = %q", routesDir)
 	}
 }

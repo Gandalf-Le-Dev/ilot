@@ -17,7 +17,7 @@ func TestKeepTakesTheLoginShellVariablesAndDropsTheRest(t *testing.T) {
 		"DEPLOY_ENV=DEV", "REGION=DEV1", "LOGKIT_INFRASTRUCTURE=preproduction", "TEMPORAL_ADDRESS=localhost:7233",
 		"MISE_TRUSTED_CONFIG_PATHS=/home/user", "NVM_DIR=/home/user/.nvm",
 		"SSH_AUTH_SOCK=/tmp/agent", "GPG_TTY=/dev/pts/0", "ACME_APPLICATION_KEY=key", "CLAUDECODE=1", "TERM_PROGRAM=tmux",
-		"TERM=xterm", "DIRENV_DIR=/src", "GOFLAGS=-mod=vendor", "DEVPROXY_PORT=1", "no-equal-sign",
+		"TERM=xterm", "DIRENV_DIR=/src", "GOFLAGS=-mod=vendor", "ILOT_PROXY_PORT=1", "no-equal-sign",
 	})
 
 	want := []string{

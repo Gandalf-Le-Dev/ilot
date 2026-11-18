@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 	"slices"
 
-	"dev/internal/checkouts"
-	"dev/internal/proxyfiles"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/proxyfiles"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 func (controller *Controller) Remove(ctx context.Context, stackName string) (err error) {
 	if stackName == stack.MasterStackName || stackName == stack.SharedStackName {
-		return fmt.Errorf("cannot remove stack %s: dev needs it, stop its apps with dev stop", stackName)
+		return fmt.Errorf("cannot remove stack %s: ilot needs it, stop its apps with ilot stop", stackName)
 	}
 	release, err := controller.Store.Lock()
 	if err != nil {
@@ -30,7 +30,7 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 	}
 	removedStack, isKnown := stacks.byName[stackName]
 	if !isKnown {
-		return fmt.Errorf("no stack %q, see dev ls", stackName)
+		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
 	delete(stacks.byName, stackName)
 	if err := controller.prepareStacks(stacks); err != nil {

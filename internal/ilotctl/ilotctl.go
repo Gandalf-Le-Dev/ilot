@@ -1,15 +1,8 @@
-package devctl
+package ilotctl
 
 import (
 	"bytes"
 	"context"
-	"dev/internal/appconfig"
-	"dev/internal/checkouts"
-	"dev/internal/logs"
-	"dev/internal/personal"
-	"dev/internal/processcompose"
-	"dev/internal/stack"
-	"dev/internal/state"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +10,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
+	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 type ProcessSupervisor interface {
@@ -142,7 +143,7 @@ func (controller *Controller) startAgainInItsStackHint(stacks stackSet, failedIn
 	for _, requestedInstance := range requestedInstances {
 		appNamesToRequest = append(appNamesToRequest, requestedInstance.appName)
 	}
-	return fmt.Errorf("%s ran in %s: name it to start it there again: dev start %s", failedInstance.appName, failedInstance.stackName, strings.Join(appNamesToRequest, " "))
+	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.appName, failedInstance.stackName, strings.Join(appNamesToRequest, " "))
 }
 
 func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Worktree) (err error) {
@@ -153,7 +154,7 @@ func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Workt
 	defer func() { err = errors.Join(err, release()) }()
 
 	if controller.Supervisor.IsUp(ctx) {
-		fmt.Fprintln(controller.Output, "dev already runs, nothing to boot")
+		fmt.Fprintln(controller.Output, "ilot already runs, nothing to boot")
 		return nil
 	}
 	return controller.bootApps(ctx, mainCheckout)
@@ -228,7 +229,7 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 		}
 	}
 	if len(problems) > 0 {
-		problems = append(problems, errors.New("fix the cause, then run dev start with the apps above"))
+		problems = append(problems, errors.New("fix the cause, then run ilot start with the apps above"))
 	}
 	return errors.Join(problems...)
 }
@@ -278,7 +279,7 @@ func (controller *Controller) instancesOf(stackName string, appNames []string) (
 func (controller *Controller) reposNotClonedHint() error {
 	var hints []error
 	for _, repoName := range slices.Sorted(maps.Keys(controller.ReposNotCloned)) {
-		hints = append(hints, fmt.Errorf("repo %s is not at %s: clone it, or set repos.%s.path in ~/.config/dev/env.yaml", repoName, controller.ReposNotCloned[repoName], repoName))
+		hints = append(hints, fmt.Errorf("repo %s is not at %s: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", repoName, controller.ReposNotCloned[repoName], repoName))
 	}
 	return errors.Join(hints...)
 }
@@ -320,7 +321,7 @@ func (controller *Controller) startInstance(ctx context.Context, stacks stackSet
 		case errors.As(err, &endedError) && isStartedByThisRun && ctx.Err() == nil:
 			return errors.Join(failure, controller.stopFailedInstance(ctx, stacks, appInstance))
 		case errors.As(err, &notReadyInTimeError):
-			return fmt.Errorf("%w; it still starts: dev keeps it", failure)
+			return fmt.Errorf("%w; it still starts: ilot keeps it", failure)
 		}
 		return failure
 	}
@@ -340,7 +341,7 @@ func (controller *Controller) stopFailedInstance(ctx context.Context, stacks sta
 	return nil
 }
 
-// Silent builds (go build) otherwise look like dev hangs.
+// Silent builds (go build) otherwise look like ilot hangs.
 func (controller *Controller) printProgressUntilStopped(task string) (stop func()) {
 	if controller.ProgressInterval <= 0 {
 		return func() {}

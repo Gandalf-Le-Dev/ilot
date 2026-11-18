@@ -1,11 +1,11 @@
-package devctl
+package ilotctl
 
 import (
 	"errors"
 	"strings"
 	"testing"
 
-	"dev/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 func TestCheckRenderingAcceptsAValidConfig(t *testing.T) {

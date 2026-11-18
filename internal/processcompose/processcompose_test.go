@@ -255,8 +255,8 @@ func TestApplyStopsWaitingForTheDaemonWhenTheContextEnds(t *testing.T) {
 
 func TestRenderProjectProbesAContainer(t *testing.T) {
 	content, err := RenderProject([]ProcessSpec{
-		{Name: "search.stack", Command: "docker run search", Ready: ReadyProbe{Host: "dev-stack-search", Port: 16271}},
-		{Name: "cache.stack", Command: "docker run cache", Ready: ReadyProbe{Command: "docker exec dev-stack-cache sh -c 'pg_isready -U postgres'"}},
+		{Name: "search.stack", Command: "docker run search", Ready: ReadyProbe{Host: "ilot-stack-search", Port: 16271}},
+		{Name: "cache.stack", Command: "docker run cache", Ready: ReadyProbe{Command: "docker exec ilot-stack-cache sh -c 'pg_isready -U postgres'"}},
 	})
 	if err != nil {
 		t.Fatalf("RenderProject: %v", err)
@@ -265,17 +265,17 @@ func TestRenderProjectProbesAContainer(t *testing.T) {
 	if err := yaml.Unmarshal(content, &parsed); err != nil {
 		t.Fatal(err)
 	}
-	if command := parsed.Processes["search.stack"].ReadinessProbe.Exec.Command; command != "bash -c 'echo > /dev/tcp/dev-stack-search/16271'" {
+	if command := parsed.Processes["search.stack"].ReadinessProbe.Exec.Command; command != "bash -c 'echo > /dev/tcp/ilot-stack-search/16271'" {
 		t.Errorf("search probe = %q", command)
 	}
-	if command := parsed.Processes["cache.stack"].ReadinessProbe.Exec.Command; command != "docker exec dev-stack-cache sh -c 'pg_isready -U postgres'" {
+	if command := parsed.Processes["cache.stack"].ReadinessProbe.Exec.Command; command != "docker exec ilot-stack-cache sh -c 'pg_isready -U postgres'" {
 		t.Errorf("cache probe = %q", command)
 	}
 }
 
 func TestRenderProjectGivesEveryProcessAShutdownTimeout(t *testing.T) {
 	content, err := RenderProject([]ProcessSpec{
-		{Name: "cache.stack", Command: "docker run cache", ShutdownCommand: "docker stop --time 10 dev-stack-cache"},
+		{Name: "cache.stack", Command: "docker run cache", ShutdownCommand: "docker stop --time 10 ilot-stack-cache"},
 		{Name: "api.stack", Command: "api"},
 	})
 	if err != nil {
@@ -292,7 +292,7 @@ func TestRenderProjectGivesEveryProcessAShutdownTimeout(t *testing.T) {
 	if err := yaml.Unmarshal(content, &project); err != nil {
 		t.Fatal(err)
 	}
-	if shutdown := project.Processes["cache.stack"].Shutdown; shutdown.Command != "docker stop --time 10 dev-stack-cache" || shutdown.TimeoutSeconds != shutdownTimeoutSeconds {
+	if shutdown := project.Processes["cache.stack"].Shutdown; shutdown.Command != "docker stop --time 10 ilot-stack-cache" || shutdown.TimeoutSeconds != shutdownTimeoutSeconds {
 		t.Errorf("cache shutdown = %+v", shutdown)
 	}
 	if shutdown := project.Processes["api.stack"].Shutdown; shutdown.Command != "" || shutdown.TimeoutSeconds != shutdownTimeoutSeconds {

@@ -49,7 +49,7 @@ func checkoutWithDevSource(t *testing.T) string {
 	if err := os.MkdirAll(devSourceDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for fileName, content := range map[string]string{"go.mod": "module dev\n\ngo 1.26\n", "main.go": tinyDevMain} {
+	for fileName, content := range map[string]string{"go.mod": "module ilot\n\ngo 1.26\n", "main.go": tinyDevMain} {
 		if err := os.WriteFile(filepath.Join(devSourceDir, fileName), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestBuildMakesABinaryStampedWithItsTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if binaryPath != filepath.Join(launcher.CacheDir, sourceTree, "dev") {
+	if binaryPath != filepath.Join(launcher.CacheDir, sourceTree, "ilot") {
 		t.Errorf("binaryPath = %s", binaryPath)
 	}
 	output, err := exec.Command(binaryPath).Output()
@@ -118,7 +118,7 @@ func TestBuildMakesABinaryStampedWithItsTree(t *testing.T) {
 	if want := "commit " + shortHead + " (checkout)\n" + sourceTree + "\n"; string(output) != want {
 		t.Errorf("binary prints %q, want %q", output, want)
 	}
-	if want := "building dev from " + checkoutDir + " (commit " + shortHead + ")\n"; notes.String() != want {
+	if want := "building ilot from " + checkoutDir + " (commit " + shortHead + ")\n"; notes.String() != want {
 		t.Errorf("notes = %q, want %q", notes.String(), want)
 	}
 }
@@ -211,7 +211,7 @@ func TestBuildReusesACachedBinary(t *testing.T) {
 	if calls := fakeGoBuild.calls.Load(); calls != 1 {
 		t.Errorf("go build ran %d times, want 1", calls)
 	}
-	if count := strings.Count(notes.String(), "building dev from"); count != 1 {
+	if count := strings.Count(notes.String(), "building ilot from"); count != 1 {
 		t.Errorf("notes has %d building lines, want 1: %q", count, notes.String())
 	}
 }
@@ -247,7 +247,7 @@ func TestConcurrentBuildsOfOneTreeBuildOnce(t *testing.T) {
 
 func TestFailedBuildReturnsTheFirstErrorLine(t *testing.T) {
 	checkoutDir := checkoutWithDevSource(t)
-	launcher, _ := testLauncher(t, checkoutDir, failingGoBuild("# dev\n./main.go:3:1: syntax error\n"))
+	launcher, _ := testLauncher(t, checkoutDir, failingGoBuild("# ilot\n./main.go:3:1: syntax error\n"))
 	sourceTree, shortHead, err := launcher.SourceTreeOfCheckout()
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestFailedBuildReturnsTheFirstErrorLine(t *testing.T) {
 	if !errors.As(err, &buildError) {
 		t.Fatalf("err = %v, want a *BuildError", err)
 	}
-	if want := "build of dev failed: ./main.go:3:1: syntax error"; err.Error() != want {
+	if want := "build of ilot failed: ./main.go:3:1: syntax error"; err.Error() != want {
 		t.Errorf("err = %q, want %q", err.Error(), want)
 	}
 	if !strings.Contains(buildOutput.String(), "syntax error") {
@@ -316,7 +316,7 @@ func TestBuildRemovesLeftoverTemporaryFolders(t *testing.T) {
 	if err := os.MkdirAll(leftoverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(leftoverDir, "dev"), []byte("half"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(leftoverDir, "ilot"), []byte("half"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sourceTree, shortHead, err := launcher.SourceTreeOfCheckout()
@@ -347,7 +347,7 @@ func TestBuildKeepsTheThreeNewestBuilds(t *testing.T) {
 		if err := os.MkdirAll(treeDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(treeDir, "dev"), []byte("old"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(treeDir, "ilot"), []byte("old"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		modification := oldestModification.Add(time.Duration(index) * time.Minute)
@@ -454,7 +454,7 @@ func TestWaitingForTheLockStopsAtItsLimit(t *testing.T) {
 	if _, err := buildWithDeadline(t, context.Background(), launcher, sourceTree, shortHead); err == nil {
 		t.Error("Build succeeded while another build held the lock")
 	}
-	if want := "waiting for another build of dev\n"; notes.String() != want {
+	if want := "waiting for another build of ilot\n"; notes.String() != want {
 		t.Errorf("notes = %q, want %q", notes.String(), want)
 	}
 }

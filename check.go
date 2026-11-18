@@ -10,14 +10,14 @@ import (
 	"slices"
 	"strings"
 
-	"dev/internal/appconfig"
-	"dev/internal/checkouts"
-	"dev/internal/devctl"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 type checkCommand struct {
-	Path string `arg:"" optional:"" help:"dev.yaml to check. The default is the dev.yaml of the repo of the current folder."`
+	Path string `arg:"" optional:"" help:"ilot.yaml to check. The default is the ilot.yaml of the repo of the current folder."`
 }
 
 func (command *checkCommand) Run() error {
@@ -83,8 +83,8 @@ func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string
 		mergedFiles := slices.Sorted(maps.Values(fileByRepo))
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
 	}
-	for _, problem := range devctl.CheckRendering(merged) {
-		var renderProblem devctl.RenderProblem
+	for _, problem := range ilotctl.CheckRendering(merged) {
+		var renderProblem ilotctl.RenderProblem
 		if errors.As(problem, &renderProblem) {
 			problem = fmt.Errorf("%s: %w", fileByRepo[renderProblem.Repo], problem)
 		}
@@ -135,7 +135,7 @@ func repoOfConfigFile(currentWorkspace *workspace, requestedPath string) (repoNa
 		return "", "", err
 	}
 	if len(config.Repos) == 0 {
-		return "", "", fmt.Errorf("%s is in no checkout that dev knows and has no repos: list, so dev cannot tell its repo", configFile)
+		return "", "", fmt.Errorf("%s is in no checkout that ilot knows and has no repos: list, so ilot cannot tell its repo", configFile)
 	}
 	return appconfig.DefaultRepo, configFile, nil
 }

@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"dev/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 const defaultTemporalGRPCPort = 7233

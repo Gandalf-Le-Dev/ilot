@@ -17,7 +17,7 @@ func WriteNpmrc(npmrcPath, artifactoryHost, token string) error {
 
 func writeNpmrc(npmrcPath, artifactoryHost, token string) (changed bool, err error) {
 	if linkTarget, err := os.Readlink(npmrcPath); err == nil {
-		return false, fmt.Errorf("%s is a symlink to %s: dev bootstrap does not write through it, so put the token line there by hand", npmrcPath, linkTarget)
+		return false, fmt.Errorf("%s is a symlink to %s: ilot bootstrap does not write through it, so put the token line there by hand", npmrcPath, linkTarget)
 	}
 	existingContent, err := readFileOrEmpty(npmrcPath)
 	if err != nil {

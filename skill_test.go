@@ -11,7 +11,7 @@ import (
 )
 
 func installedSkillPath(homeDir string) string {
-	return filepath.Join(homeDir, ".claude", "skills", "dev", "SKILL.md")
+	return filepath.Join(homeDir, ".claude", "skills", "ilot", "SKILL.md")
 }
 
 func TestInstallAgentSkillWritesTheEmbeddedFile(t *testing.T) {
@@ -71,7 +71,7 @@ func TestAgentSkillPreApprovesEveryDevCommand(t *testing.T) {
 	if !strings.HasPrefix(agentSkill, "---\n") || !isFound {
 		t.Fatalf("skill has no frontmatter:\n%s", agentSkill)
 	}
-	for _, wantLine := range []string{"name: dev", "allowed-tools: Bash(dev:*)"} {
+	for _, wantLine := range []string{"name: ilot", "allowed-tools: Bash(ilot:*)"} {
 		if !strings.Contains(frontmatter, wantLine) {
 			t.Errorf("frontmatter lacks %q:\n%s", wantLine, frontmatter)
 		}
@@ -85,7 +85,7 @@ func TestAgentSkillNamesEveryCommand(t *testing.T) {
 		if _, isCommand := field.Tag.Lookup("cmd"); !isCommand {
 			continue
 		}
-		if commandLine := "dev " + strings.ToLower(field.Name); !strings.Contains(agentSkill, commandLine) {
+		if commandLine := "ilot " + strings.ToLower(field.Name); !strings.Contains(agentSkill, commandLine) {
 			t.Errorf("the skill never names %q", commandLine)
 		}
 	}
@@ -100,7 +100,7 @@ func TestInstallAgentSkillOrWarnPrintsOneWarningWhenTheFolderCannotBeWritten(t *
 
 	installAgentSkillOrWarn(func() (string, error) { return homeDir, nil }, &warnings)
 
-	if lines := strings.Split(strings.TrimSpace(warnings.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "warning: install the dev skill: ") {
+	if lines := strings.Split(strings.TrimSpace(warnings.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "warning: install the ilot skill: ") {
 		t.Fatalf("warnings = %q, want one warning line", warnings.String())
 	}
 }
@@ -110,7 +110,7 @@ func TestInstallAgentSkillOrWarnPrintsOneWarningWithoutAHomeFolder(t *testing.T)
 
 	installAgentSkillOrWarn(func() (string, error) { return "", errors.New("$HOME is not defined") }, &warnings)
 
-	if warnings.String() != "warning: install the dev skill: $HOME is not defined\n" {
+	if warnings.String() != "warning: install the ilot skill: $HOME is not defined\n" {
 		t.Fatalf("warnings = %q, want one warning naming the cause", warnings.String())
 	}
 }

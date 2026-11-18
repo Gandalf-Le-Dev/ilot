@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"strings"

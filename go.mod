@@ -1,4 +1,4 @@
-module dev
+module github.com/Gandalf-Le-Dev/ilot
 
 go 1.26
 

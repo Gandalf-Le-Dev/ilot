@@ -46,7 +46,7 @@ apps:
 
 func writeConfigFile(t *testing.T, content string) string {
 	t.Helper()
-	configPath := filepath.Join(t.TempDir(), "dev.yaml")
+	configPath := filepath.Join(t.TempDir(), "ilot.yaml")
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -267,11 +267,11 @@ func TestValidateReportsEveryGatewayProblemAtOnce(t *testing.T) {
 }
 
 func TestParseReadsTheRepoListAndRepoEnv(t *testing.T) {
-	config, err := Parse(writeConfigFile(t, "repos:\n  portal: {path: ~/portal, config: dev.yaml}\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
+	config, err := Parse(writeConfigFile(t, "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if config.Repos["portal"].Path != "~/portal" || config.Repos["portal"].Config != "dev.yaml" || config.Env["LOG_LEVEL"] != "info" {
+	if config.Repos["portal"].Path != "~/portal" || config.Repos["portal"].Config != "ilot.yaml" || config.Env["LOG_LEVEL"] != "info" {
 		t.Errorf("config = %+v", config)
 	}
 }

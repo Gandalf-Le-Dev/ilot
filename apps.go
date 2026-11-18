@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"dev/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 type appsCommand struct {

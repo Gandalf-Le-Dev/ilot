@@ -11,16 +11,16 @@ import (
 	"slices"
 	"strings"
 
-	"dev/internal/appconfig"
-	"dev/internal/checkouts"
-	"dev/internal/personal"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 const (
-	personalSettingsPath = ".config/dev/env.yaml"
+	personalSettingsPath = ".config/ilot/env.yaml"
 	defaultPlatformPath  = "~/src/platform"
-	platformConfigPath   = "devbox/dev.yaml"
+	platformConfigPath   = "devbox/ilot.yaml"
 )
 
 type workspace struct {

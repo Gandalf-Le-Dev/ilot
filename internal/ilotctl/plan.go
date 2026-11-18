@@ -1,17 +1,18 @@
-package devctl
+package ilotctl
 
 import (
 	"cmp"
 	"context"
-	"dev/internal/appconfig"
-	"dev/internal/ports"
-	"dev/internal/stack"
-	"dev/internal/state"
 	"errors"
 	"fmt"
 	"maps"
 	"os"
 	"slices"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 func (controller *Controller) planStart(stacks stackSet, requestedInstances []instance, options StartOptions) ([]instance, []string) {
@@ -199,7 +200,7 @@ func (controller *Controller) checkoutDir(stacks stackSet, appInstance instance)
 	repoName := cmp.Or(controller.app(appInstance).Repo, appconfig.DefaultRepo)
 	checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 	if checkoutDir == "" {
-		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/dev/env.yaml", appInstance.processName(), repoName, repoName)
+		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", appInstance.processName(), repoName, repoName)
 	}
 	return checkoutDir, nil
 }

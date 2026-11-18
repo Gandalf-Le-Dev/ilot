@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"testing"
 
-	"dev/internal/checkouts"
-	"dev/internal/devctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 )
 
 func TestLsJSONOutputIsOneObjectWithHomeAppsExternalServicesAndCheckouts(t *testing.T) {
 	output := lsJSONOutput{
 		Home: "http://home.dev.example.net:18080",
-		Listing: devctl.Listing{
-			Apps:             []devctl.AppRow{{Stack: "proj-0001", App: "publicapi", Status: "Running", Ports: map[string]int{"http": 10003}, URL: "http://publicapi.proj-0001.dev.example.net:18080"}},
-			ExternalServices: []devctl.ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}},
+		Listing: ilotctl.Listing{
+			Apps:             []ilotctl.AppRow{{Stack: "proj-0001", App: "publicapi", Status: "Running", Ports: map[string]int{"http": 10003}, URL: "http://publicapi.proj-0001.dev.example.net:18080"}},
+			ExternalServices: []ilotctl.ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}},
 		},
 		CheckoutsByStack: map[string]map[string]checkouts.Checkout{
 			"proj-0001": {"portal": {Repo: "portal", Dir: "/home/user/worktrees-portal-0001", Branch: "PROJ-0001-x", IsMainCheckout: false}},

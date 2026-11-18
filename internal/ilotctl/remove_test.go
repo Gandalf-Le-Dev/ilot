@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"errors"
@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"dev/internal/checkouts"
-	"dev/internal/stack"
-	"dev/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 			t.Errorf("%s still runs", processName)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(environment.routesDir, "dev-proj-1234.yml")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(environment.routesDir, "ilot-proj-1234.yml")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("routes file of the removed stack: stat err = %v, want not exist", err)
 	}
 	if _, err := os.Stat(environment.controller.Store.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {

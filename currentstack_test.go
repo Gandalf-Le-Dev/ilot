@@ -33,7 +33,7 @@ func workspaceWithPlatform(t *testing.T, platformPath string) workspace {
 
 func platformRepoForTest(t *testing.T) string {
 	t.Helper()
-	return gitRepoWithFiles(t, map[string]string{"devbox/dev.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n"})
+	return gitRepoWithFiles(t, map[string]string{"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n"})
 }
 
 func TestCrossStackCommandsUseTheMasterStackFromAnyFolder(t *testing.T) {

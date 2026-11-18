@@ -93,8 +93,8 @@ func TestRegistryHostOfImage(t *testing.T) {
 		"traefik:v3.6":                     "",
 		"devhome:local":                    "",
 		"library/ubuntu:24.04":             "",
-		"localhost/app:dev":                "",
-		"localhost:5000/app:dev":           "",
+		"localhost/app:ilot":               "",
+		"localhost:5000/app:ilot":          "",
 	}
 	for image, want := range hostByImage {
 		if got := RegistryHostOfImage(image); got != want {
@@ -107,7 +107,7 @@ func TestRegistriesToLogInto(t *testing.T) {
 	homeDir := t.TempDir()
 	writeFile(t, filepath.Join(homeDir, ".docker", "config.json"), `{"auths":{"reg-b.corp.example":{},"https://reg-d.corp.example:8443/v2/":{},"reg-a.corp.example":{},"ghcr.io":{},"https://index.docker.io/v1/":{},"localhost:5000":{},"10.0.0.1:5000":{},"evilcorp.example":{},"corp.example":{},"art.corp.example.evil.net":{}}}`)
 
-	registries, err := RegistriesToLogInto(homeDir, "art.corp.example", []string{"reg-c.corp.example/x:1", "traefik:v3.6", "reg-a.corp.example/y:2", "devagents:local", "localhost/app:dev"})
+	registries, err := RegistriesToLogInto(homeDir, "art.corp.example", []string{"reg-c.corp.example/x:1", "traefik:v3.6", "reg-a.corp.example/y:2", "devagents:local", "localhost/app:ilot"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func (fixture *fixture) settings() Settings {
 	return Settings{
 		HomeDir:         fixture.homeDir,
 		ArtifactoryHost: testHost,
-		ImageReferences: []string{"reg-a.corp.example/devbox:1", "traefik:v3.6", "devhome:local", "localhost/app:dev"},
+		ImageReferences: []string{"reg-a.corp.example/devbox:1", "traefik:v3.6", "devhome:local", "localhost/app:ilot"},
 		ReplaceToken:    fixture.replaceToken,
 	}
 }

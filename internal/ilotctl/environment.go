@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"bufio"
@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"dev/internal/appconfig"
-	"dev/internal/processcompose"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 type EnvEntry struct {
@@ -44,7 +44,7 @@ func (controller *Controller) Environment(worktree stack.Worktree, appName strin
 	return controller.environmentOf(stacks, appInstances[0])
 }
 
-// A daemon started before dev recorded its environment gives the apps the environment of the shell that started it.
+// A daemon started before ilot recorded its environment gives the apps the environment of the shell that started it.
 func (controller *Controller) RunsWithoutARecordedEnvironment(ctx context.Context) (bool, error) {
 	if !controller.Supervisor.IsUp(ctx) {
 		return false, nil
@@ -88,7 +88,7 @@ func (controller *Controller) shellEnviron() ([]string, error) {
 	return processcompose.Environ(shellEnv), nil
 }
 
-// A value written with a template is computed by dev (ports, addresses, the stack), so a personal value cannot override it.
+// A value written with a template is computed by ilot (ports, addresses, the stack), so a personal value cannot override it.
 func (controller *Controller) environmentOf(stacks stackSet, appInstance instance) ([]EnvEntry, error) {
 	app := controller.app(appInstance)
 	checkoutDir, err := controller.checkoutDir(stacks, appInstance)

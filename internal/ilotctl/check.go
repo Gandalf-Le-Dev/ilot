@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"cmp"
@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"dev/internal/appconfig"
-	"dev/internal/personal"
-	"dev/internal/stack"
-	"dev/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 const (

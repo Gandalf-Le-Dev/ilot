@@ -24,14 +24,14 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"dev/internal/checkouts"
-	"dev/internal/devctl"
-	"dev/internal/logs"
-	"dev/internal/ports"
-	"dev/internal/processcompose"
-	"dev/internal/shellenv"
-	"dev/internal/stack"
-	"dev/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 const (
@@ -40,29 +40,29 @@ const (
 )
 
 type cli struct {
-	Version kong.VersionFlag `short:"v" help:"Print the version of dev and exit."`
-	Skill   skillFlag        `help:"Print the dev skill for AI agents and exit."`
+	Version kong.VersionFlag `short:"v" help:"Print the version of ilot and exit."`
+	Skill   skillFlag        `help:"Print the ilot skill for AI agents and exit."`
 
 	Ls        lsCommand        `cmd:"" help:"List the apps of every stack and the external services."`
-	Apps      appsCommand      `cmd:"" help:"List the apps and the external services that the dev.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
+	Apps      appsCommand      `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
 	Start     startCommand     `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop      stopCommand      `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Boot      bootCommand      `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when dev already runs."`
-	Restart   restartCommand   `cmd:"" help:"Stop every app of every stack, start dev again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
+	Boot      bootCommand      `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
+	Restart   restartCommand   `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
 	Env       envCommand       `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs      logsCommand      `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm        rmCommand        `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
 	Clean     cleanCommand     `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
-	Check     checkCommand     `cmd:"" help:"Check a dev.yaml with the dev.yaml of the other repos: config rules and every template."`
-	Rebuild   rebuildCommand   `cmd:"" help:"Build dev from the platform main checkout again, with the full build output."`
+	Check     checkCommand     `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
+	Rebuild   rebuildCommand   `cmd:"" help:"Build ilot from the platform main checkout again, with the full build output."`
 	Bootstrap bootstrapCommand `cmd:"" help:"Set up the Artifactory token for npm, jf and docker, the GPG loopback lines and the agent unlock. Safe to run again."`
 }
 
 type envCommand struct {
-	App string `arg:"" help:"App declared in a dev.yaml."`
+	App string `arg:"" help:"App declared in an ilot.yaml."`
 }
 
-const unrecordedEnvironmentNote = "note: dev started before it fixed the environment of the apps: they have the environment of the shell that started it. Run dev restart."
+const unrecordedEnvironmentNote = "note: ilot started before it fixed the environment of the apps: they have the environment of the shell that started it. Run ilot restart."
 
 func (command *envCommand) Run(ctx context.Context) error {
 	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
@@ -88,7 +88,7 @@ func (command *envCommand) Run(ctx context.Context) error {
 }
 
 type logsCommand struct {
-	App    string `arg:"" help:"App declared in devbox/dev.yaml."`
+	App    string `arg:"" help:"App declared in devbox/ilot.yaml."`
 	Follow bool   `short:"f" help:"Keep printing new lines."`
 	Lines  int    `short:"n" default:"100" help:"How many of the last lines to print first."`
 	JSON   bool   `help:"Print the app's own log lines as they are, for tools and agents."`
@@ -111,7 +111,7 @@ func (command *logsCommand) Run(ctx context.Context) error {
 }
 
 type bootCommand struct {
-	Checkout string        `required:"" type:"existingdir" help:"Main checkout of the platform repo, whose devbox/dev.yaml is read."`
+	Checkout string        `required:"" type:"existingdir" help:"Main checkout of the platform repo, whose devbox/ilot.yaml is read."`
 	Timeout  time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
 }
 
@@ -133,24 +133,24 @@ type lsCommand struct {
 
 type lsJSONOutput struct {
 	Home string `json:"home"`
-	devctl.Listing
+	ilotctl.Listing
 	CheckoutsByStack map[string]map[string]checkouts.Checkout `json:"checkouts"`
 }
 
 type rmCommand struct {
-	Stack string `arg:"" help:"Stack to remove, as dev ls shows it."`
+	Stack string `arg:"" help:"Stack to remove, as ilot ls shows it."`
 }
 
 type cleanCommand struct{}
 
 type startCommand struct {
-	Apps    []string      `arg:"" help:"Apps declared in devbox/dev.yaml."`
+	Apps    []string      `arg:"" help:"Apps declared in devbox/ilot.yaml."`
 	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
 	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
 }
 
 type stopCommand struct {
-	Apps []string `arg:"" help:"Apps declared in devbox/dev.yaml."`
+	Apps []string `arg:"" help:"Apps declared in devbox/ilot.yaml."`
 }
 
 func (command *bootCommand) Run(ctx context.Context) error {
@@ -271,7 +271,7 @@ func (command *startCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return controller.Start(ctx, worktree, command.Apps, devctl.StartOptions{SkipDependencies: command.NoDeps})
+	return controller.Start(ctx, worktree, command.Apps, ilotctl.StartOptions{SkipDependencies: command.NoDeps})
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
@@ -282,7 +282,7 @@ func (command *stopCommand) Run(ctx context.Context) error {
 	return controller.Stop(ctx, worktree, command.Apps)
 }
 
-func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*devctl.Controller, stack.Worktree, error) {
+func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, stack.Worktree, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
 		return nil, stack.Worktree{}, err
@@ -326,9 +326,9 @@ func loadCurrentWorkspace() (workspace, error) {
 	return loadWorkspace(homeDir)
 }
 
-func newController(currentWorkspace workspace, worktree stack.Worktree, readyTimeout time.Duration) (*devctl.Controller, error) {
+func newController(currentWorkspace workspace, worktree stack.Worktree, readyTimeout time.Duration) (*ilotctl.Controller, error) {
 	if _, err := os.Stat(devboxMarkerFile); err != nil {
-		return nil, errors.New("dev runs inside devbox only for now: ssh into devbox and run it there")
+		return nil, errors.New("ilot runs inside devbox only for now: ssh into devbox and run it there")
 	}
 	config, err := currentWorkspace.configForStack(worktree.Name)
 	if err != nil {
@@ -342,9 +342,9 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	if err != nil {
 		return nil, err
 	}
-	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "dev")
+	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
-	controller := &devctl.Controller{
+	controller := &ilotctl.Controller{
 		Config:                  config,
 		Store:                   state.Store{RootDir: stateDir},
 		Supervisor:              processcompose.Client{Binary: processComposeBinary, StateDir: filepath.Join(stateDir, "process-compose"), Env: shellEnv},
@@ -365,7 +365,7 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		Login:                   os.Getenv("LC_DEVBOX_LOGIN"),
 		RoutesDir:               routesDir,
 		BackendHost:             "devbox",
-		ProxyPort:               cmp.Or(os.Getenv("DEVPROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
+		ProxyPort:               cmp.Or(os.Getenv("ILOT_PROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
 		ReadyTimeout:            readyTimeout,
 		ProgressInterval:        10 * time.Second,
 		Output:                  os.Stdout,
@@ -374,13 +374,13 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 }
 
 func findRoutesDir() (string, error) {
-	if routesDir := os.Getenv("DEV_ROUTES_DIR"); routesDir != "" {
+	if routesDir := os.Getenv("ILOT_ROUTES_DIR"); routesDir != "" {
 		return routesDir, nil
 	}
-	proxyContainer := "devproxy_" + os.Getenv("LC_DEVBOX_LOGIN")
+	proxyContainer := "ilotproxy_" + os.Getenv("LC_DEVBOX_LOGIN")
 	mountsJSON, err := exec.Command("docker", "inspect", "--format", "{{json .Mounts}}", proxyContainer).Output()
 	if err != nil {
-		return "", fmt.Errorf("find the routes folder of %s (set DEV_ROUTES_DIR to skip this): %w", proxyContainer, err)
+		return "", fmt.Errorf("find the routes folder of %s (set ILOT_ROUTES_DIR to skip this): %w", proxyContainer, err)
 	}
 	return routesDirFromMounts(mountsJSON)
 }
@@ -441,6 +441,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
-	commandLine := kong.Parse(&commandLineArguments, kong.Name("dev"), kong.Description("Run the devbox apps of each worktree behind the dev proxy.\n\nAgents: if the dev skill is not in your context, run dev --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary(), "artifactory_host": defaultArtifactoryHost})
+	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary(), "artifactory_host": defaultArtifactoryHost})
 	commandLine.FatalIfErrorf(commandLine.Run())
 }

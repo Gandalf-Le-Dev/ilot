@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"bytes"
@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"dev/internal/appconfig"
-	"dev/internal/checkouts"
-	"dev/internal/personal"
-	"dev/internal/processcompose"
-	"dev/internal/stack"
-	"dev/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 type processBehavior int
@@ -188,7 +188,7 @@ type testEnvironment struct {
 	routesDir         string
 }
 
-// Every dev command builds its own controller, and gives its shell to the daemon client too: this one sees the daemon as it is now.
+// Every ilot command builds its own controller, and gives its shell to the daemon client too: this one sees the daemon as it is now.
 func (environment testEnvironment) controllerOfANewCommand() *Controller {
 	controller := *environment.controller
 	controller.resolvedShellEnv = nil
@@ -500,7 +500,7 @@ func TestGatewayFilesStartFromTheBaseFileAndOverrideItWithRunningApps(t *testing
 
 	want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "master", "internalapi"))
 	if got := environment.localServices(t, "proj-1234")["acme-internalapi"]; got != want {
-		t.Errorf("acme-internalapi -> %q, want master's dev instance %q over the base file", got, want)
+		t.Errorf("acme-internalapi -> %q, want master's ilot instance %q over the base file", got, want)
 	}
 }
 
@@ -884,7 +884,7 @@ func TestAFailedTicketStackDependencyNamesTheCommandThatStartsItThereAgain(t *te
 
 	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.HasSuffix(err.Error(), "internalapi ran in proj-1234: name it to start it there again: dev start internalapi publicapi") {
+	if err == nil || !strings.HasSuffix(err.Error(), "internalapi ran in proj-1234: name it to start it there again: ilot start internalapi publicapi") {
 		t.Fatalf("Start = %v, want it to end with the command that starts internalapi in proj-1234 again", err)
 	}
 	if environment.isStoredAsRunning(t, "proj-1234", "internalapi") || environment.isApplied("internalapi.proj-1234") {
@@ -938,7 +938,7 @@ func TestStartKeepsAnAppThatTimesOut(t *testing.T) {
 
 	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.HasSuffix(err.Error(), "it still starts: dev keeps it") {
+	if err == nil || !strings.HasSuffix(err.Error(), "it still starts: ilot keeps it") {
 		t.Fatalf("Start = %v, want it to say that the app still starts", err)
 	}
 	if !environment.isStoredAsRunning(t, "master", "publicapi") || !environment.isApplied("publicapi.master") {
@@ -1030,7 +1030,7 @@ func TestRoutesFileServesEveryRoutedAppOfTheStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "dev-proj-1234.yml"))
+	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
 	if err != nil {
 		t.Fatalf("read routes file: %v", err)
 	}
@@ -1197,7 +1197,7 @@ func TestSharedAppRoutesUseTheDevboxHostnames(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "temporal")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "dev-devbox.yml"))
+	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-devbox.yml"))
 	if err != nil {
 		t.Fatalf("read routes file: %v", err)
 	}
@@ -1341,7 +1341,7 @@ func TestRoutesFileRedirectsTheRootOfAnAppWithAHomePath(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "dev-proj-1234.yml"))
+	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
 	if err != nil {
 		t.Fatalf("read routes file: %v", err)
 	}
@@ -1508,7 +1508,7 @@ func TestContainerCommandRemovesALeftoverContainerFirst(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
-	if !strings.HasPrefix(command, "docker rm -f 'dev-proj-1234-search' >/dev/null 2>&1 || true && exec docker run --rm --name 'dev-proj-1234-search'") {
+	if !strings.HasPrefix(command, "docker rm -f 'ilot-proj-1234-search' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot-proj-1234-search'") {
 		t.Errorf("command = %q", command)
 	}
 }
@@ -1538,12 +1538,12 @@ func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
 	gatewayPort := environment.appPort(t, "proj-1234", "gateway")
 	for _, wantPart := range []string{
-		"--network devproxy",
+		"--network ilotproxy",
 		"--env-file '/etc/acme.conf.d/devhost.conf'",
 		"-e 'REGION'",
 		"-e 'GATEWAY_URL'",
 		"-v '/home/jdoe/devbox/src/portal/schemas:/src/schemas'",
-		"--link 'dev-proj-1234-search-cache:postgres-cache'",
+		"--link 'ilot-proj-1234-search-cache:postgres-cache'",
 		"--link 'devhost_legacy_jdoe:legacy-db'",
 		" 'registry/search:latest'",
 	} {
@@ -1570,20 +1570,20 @@ func TestContainerRouteAndAliasUseTheContainerName(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.localServices(t, "proj-1234")["acme-search"]; got != "http://dev-proj-1234-search:16271" {
+	if got := environment.localServices(t, "proj-1234")["acme-search"]; got != "http://ilot-proj-1234-search:16271" {
 		t.Errorf("acme-search -> %q", got)
 	}
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "dev-proj-1234.yml"))
+	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(content), "http://dev-proj-1234-search:16271") {
+	if !strings.Contains(string(content), "http://ilot-proj-1234-search:16271") {
 		t.Errorf("routes file:\n%s\nwant the container address", content)
 	}
-	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe.Host != "dev-proj-1234-search" || probe.Port != 16271 {
+	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe.Host != "ilot-proj-1234-search" || probe.Port != 16271 {
 		t.Errorf("search probe = %+v", probe)
 	}
-	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe.Command != "docker exec 'dev-proj-1234-search-cache' sh -c 'pg_isready -U postgres'" {
+	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe.Command != "docker exec 'ilot-proj-1234-search-cache' sh -c 'pg_isready -U postgres'" {
 		t.Errorf("cache probe = %+v", probe)
 	}
 }
@@ -1593,7 +1593,7 @@ func TestHostTemplateDependsOnTheCaller(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
 	searchPort := 16271
-	want := "front --api=http://dev-proj-1234-search:" + strconv.Itoa(searchPort) + " --gw=localhost"
+	want := "front --api=http://ilot-proj-1234-search:" + strconv.Itoa(searchPort) + " --gw=localhost"
 	if got := environment.supervisor.runningSpecs["front-like.proj-1234"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
@@ -1618,7 +1618,7 @@ func TestDependencyWithoutPerStackComesFromMaster(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
-	if want := "front --api=http://dev-master-search:16271 --gw=localhost"; environment.supervisor.runningSpecs["front-like.proj-1234"].Command != want {
+	if want := "front --api=http://ilot-master-search:16271 --gw=localhost"; environment.supervisor.runningSpecs["front-like.proj-1234"].Command != want {
 		t.Errorf("Command = %q, want %q", environment.supervisor.runningSpecs["front-like.proj-1234"].Command, want)
 	}
 }
@@ -1655,7 +1655,7 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].ShutdownCommand; got != "docker stop --time 10 'dev-proj-1234-search-cache'" {
+	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].ShutdownCommand; got != "docker stop --time 10 'ilot-proj-1234-search-cache'" {
 		t.Errorf("search-cache ShutdownCommand = %q", got)
 	}
 	if got := environment.supervisor.runningSpecs["gateway.proj-1234"].ShutdownCommand; got != "" {
@@ -1872,7 +1872,7 @@ func fixedShellEnv(valueByKey map[string]string) func() (map[string]string, erro
 	return func() (map[string]string, error) { return valueByKey, nil }
 }
 
-// Every dev command gives the same shell environment to its controller and to its daemon client.
+// Every ilot command gives the same shell environment to its controller and to its daemon client.
 func shellEnvOf(controller *Controller) func() map[string]string {
 	return func() map[string]string {
 		if controller.ShellEnv == nil {

@@ -4,10 +4,10 @@ import (
 	"runtime/debug"
 )
 
-// Set at build time with -ldflags "-X main.stampedVersion=...": by the image build, and by `make dev-install`, because Go records no git data in a linked worktree.
+// Set at build time with -ldflags "-X main.stampedVersion=...": by the image build, and by `make ilot-install`, because Go records no git data in a linked worktree.
 var stampedVersion string
 
-// Set at build time by the image build and by the launcher's own builds. Empty turns the launcher off, so `make dev-install` and `go run` run their own code.
+// Set at build time by the image build and by the launcher's own builds. Empty turns the launcher off, so `make ilot-install` and `go run` run their own code.
 var stampedSourceTree string
 
 const shortCommitLength = 12

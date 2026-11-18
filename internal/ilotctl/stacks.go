@@ -1,10 +1,10 @@
-package devctl
+package ilotctl
 
 import (
 	"maps"
 	"slices"
 
-	"dev/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 type stackSet struct {

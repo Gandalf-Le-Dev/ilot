@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"dev/internal/appconfig"
-	"dev/internal/bootstrap"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/bootstrap"
 )
 
 func TestAppImageReferencesListsTheContainerImageOfEveryApp(t *testing.T) {

@@ -14,19 +14,19 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"dev/internal/appconfig"
-	"dev/internal/launcher"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/launcher"
 )
 
 const (
 	launcherBuildTimeout = 2 * time.Minute
 	launcherLockMargin   = 30 * time.Second
 	rebuildCommandName   = "rebuild"
-	launchWarningPrefix  = "warning: run the dev of the image: "
+	launchWarningPrefix  = "warning: run the ilot of the image: "
 )
 
 type rebuildCommand struct {
-	Local bool `help:"Build the uncommitted files of devbox/dev too. Plain dev runs this build until devbox/dev changes in git."`
+	Local bool `help:"Build the uncommitted files of devbox/ilot too. Plain ilot runs this build until devbox/ilot changes in git."`
 }
 
 func (command *rebuildCommand) Run(ctx context.Context) error {
@@ -86,7 +86,7 @@ func launcherForThisBinary() (launcher.Launcher, error) {
 	}
 	return launcher.Launcher{
 		MainCheckoutDir: platformCheckoutForLauncher(homeDir),
-		CacheDir:        filepath.Join(cmp.Or(os.Getenv("XDG_CACHE_HOME"), filepath.Join(homeDir, ".cache")), "dev"),
+		CacheDir:        filepath.Join(cmp.Or(os.Getenv("XDG_CACHE_HOME"), filepath.Join(homeDir, ".cache")), "ilot"),
 		OwnSourceTree:   stampedSourceTree,
 		BuildTimeout:    launcherBuildTimeout,
 		LockWaitTimeout: launcherBuildTimeout + launcherLockMargin,
@@ -122,10 +122,10 @@ func launchWarning(err error) string {
 	if buildError.Hint != "" {
 		warning += buildError.Hint + "\n"
 	}
-	return warning + "run \"dev rebuild\" to see the full build output and try again\n"
+	return warning + "run \"ilot rebuild\" to see the full build output and try again\n"
 }
 
-// Not personal.Load: its strict decoding would let a field added by a newer dev lock out the build that knows it.
+// Not personal.Load: its strict decoding would let a field added by a newer ilot lock out the build that knows it.
 func platformCheckoutForLauncher(homeDir string) string {
 	defaultPath := expandHome(defaultPlatformPath, homeDir)
 	content, err := os.ReadFile(filepath.Join(homeDir, personalSettingsPath))

@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"slices"
 
-	"dev/internal/appconfig"
-	"dev/internal/bootstrap"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/bootstrap"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 const (
@@ -107,7 +107,7 @@ func (terminalOnStandardStreams) ReadSecretLine() (string, error) {
 	hideTyping := exec.Command("stty", "-echo")
 	hideTyping.Stdin = os.Stdin
 	if err := hideTyping.Run(); err != nil {
-		return "", errors.New("cannot read a secret without echo: run dev bootstrap in a terminal")
+		return "", errors.New("cannot read a secret without echo: run ilot bootstrap in a terminal")
 	}
 	defer func() {
 		showTyping := exec.Command("stty", "echo")

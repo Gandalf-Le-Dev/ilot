@@ -96,7 +96,7 @@ func (state *bootstrapRun) checkPassUsesTheSigningKey() error {
 	signingKeyOutput, err := state.run(nil, "git", "config", "user.signingkey")
 	signingKey := strings.TrimSpace(string(signingKeyOutput))
 	if err != nil || signingKey == "" {
-		return errors.New("git user.signingkey is not set: set it to the key that signs your commits, then run dev bootstrap again")
+		return errors.New("git user.signingkey is not set: set it to the key that signs your commits, then run ilot bootstrap again")
 	}
 	signingFingerprints, err := state.primaryFingerprints(signingKey)
 	if err != nil {
@@ -201,14 +201,14 @@ func (state *bootstrapRun) holdsAPrivateSshKey() bool {
 
 // gpg-agent caches a passphrase per key, and pass decrypts with another key than the one that signs.
 func (state *bootstrapRun) unlockGpgAgent() error {
-	probeFolder, err := os.MkdirTemp("", "dev-bootstrap-probe-*")
+	probeFolder, err := os.MkdirTemp("", "ilot-bootstrap-probe-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(probeFolder)
 	fileToSign := filepath.Join(probeFolder, "plain")
 	encryptedProbe := filepath.Join(probeFolder, "probe.gpg")
-	if err := os.WriteFile(fileToSign, []byte("dev bootstrap\n"), 0o600); err != nil {
+	if err := os.WriteFile(fileToSign, []byte("ilot bootstrap\n"), 0o600); err != nil {
 		return err
 	}
 	if _, err := state.run(nil, "gpg", "--batch", "--yes", "--trust-model", "always", "--recipient", state.signingFingerprint, "--output", encryptedProbe, "--encrypt", fileToSign); err != nil {
@@ -418,7 +418,7 @@ func (state *bootstrapRun) setDockerCredentialStore() error {
 		return nil
 	}
 	if registries := registriesHoldingInlineCredentials(dockerConfig); len(registries) > 0 {
-		fmt.Fprintf(state.terminal, "warning: credsStore pass hides the inline docker credentials of %s: dev bootstrap logs in again, and skips the registries it cannot log in to\n", strings.Join(registries, ", "))
+		fmt.Fprintf(state.terminal, "warning: credsStore pass hides the inline docker credentials of %s: ilot bootstrap logs in again, and skips the registries it cannot log in to\n", strings.Join(registries, ", "))
 	}
 	dockerConfig["credsStore"] = "pass"
 	content, err := json.MarshalIndent(dockerConfig, "", "  ")

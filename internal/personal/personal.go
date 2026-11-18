@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"dev/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 type Settings struct {

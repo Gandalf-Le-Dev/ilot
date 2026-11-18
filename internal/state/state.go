@@ -16,12 +16,12 @@ type StackState struct {
 	Name              string            `json:"name"`
 	CheckoutDirs      map[string]string `json:"checkout_dirs"`
 	LegacyWorktreeDir string            `json:"worktree_dir,omitempty"`
-	// Set once dev created the namespace: dev rm must delete it even when no dev.yaml declares the app any more.
+	// Set once ilot created the namespace: ilot rm must delete it even when no ilot.yaml declares the app any more.
 	HasTemporalNamespace bool                `json:"has_temporal_namespace,omitempty"`
 	Apps                 map[string]AppState `json:"apps"`
 }
 
-// State files written before dev knew several repos hold platform's checkout as worktree_dir.
+// State files written before ilot knew several repos hold platform's checkout as worktree_dir.
 const legacyWorktreeRepo = "platform"
 
 type AppState struct {

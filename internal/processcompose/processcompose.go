@@ -134,7 +134,7 @@ type httpGetProbe struct {
 	Path string `yaml:"path"`
 }
 
-// Past it, process-compose sends SIGKILL: without it, a process that ignores SIGTERM blocks every later dev command.
+// Past it, process-compose sends SIGKILL: without it, a process that ignores SIGTERM blocks every later ilot command.
 const shutdownTimeoutSeconds = 20
 
 func RenderProject(specs []ProcessSpec) ([]byte, error) {

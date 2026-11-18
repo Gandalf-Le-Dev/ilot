@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"testing"
 
-	"dev/internal/launcher"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/launcher"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 type fakeGoBuild struct {
@@ -58,13 +58,13 @@ func checkoutSourceTree(t *testing.T, checkoutDir string) string {
 
 func platformCheckoutWithDevSource(t *testing.T) string {
 	t.Helper()
-	return gitRepoWithFiles(t, map[string]string{"devbox/dev/main.go": "package main\n"})
+	return gitRepoWithFiles(t, map[string]string{"devbox/ilot/main.go": "package main\n"})
 }
 
 func TestLauncherIsOffWithoutAStampedTree(t *testing.T) {
 	goBuild := &fakeGoBuild{}
 	checkoutLauncher := launcherOnCheckout(t, platformCheckoutWithDevSource(t), "", goBuild)
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "ls"})
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "ls"})
 	if binaryPath != "" || warning != "" || goBuild.calls.Load() != 0 {
 		t.Errorf("got (%q, %q) after %d builds, want nothing", binaryPath, warning, goBuild.calls.Load())
 	}
@@ -73,7 +73,7 @@ func TestLauncherIsOffWithoutAStampedTree(t *testing.T) {
 func TestRebuildSkipsTheLauncher(t *testing.T) {
 	goBuild := &fakeGoBuild{}
 	checkoutLauncher := launcherOnCheckout(t, platformCheckoutWithDevSource(t), "unknown", goBuild)
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "rebuild"})
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "rebuild"})
 	if binaryPath != "" || warning != "" || goBuild.calls.Load() != 0 {
 		t.Errorf("got (%q, %q) after %d builds, want nothing", binaryPath, warning, goBuild.calls.Load())
 	}
@@ -83,7 +83,7 @@ func TestSameTreeRunsItself(t *testing.T) {
 	checkoutDir := platformCheckoutWithDevSource(t)
 	goBuild := &fakeGoBuild{}
 	checkoutLauncher := launcherOnCheckout(t, checkoutDir, checkoutSourceTree(t, checkoutDir), goBuild)
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "ls"})
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "ls"})
 	if binaryPath != "" || warning != "" || goBuild.calls.Load() != 0 {
 		t.Errorf("got (%q, %q) after %d builds, want nothing", binaryPath, warning, goBuild.calls.Load())
 	}
@@ -92,16 +92,16 @@ func TestSameTreeRunsItself(t *testing.T) {
 func TestNewTreeReturnsTheBuiltBinary(t *testing.T) {
 	checkoutDir := platformCheckoutWithDevSource(t)
 	checkoutLauncher := launcherOnCheckout(t, checkoutDir, "unknown", &fakeGoBuild{})
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "ls"})
-	if want := filepath.Join(checkoutLauncher.CacheDir, checkoutSourceTree(t, checkoutDir), "dev"); binaryPath != want || warning != "" {
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "ls"})
+	if want := filepath.Join(checkoutLauncher.CacheDir, checkoutSourceTree(t, checkoutDir), "ilot"); binaryPath != want || warning != "" {
 		t.Errorf("got (%q, %q), want (%q, \"\")", binaryPath, warning, want)
 	}
 }
 
 func TestMissingCheckoutWarnsAndRunsItself(t *testing.T) {
 	checkoutLauncher := launcherOnCheckout(t, filepath.Join(t.TempDir(), "nowhere"), "unknown", &fakeGoBuild{})
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "ls"})
-	if binaryPath != "" || !strings.HasPrefix(warning, "warning: run the dev of the image: ") || strings.Contains(warning, "dev rebuild") {
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "ls"})
+	if binaryPath != "" || !strings.HasPrefix(warning, "warning: run the ilot of the image: ") || strings.Contains(warning, "ilot rebuild") {
 		t.Errorf("got (%q, %q), want no binary and a warning without the rebuild line", binaryPath, warning)
 	}
 }
@@ -109,10 +109,10 @@ func TestMissingCheckoutWarnsAndRunsItself(t *testing.T) {
 func TestFailedBuildWarnsWithTheRebuildCommand(t *testing.T) {
 	goBuild := &fakeGoBuild{buildOutput: "go: go.mod requires go >= 1.27 (running go 1.26.4; GOTOOLCHAIN=local)\n", isFailing: true}
 	checkoutLauncher := launcherOnCheckout(t, platformCheckoutWithDevSource(t), "unknown", goBuild)
-	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"dev", "ls"})
-	wantWarning := "warning: run the dev of the image: build of dev failed: go: go.mod requires go >= 1.27 (running go 1.26.4; GOTOOLCHAIN=local)\n" +
+	binaryPath, warning := checkoutBinaryToRun(context.Background(), checkoutLauncher, []string{"ilot", "ls"})
+	wantWarning := "warning: run the ilot of the image: build of ilot failed: go: go.mod requires go >= 1.27 (running go 1.26.4; GOTOOLCHAIN=local)\n" +
 		"the checkout needs Go 1.27, the image ships Go 1.26.4: the devbox image must be updated\n" +
-		"run \"dev rebuild\" to see the full build output and try again\n"
+		"run \"ilot rebuild\" to see the full build output and try again\n"
 	if binaryPath != "" || warning != wantWarning {
 		t.Errorf("got (%q, %q), want no binary and\n%s", binaryPath, warning, wantWarning)
 	}
@@ -150,7 +150,7 @@ func TestInterruptDuringTheBuildStopsTheCommand(t *testing.T) {
 		t.Skip("go is not on PATH")
 	}
 	workDir := t.TempDir()
-	imageCopy := filepath.Join(workDir, "dev-image")
+	imageCopy := filepath.Join(workDir, "ilot-image")
 	build := exec.Command("go", "build", "-ldflags", "-X 'main.stampedVersion=test (image)' -X main.stampedSourceTree=unknown", "-o", imageCopy, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, output)
@@ -179,7 +179,7 @@ func TestInterruptDuringTheBuildStopsTheCommand(t *testing.T) {
 		}
 	})
 	stderrLines := bufio.NewScanner(stderr)
-	if !stderrLines.Scan() || !strings.HasPrefix(stderrLines.Text(), "building dev from") {
+	if !stderrLines.Scan() || !strings.HasPrefix(stderrLines.Text(), "building ilot from") {
 		t.Fatalf("first stderr line = %q, want the building line", stderrLines.Text())
 	}
 	if err := syscall.Kill(-command.Process.Pid, syscall.SIGINT); err != nil {

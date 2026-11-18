@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"errors"
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"dev/internal/appconfig"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 func configWithApps(base appconfig.Config, extraApps map[string]appconfig.App) appconfig.Config {
@@ -64,7 +64,7 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	if got := environment.supervisor.runningSpecs["ticket-iam.devbox"]; got.Command != iamSpecBefore.Command {
 		t.Errorf("shared ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
 	}
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "dev-proj-1234.yml"))
+	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
 	if err != nil || !strings.Contains(string(content), "ticket-search") {
 		t.Errorf("routes of proj-1234 = %q, %v; want the ticket-search route kept", content, err)
 	}
@@ -96,7 +96,7 @@ func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.controller.ConfigForStack = func(stackName string) (appconfig.Config, error) {
 		if stackName == "proj-1234" {
-			return appconfig.Config{}, errors.New("parse dev.yaml: bad indentation")
+			return appconfig.Config{}, errors.New("parse ilot.yaml: bad indentation")
 		}
 		return testConfig(), nil
 	}

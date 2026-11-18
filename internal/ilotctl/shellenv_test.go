@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"maps"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"dev/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
 )
 
 func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
@@ -50,7 +50,7 @@ func TestEnvironmentShowsTheShellTheDaemonStartedWith(t *testing.T) {
 		t.Errorf("GOPROXY = %+v, want the value the daemon started with", entries)
 	}
 	if isUnrecorded, err := laterCommand.RunsWithoutARecordedEnvironment(t.Context()); isUnrecorded || err != nil {
-		t.Errorf("RunsWithoutARecordedEnvironment = %t, %v; want false for a daemon dev started", isUnrecorded, err)
+		t.Errorf("RunsWithoutARecordedEnvironment = %t, %v; want false for a daemon ilot started", isUnrecorded, err)
 	}
 }
 

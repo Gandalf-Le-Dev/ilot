@@ -41,7 +41,7 @@ type traefikService struct {
 }
 
 func RoutesFileName(stackName string) string {
-	return "dev-" + stackName + ".yml"
+	return "ilot-" + stackName + ".yml"
 }
 
 func TraefikRoutes(stackName, domain, backendHost string, routedApps []RoutedApp) ([]byte, error) {

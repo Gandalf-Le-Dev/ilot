@@ -54,7 +54,7 @@ func TestNameForCheckoutUsesTheTicketKey(t *testing.T) {
 		isMainCheckout bool
 		wantName       string
 	}{
-		{checkoutDir: "/w/dev-jdoe-proj-2003-example-change", branch: "dev/jdoe/proj-2003-example-change", wantName: "proj-2003"},
+		{checkoutDir: "/w/ilot-jdoe-proj-2003-example-change", branch: "dev/jdoe/proj-2003-example-change", wantName: "proj-2003"},
 		{checkoutDir: "/w/task-2004", branch: "TASK-2004", wantName: "task-2004"},
 		{checkoutDir: "/w/anything", branch: "OPS-123-fix", wantName: "ops-123"},
 		{checkoutDir: "/w/anything", branch: "PROJ-2005-x", wantName: "proj-2005"},

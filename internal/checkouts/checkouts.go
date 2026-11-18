@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 type Checkout struct {
@@ -20,7 +20,7 @@ type Checkout struct {
 	IsMainCheckout bool   `json:"is_main_checkout"`
 }
 
-const personalFileHint = "~/.config/dev/env.yaml"
+const personalFileHint = "~/.config/ilot/env.yaml"
 
 func ForStack(repoPaths map[string]string, stackName string) (map[string]Checkout, error) {
 	checkoutByRepo := map[string]Checkout{}
@@ -124,7 +124,7 @@ func RepoOf(repoPaths map[string]string, dir string) (string, error) {
 			return repoName, nil
 		}
 	}
-	return "", fmt.Errorf("%s is in no repo that dev knows: if it is one of %v cloned elsewhere, set repos.<name>.path in %s; for a personal repo, set repos.<name>.path and repos.<name>.config there", dir, slices.Sorted(maps.Keys(repoPaths)), personalFileHint)
+	return "", fmt.Errorf("%s is in no repo that ilot knows: if it is one of %v cloned elsewhere, set repos.<name>.path in %s; for a personal repo, set repos.<name>.path and repos.<name>.config there", dir, slices.Sorted(maps.Keys(repoPaths)), personalFileHint)
 }
 
 func commonGitDirOf(dir string) (string, error) {

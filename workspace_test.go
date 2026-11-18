@@ -40,7 +40,7 @@ func gitRepoWithFiles(t *testing.T, contentByPath map[string]string) string {
 func homeWithPersonalFile(t *testing.T, content string) string {
 	t.Helper()
 	homeDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(homeDir, ".config", "dev"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(homeDir, ".config", "ilot"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(homeDir, personalSettingsPath), []byte(content), 0o600); err != nil {
@@ -50,9 +50,9 @@ func homeWithPersonalFile(t *testing.T, content string) string {
 }
 
 func TestARepoCheckoutWithoutItsConfigFileDeclaresNoApps(t *testing.T) {
-	portalDir := gitRepoWithFiles(t, map[string]string{"README.md": "no dev.yaml on this branch\n"})
+	portalDir := gitRepoWithFiles(t, map[string]string{"README.md": "no ilot.yaml on this branch\n"})
 	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/dev.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: dev.yaml}\napps:\n  standalone: {run: standalone}\n",
+		"devbox/ilot.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: ilot.yaml}\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  portal: {path: "+portalDir+"}\n")
 	currentWorkspace, err := loadWorkspace(homeDir)
@@ -81,11 +81,11 @@ func TestPlatformWithoutItsConfigNamesThePersonalSetting(t *testing.T) {
 }
 
 func TestAPersonalRepoWithPathAndConfigJoinsTheWorkspace(t *testing.T) {
-	toolDir := gitRepoWithFiles(t, map[string]string{"dev.yaml": "apps:\n  mytool-daemon: {run: mytool daemon}\n"})
+	toolDir := gitRepoWithFiles(t, map[string]string{"ilot.yaml": "apps:\n  mytool-daemon: {run: mytool daemon}\n"})
 	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/dev.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
+		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
 	})
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  mytool: {path: "+toolDir+", config: dev.yaml}\n  pathonly: {path: "+t.TempDir()+"}\n")
+	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  mytool: {path: "+toolDir+", config: ilot.yaml}\n  pathonly: {path: "+t.TempDir()+"}\n")
 	currentWorkspace, err := loadWorkspace(homeDir)
 	if err != nil {
 		t.Fatalf("loadWorkspace: %v", err)

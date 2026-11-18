@@ -1,10 +1,8 @@
-package devctl
+package ilotctl
 
 import (
 	"bytes"
 	"context"
-	"dev/internal/processcompose"
-	"dev/internal/proxyfiles"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/proxyfiles"
 )
 
 func (controller *Controller) applyAll(ctx context.Context, stacks stackSet) error {

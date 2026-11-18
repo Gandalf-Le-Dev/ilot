@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"dev/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 )
 
 func TestCheckoutsTableShowsOnlyTheWorktreesOfTicketStacks(t *testing.T) {

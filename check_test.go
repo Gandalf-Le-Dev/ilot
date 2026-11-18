@@ -10,7 +10,7 @@ import (
 
 func writeConfigFile(t *testing.T, content string) string {
 	t.Helper()
-	configFile := filepath.Join(t.TempDir(), "dev.yaml")
+	configFile := filepath.Join(t.TempDir(), "ilot.yaml")
 	if err := os.WriteFile(configFile, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -30,9 +30,9 @@ func TestCheckConfigFileFindsAnAppDeclaredInTwoFiles(t *testing.T) {
 }
 
 func TestCheckWithoutAPathUsesTheRepoOfTheCurrentFolder(t *testing.T) {
-	portalDir := gitRepoWithFiles(t, map[string]string{"dev.yaml": "apps:\n  portal-api: {run: api}\n"})
+	portalDir := gitRepoWithFiles(t, map[string]string{"ilot.yaml": "apps:\n  portal-api: {run: api}\n"})
 	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/dev.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: dev.yaml}\napps:\n  standalone: {run: standalone}\n",
+		"devbox/ilot.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: ilot.yaml}\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  portal: {path: "+portalDir+"}\n")
 	currentWorkspace, err := loadWorkspace(homeDir)
@@ -42,8 +42,8 @@ func TestCheckWithoutAPathUsesTheRepoOfTheCurrentFolder(t *testing.T) {
 
 	repoName, configFile, err := configFileToCheck(&currentWorkspace, portalDir, "")
 
-	if err != nil || repoName != "portal" || configFile != filepath.Join(portalDir, "dev.yaml") {
-		t.Fatalf("configFileToCheck = %q, %q, %v; want portal and its dev.yaml", repoName, configFile, err)
+	if err != nil || repoName != "portal" || configFile != filepath.Join(portalDir, "ilot.yaml") {
+		t.Fatalf("configFileToCheck = %q, %q, %v; want portal and its ilot.yaml", repoName, configFile, err)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
 
 func TestCheckWithoutAPathOutsideACheckoutUsesPlatformsMainCheckout(t *testing.T) {
 	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/dev.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
+		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
 	currentWorkspace, err := loadWorkspace(homeDir)
@@ -94,14 +94,14 @@ func TestCheckWithoutAPathOutsideACheckoutUsesPlatformsMainCheckout(t *testing.T
 
 	repoName, configFile, err := configFileToCheck(&currentWorkspace, t.TempDir(), "")
 
-	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "dev.yaml") {
+	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "ilot.yaml") {
 		t.Fatalf("configFileToCheck = %q, %q, %v; want platform's file in its main checkout", repoName, configFile, err)
 	}
 }
 
 func TestCheckWithoutAPathFromAHomeFolderThatIsACheckoutUsesPlatformsMainCheckout(t *testing.T) {
 	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/dev.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
+		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
 	runGitInTest(t, homeDir, "init", "-q", "-b", "master")
@@ -113,7 +113,7 @@ func TestCheckWithoutAPathFromAHomeFolderThatIsACheckoutUsesPlatformsMainCheckou
 
 	repoName, configFile, err := configFileToCheck(&currentWorkspace, homeDir, "")
 
-	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "dev.yaml") {
+	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "ilot.yaml") {
 		t.Fatalf("configFileToCheck = %q, %q, %v; want platform's file in its main checkout", repoName, configFile, err)
 	}
 }

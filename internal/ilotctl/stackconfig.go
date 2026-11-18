@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"errors"
@@ -6,8 +6,8 @@ import (
 	"maps"
 	"slices"
 
-	"dev/internal/appconfig"
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 func (controller *Controller) loadStackConfigs(stackNames []string) error {
@@ -24,7 +24,7 @@ func (controller *Controller) loadEveryReadableStackConfig(stackNames []string) 
 	for _, stackName := range stackNames {
 		config, err := controller.ConfigForStack(stackName)
 		if err != nil {
-			problems = append(problems, fmt.Errorf("read the config of stack %s: %w: fix it, or remove the stack with dev rm %s", stackName, err, stackName))
+			problems = append(problems, fmt.Errorf("read the config of stack %s: %w: fix it, or remove the stack with ilot rm %s", stackName, err, stackName))
 			continue
 		}
 		controller.configByStack[stackName] = config
@@ -97,7 +97,7 @@ func (controller *Controller) prepareStacks(stacks stackSet) error {
 	for _, runningInstance := range stacks.runningInstances() {
 		if _, isDeclared := controller.lookupApp(runningInstance); !isDeclared {
 			stacks.setRunning(runningInstance, false)
-			fmt.Fprintf(controller.Output, "warning: %s stopped: no dev.yaml of stack %s declares it any more\n", runningInstance.processName(), runningInstance.stackName)
+			fmt.Fprintf(controller.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", runningInstance.processName(), runningInstance.stackName)
 		}
 	}
 	return nil

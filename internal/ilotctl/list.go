@@ -1,4 +1,4 @@
-package devctl
+package ilotctl
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"maps"
 	"slices"
 
-	"dev/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 )
 
 type Listing struct {
@@ -72,7 +72,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 	return listing, nil
 }
 
-// A repo with several worktrees for a stack is left out: dev start reports it in that stack.
+// A repo with several worktrees for a stack is left out: ilot start reports it in that stack.
 func (controller *Controller) StackCheckouts() (map[string]map[string]checkouts.Checkout, error) {
 	allStacks, err := controller.Store.All()
 	if err != nil {

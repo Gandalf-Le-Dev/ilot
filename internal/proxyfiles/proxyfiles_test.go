@@ -50,7 +50,7 @@ func TestTraefikRoutesSendsEachAppHostToItsPort(t *testing.T) {
 }
 
 func TestRoutesFileNameDoesNotCollideWithCommittedRouteFiles(t *testing.T) {
-	if got := RoutesFileName("master"); got != "dev-master.yml" {
+	if got := RoutesFileName("master"); got != "ilot-master.yml" {
 		t.Errorf("RoutesFileName = %q", got)
 	}
 }

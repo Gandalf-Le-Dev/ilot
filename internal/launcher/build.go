@@ -17,16 +17,16 @@ import (
 	"syscall"
 	"time"
 
-	"dev/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 const (
-	SourceDir         = "devbox/dev"
+	SourceDir         = "devbox/ilot"
 	keptBuildCount    = 3
 	buildFolderPrefix = "build-"
 	buildLockFileName = "build.lock"
 	lockPollInterval  = 100 * time.Millisecond
-	builtBinaryName   = "dev"
+	builtBinaryName   = "ilot"
 	defaultGoProxy    = "https://goproxy.example.com,direct"
 	shortCommitLength = "12"
 	newerGoHintFormat = "the checkout needs Go %s, the image ships Go %s: the devbox image must be updated"
@@ -53,7 +53,7 @@ type BuildError struct {
 }
 
 func (buildError *BuildError) Error() string {
-	return "build of dev failed: " + buildError.FirstLine
+	return "build of ilot failed: " + buildError.FirstLine
 }
 
 func RunGoBuild(ctx context.Context, sourceDir, outputPath, ldflags string, buildOutput io.Writer) error {
@@ -92,7 +92,7 @@ func (launcher Launcher) Build(ctx context.Context, sourceTree, shortHead string
 	return launcher.build(ctx, sourceTree, shortHead, buildOutput, false)
 }
 
-// The binary takes the place of the one cached for the committed tree, so plain dev runs it until the tree changes in git.
+// The binary takes the place of the one cached for the committed tree, so plain ilot runs it until the tree changes in git.
 func (launcher Launcher) BuildLocal(ctx context.Context, sourceTree, shortHead string, buildOutput io.Writer) (binaryPath string, err error) {
 	return launcher.build(ctx, sourceTree, shortHead, buildOutput, true)
 }
@@ -116,7 +116,7 @@ func (launcher Launcher) build(ctx context.Context, sourceTree, shortHead string
 	if err := removeLeftoverBuildFolders(launcher.CacheDir); err != nil {
 		return "", err
 	}
-	if _, err := fmt.Fprintf(launcher.Notes, "building dev from %s (%s)\n", launcher.MainCheckoutDir, describeSource(shortHead, hasLocalChanges)); err != nil {
+	if _, err := fmt.Fprintf(launcher.Notes, "building ilot from %s (%s)\n", launcher.MainCheckoutDir, describeSource(shortHead, hasLocalChanges)); err != nil {
 		return "", err
 	}
 	buildDir, err := os.MkdirTemp(launcher.CacheDir, buildFolderPrefix)
@@ -297,13 +297,13 @@ func (launcher Launcher) lockBuilds(ctx context.Context) (unlock func() error, e
 			return nil, errors.Join(err, lockFile.Close())
 		}
 		if !hasWaited {
-			if _, err := fmt.Fprintln(launcher.Notes, "waiting for another build of dev"); err != nil {
+			if _, err := fmt.Fprintln(launcher.Notes, "waiting for another build of ilot"); err != nil {
 				return nil, errors.Join(err, lockFile.Close())
 			}
 		}
 		select {
 		case <-waitContext.Done():
-			return nil, errors.Join(fmt.Errorf("wait for another build of dev: %w", waitContext.Err()), lockFile.Close())
+			return nil, errors.Join(fmt.Errorf("wait for another build of ilot: %w", waitContext.Err()), lockFile.Close())
 		case <-time.After(lockPollInterval):
 		}
 	}

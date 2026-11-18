@@ -1,24 +1,24 @@
-package devctl
+package ilotctl
 
 import (
 	"maps"
 	"slices"
 	"strings"
 
-	"dev/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 )
 
-const containerNetwork = "devproxy"
+const containerNetwork = "ilotproxy"
 
 func containerName(appInstance instance) string {
-	return "dev-" + appInstance.stackName + "-" + appInstance.appName
+	return "ilot-" + appInstance.stackName + "-" + appInstance.appName
 }
 
 func (controller *Controller) isContainer(appInstance instance) bool {
 	return !controller.app(appInstance).Container.IsZero()
 }
 
-// The leftover of a crash or a killed dev holds the name, so the command removes it before running.
+// The leftover of a crash or a killed ilot holds the name, so the command removes it before running.
 func (controller *Controller) containerCommand(stacks stackSet, appInstance instance, envEntries []EnvEntry) (string, error) {
 	container := controller.app(appInstance).Container
 	name := processcompose.ShellQuote(containerName(appInstance))
