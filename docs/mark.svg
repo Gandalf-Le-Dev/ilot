@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="ilot">
+  <defs>
+    <clipPath id="water">
+      <circle cx="60" cy="60" r="22"/>
+    </clipPath>
+  </defs>
+  <rect width="120" height="120" rx="28" fill="#0E2A33"/>
+  <circle cx="60" cy="60" r="31" fill="none" stroke="#F2E8D5" stroke-width="18"/>
+  <path d="M26.15 63.38 Q36.31 56.61 46.46 63.38 Q56.62 70.15 66.77 63.38 Q76.92 56.61 87.08 63.38 Q90.46 65.08 93.85 63.38 V93.85 H26.15 Z" fill="#2BB3A3" clip-path="url(#water)"/>
+</svg>
