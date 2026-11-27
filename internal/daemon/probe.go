@@ -75,15 +75,19 @@ func (supervisor *Supervisor) probeUntilReady(name string, spec Spec, probed *ru
 	ticker := time.NewTicker(supervisor.probeInterval)
 	defer ticker.Stop()
 	for {
-		attempt, cancel := context.WithTimeout(probed.exited, supervisor.probeTimeout)
+		attempt, cancel := context.WithTimeout(probed.dead, supervisor.probeTimeout)
 		err := spec.Ready.check(attempt, spec)
 		cancel()
+		// A probe can pass after the exit, for example on a port that a grandchild holds.
+		if probed.dead.Err() != nil {
+			return
+		}
 		if err == nil {
 			supervisor.markReady(name, probed)
 			return
 		}
 		select {
-		case <-probed.exited.Done():
+		case <-probed.dead.Done():
 			return
 		case <-ticker.C:
 		}
@@ -92,9 +96,12 @@ func (supervisor *Supervisor) probeUntilReady(name string, spec Spec, probed *ru
 
 func (supervisor *Supervisor) readyIfStillAlive(name string, started *run) {
 	select {
-	case <-started.exited.Done():
+	case <-started.dead.Done():
 	case <-time.After(supervisor.aliveWindow):
-		supervisor.markReady(name, started)
+		// Both can be true at once, and the select then picks at random.
+		if started.dead.Err() == nil {
+			supervisor.markReady(name, started)
+		}
 	}
 }
 

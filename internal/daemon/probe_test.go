@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -174,6 +176,41 @@ func TestAProcessWithNoProbeThatExitsAtOnceIsNeverReady(t *testing.T) {
 	err = supervisor.WaitReady(t.Context(), "broken")
 	if exitedError, isExited := errors.AsType[*ExitedError](err); !isExited || exitedError.ExitCode != 4 {
 		t.Fatalf("got %v, want an exit with code 4", err)
+	}
+}
+
+func TestAProcessThatExitedIsNotReadyWhileAGrandchildHoldsItsOutput(t *testing.T) {
+	if _, err := exec.LookPath("perl"); err != nil {
+		t.Skip("perl makes the grandchild that leaves the group")
+	}
+	// Longer than the start of perl and shorter than the drain of the output, so that the window ends during the drain.
+	supervisor := newTestSupervisor(t, SupervisorOptions{AliveWindow: outputDrainTimeout / 4})
+	spec := sleeperWithProbe(t, Probe{})
+	spec.Ready = nil
+	spec.Command = `perl -MPOSIX -e 'setsid(); open(my $mark, ">", "left") or die; close($mark); sleep 300' &
+echo $! > grandchild.pid
+while [ ! -e left ]; do sleep 0.02; done
+exit 1`
+
+	begin := time.Now()
+	if _, err := supervisor.Put("broken", spec); err != nil {
+		t.Fatal(err)
+	}
+	grandchild := readPIDFile(t, filepath.Join(spec.Dir, "grandchild.pid"))
+	t.Cleanup(func() { _ = syscall.Kill(grandchild, syscall.SIGKILL) })
+
+	for time.Since(begin) < outputDrainTimeout {
+		if got := processNamed(t, supervisor, "broken").State; got == StateReady {
+			t.Fatalf("the process is ready %s after its start, although its shell exited", time.Since(begin))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	err := supervisor.WaitReady(t.Context(), "broken")
+	if exitedError, isExited := errors.AsType[*ExitedError](err); !isExited || exitedError.ExitCode != 1 {
+		t.Fatalf("got %v, want an exit with code 1", err)
+	}
+	if !isProcessAlive(grandchild) {
+		t.Fatal("the grandchild did not leave the group, so nothing held the output")
 	}
 }
 
