@@ -233,11 +233,9 @@ repos:
 `ilot` builds the environment of an app in this order, and the last value wins:
 
 1. The shell files. `ilot` runs a clean zsh and keeps `HOME`, `PATH`, `USER`, `LOGNAME` and `LANG`. It also keeps the variables of a fixed list in `internal/shellenv/shellenv.go`. Nothing of your own shell gets in.
-2. Defaults: `APP_NAME` is your login, and `VSCODE_REPO_PATH` is the checkout of the app.
-3. `KEYRING_APP_KEY`, read from `~/.keyring` at each start.
-4. The `ilot.yaml` of the repo: its top-level `env`, then the `env` of the app.
-5. Your personal file: its `env`, then its entry under `apps`.
-6. The values that `ilot.yaml` writes with a template. Your personal file cannot replace them.
+2. The `ilot.yaml` of the repo: its top-level `env`, then the `env` of the app.
+3. Your personal file: its `env`, then its entry under `apps`.
+4. The values that `ilot.yaml` writes with a template. Your personal file cannot replace them.
 
 A container app does not get the top-level `env` of your personal file, so a third-party image does not get your tokens. It gets its entry under `apps`.
 The daemon keeps the shell values that it started with. To give the apps fresh values, run `ilot restart`.

@@ -19,7 +19,7 @@ var keptNames = []string{
 	"DEPLOY_ENV", "REGION", "MISE_TRUSTED_CONFIG_PATHS", "NPM_CONFIG_PREFIX", "SSH_AUTH_SOCK",
 }
 
-var keptPrefixes = []string{"DEVHOST_", "KEYRING_", "LOGKIT_", "TEMPORAL_", "NVM_"}
+var keptPrefixes = []string{"DEVHOST_", "LOGKIT_", "TEMPORAL_", "NVM_"}
 
 const cleanShellTimeout = 15 * time.Second
 

@@ -326,7 +326,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
 		UsesMise:            func(string) bool { return false },
-		KeyringFile:         "",
 		RoutesDir:           routesDir,
 		BackendHost:         "devbox",
 		ReadyTimeout:        time.Second,
@@ -1296,7 +1295,7 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	environment.controller.Config.Apps["standalone"] = standalone
 	environment.controller.Personal = personal.Settings{
 		Env:   map[string]string{"LOG_LEVEL": "debug", "PORT": "1"},
-		Apps:  map[string]map[string]string{"standalone": {"APP_NAME": "custom"}},
+		Apps:  map[string]map[string]string{"standalone": {"API_TOKEN": "custom"}},
 		Repos: nil,
 	}
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
@@ -1305,11 +1304,10 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 
 	wantPort := strconv.Itoa(environment.appPort(t, "proj-1234", "standalone"))
 	want := map[string]EnvEntry{
-		"LOG_LEVEL":        {Key: "LOG_LEVEL", Value: "debug", Source: "personal"},
-		"REGION":           {Key: "REGION", Value: "EU1", Source: "app"},
-		"PORT":             {Key: "PORT", Value: wantPort, Source: "computed"},
-		"APP_NAME":         {Key: "APP_NAME", Value: "custom", Source: "personal app"},
-		"VSCODE_REPO_PATH": {Key: "VSCODE_REPO_PATH", Value: "/worktrees/proj-1234", Source: "default"},
+		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "personal"},
+		"REGION":    {Key: "REGION", Value: "EU1", Source: "app"},
+		"PORT":      {Key: "PORT", Value: wantPort, Source: "computed"},
+		"API_TOKEN": {Key: "API_TOKEN", Value: "custom", Source: "personal app"},
 	}
 	for key, wantEntry := range want {
 		if entryByKey[key] != wantEntry {
@@ -1318,16 +1316,6 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	}
 	if environment.supervisor.runningSpecs["standalone.proj-1234"].Env["LOG_LEVEL"] != "debug" {
 		t.Errorf("the process does not get the environment: %v", environment.supervisor.runningSpecs["standalone.proj-1234"].Env)
-	}
-}
-
-func TestEnvironmentDefaultsAppNameToTheLogin(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.Login = "jdoe"
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-
-	if entry := environmentOf(t, environment, "standalone")["APP_NAME"]; entry.Value != "jdoe" || entry.Source != "default" {
-		t.Errorf("APP_NAME = %+v", entry)
 	}
 }
 
@@ -1548,51 +1536,6 @@ func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 	}
 }
 
-func writeKeyringFile(t *testing.T, content string) string {
-	t.Helper()
-	keyringFile := filepath.Join(t.TempDir(), ".keyring")
-	if err := os.WriteFile(keyringFile, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return keyringFile
-}
-
-func TestAppsGetTheKeyringKeyFromTheKeyringFile(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.KeyringFile = writeKeyringFile(t, `export KEYRING_APP_KEY="key-from-file"`+"\n")
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if got := environment.supervisor.runningSpecs["standalone.master"].Env["KEYRING_APP_KEY"]; got != "key-from-file" {
-		t.Errorf("KEYRING_APP_KEY = %q, want the value of the keyring file", got)
-	}
-	entries, err := environment.controller.Environment(environment.master, "standalone")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if entry.Key == "KEYRING_APP_KEY" && entry.Source != "~/.keyring" {
-			t.Errorf("source of KEYRING_APP_KEY = %q, want ~/.keyring", entry.Source)
-		}
-	}
-}
-
-func TestKeyringFileReadsKeyWithoutExportAndQuotes(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.KeyringFile = writeKeyringFile(t, "# comment\nOTHER=1\nKEYRING_APP_KEY=plain-key\n")
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if got := environment.supervisor.runningSpecs["standalone.master"].Env["KEYRING_APP_KEY"]; got != "plain-key" {
-		t.Errorf("KEYRING_APP_KEY = %q, want plain-key", got)
-	}
-}
-
-func TestMissingKeyringFileGivesNoKeyringKeyAndNoError(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.KeyringFile = filepath.Join(t.TempDir(), "absent")
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if value, isSet := environment.supervisor.runningSpecs["standalone.master"].Env["KEYRING_APP_KEY"]; isSet {
-		t.Errorf("KEYRING_APP_KEY = %q, want it unset", value)
-	}
-}
-
 func TestRepoEnvWinsOverTheInheritedShellValue(t *testing.T) {
 	t.Setenv("LOGKIT_LOGJSON", "from-shell")
 	environment := newTestEnvironment(t)
@@ -1600,35 +1543,6 @@ func TestRepoEnvWinsOverTheInheritedShellValue(t *testing.T) {
 	environment.start(t, environment.master, StartOptions{}, "standalone")
 	if got := environment.supervisor.runningSpecs["standalone.master"].Env["LOGKIT_LOGJSON"]; got != "1" {
 		t.Errorf("LOGKIT_LOGJSON = %q, want the repo value", got)
-	}
-}
-
-func TestStartWarnsOnceWhenTheKeyringFileHasNoKey(t *testing.T) {
-	environment := newTestEnvironment(t)
-	missingKeyringFile := filepath.Join(t.TempDir(), ".keyring")
-	environment.controller.KeyringFile = missingKeyringFile
-	environment.start(t, environment.master, StartOptions{}, "standalone", "internalapi")
-	wantWarning := "warning: " + missingKeyringFile + " has no KEYRING_APP_KEY: apps start without it"
-	if count := strings.Count(environment.output.String(), wantWarning); count != 1 {
-		t.Errorf("warning count = %d, want 1; output:\n%s", count, environment.output.String())
-	}
-}
-
-func TestStartWarnsWhenTheKeyringFileHoldsNoKeyLine(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.KeyringFile = writeKeyringFile(t, "OTHER=1\n")
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if !strings.Contains(environment.output.String(), "has no KEYRING_APP_KEY") {
-		t.Errorf("output = %q, want the warning", environment.output.String())
-	}
-}
-
-func TestStartDoesNotWarnWhenTheKeyringFileHasAKey(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.controller.KeyringFile = writeKeyringFile(t, "export KEYRING_APP_KEY=abc\n")
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if strings.Contains(environment.output.String(), "KEYRING_APP_KEY") {
-		t.Errorf("output = %q, want no warning", environment.output.String())
 	}
 }
 

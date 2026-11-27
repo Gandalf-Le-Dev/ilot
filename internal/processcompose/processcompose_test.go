@@ -393,7 +393,7 @@ func TestTheDaemonGivesEveryProcessItsOwnEnvironmentAndRecordsIt(t *testing.T) {
 	}
 	info, err := os.Stat(client.environmentPath())
 	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Errorf("environment file mode = %v, %v; want 0600, it holds the keyring key", info, err)
+		t.Errorf("environment file mode = %v, %v; want 0600, it can hold secrets", info, err)
 	}
 
 	if err := client.Shutdown(); err != nil {

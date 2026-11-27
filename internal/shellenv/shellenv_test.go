@@ -12,7 +12,7 @@ import (
 func TestKeepTakesTheLoginShellVariablesAndDropsTheRest(t *testing.T) {
 	kept := Keep([]string{
 		"HOME=/home/user", "PATH=/usr/bin", "USER=acme", "LOGNAME=acme", "LANG=C.UTF-8",
-		"LC_DEVBOX_LOGIN=jdoe", "DEVBOX_VERSION=1.2.3", "DEVHOST_PORT_7=20007", "KEYRING_APP_KEY=secret",
+		"LC_DEVBOX_LOGIN=jdoe", "DEVBOX_VERSION=1.2.3", "DEVHOST_PORT_7=20007",
 		"GOPATH=/home/user/go", "GOPROXY=https://proxy", "GOPRIVATE=git.example.com", "GONOSUMDB=git.example.com", "CGO_ENABLED=0",
 		"DEPLOY_ENV=DEV", "REGION=DEV1", "LOGKIT_INFRASTRUCTURE=preproduction", "TEMPORAL_ADDRESS=localhost:7233",
 		"MISE_TRUSTED_CONFIG_PATHS=/home/user", "NVM_DIR=/home/user/.nvm",
@@ -22,13 +22,13 @@ func TestKeepTakesTheLoginShellVariablesAndDropsTheRest(t *testing.T) {
 
 	want := []string{
 		"CGO_ENABLED", "DEPLOY_ENV", "DEVBOX_VERSION", "DEVHOST_PORT_7", "GONOSUMDB", "GOPATH", "GOPRIVATE",
-		"GOPROXY", "HOME", "KEYRING_APP_KEY", "LANG", "LC_DEVBOX_LOGIN", "LOGKIT_INFRASTRUCTURE", "LOGNAME",
+		"GOPROXY", "HOME", "LANG", "LC_DEVBOX_LOGIN", "LOGKIT_INFRASTRUCTURE", "LOGNAME",
 		"MISE_TRUSTED_CONFIG_PATHS", "NVM_DIR", "PATH", "REGION", "SSH_AUTH_SOCK", "TEMPORAL_ADDRESS", "USER",
 	}
 	if got := slices.Sorted(maps.Keys(kept)); !slices.Equal(got, want) {
 		t.Errorf("Keep kept %v, want %v", got, want)
 	}
-	if kept["GOPROXY"] != "https://proxy" || kept["KEYRING_APP_KEY"] != "secret" {
+	if kept["GOPROXY"] != "https://proxy" || kept["DEVHOST_PORT_7"] != "20007" {
 		t.Errorf("Keep changed the values: %v", kept)
 	}
 }

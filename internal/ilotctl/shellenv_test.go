@@ -82,11 +82,11 @@ func TestBuildsRunWithTheShellOfTheDaemon(t *testing.T) {
 
 func TestAContainerGetsNoShellVariable(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"KEYRING_APP_KEY": "secret"})
+	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"API_TOKEN": "secret"})
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
-	if strings.Contains(command, "KEYRING_APP_KEY") {
+	if strings.Contains(command, "API_TOKEN") {
 		t.Errorf("command %q passes a shell variable to the image", command)
 	}
 	if !strings.Contains(command, "-e 'REGION'") {

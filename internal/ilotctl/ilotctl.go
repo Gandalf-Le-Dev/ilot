@@ -44,7 +44,6 @@ type Controller struct {
 	UsesMise            func(checkoutDir string) bool
 	ReposNotCloned      map[string]string
 	Personal            personal.Settings
-	KeyringFile         string
 	ShellEnv            func() (map[string]string, error)
 	Login               string
 	RoutesDir           string
@@ -83,7 +82,6 @@ func (controller *Controller) Start(ctx context.Context, worktree stack.Worktree
 	if err != nil {
 		return err
 	}
-	controller.warnWhenKeyringKeyIsMissing()
 	requestedInstances, err := controller.instancesOf(worktree.Name, appNames)
 	if err != nil {
 		return err
