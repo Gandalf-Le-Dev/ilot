@@ -79,6 +79,9 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 		return err
 	}
 	for _, appInstance := range start.Order {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := controller.startInstance(ctx, after, appInstance, processByName, isRequested[appInstance]); err != nil {
 			return err
 		}
@@ -286,6 +289,9 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 		problems = append(problems, fmt.Errorf("%s: %w", snapshot.ProcessName(failure.appInstance), failure.err))
 	}
 	for _, appInstance := range startOrder {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(problems, err)...)
+		}
 		if isFailed[appInstance] {
 			continue
 		}

@@ -53,10 +53,10 @@ type logLineBeforeReady struct {
 }
 
 func (supervisor *fakeSupervisor) Put(ctx context.Context, spec ProcessSpec) error {
+	supervisor.calls = append(supervisor.calls, "put "+spec.Name)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	supervisor.calls = append(supervisor.calls, "put "+spec.Name)
 	if supervisor.putError != nil {
 		return supervisor.putError
 	}
