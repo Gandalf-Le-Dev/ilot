@@ -301,6 +301,8 @@ func (store Store) Lock(ctx context.Context) (release func() error, err error) {
 	timeout := cmp.Or(store.LockTimeout, defaultLockTimeout)
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
+	poll := time.NewTicker(lockPollInterval)
+	defer poll.Stop()
 	hasSaidThatItWaits := false
 	for {
 		err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
@@ -320,7 +322,7 @@ func (store Store) Lock(ctx context.Context) (release func() error, err error) {
 			return nil, errors.Join(ctx.Err(), lockFile.Close())
 		case <-deadline.C:
 			return nil, errors.Join(fmt.Errorf("another ilot holds the state lock %s for more than %s: %s. Run the command again when it ends", lockFile.Name(), timeout, store.lockHolder()), lockFile.Close())
-		case <-time.After(lockPollInterval):
+		case <-poll.C:
 		}
 	}
 }
