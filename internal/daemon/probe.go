@@ -97,7 +97,7 @@ func (supervisor *Supervisor) probeUntilReady(name string, spec Spec, probed *ru
 func (supervisor *Supervisor) readyIfStillAlive(name string, started *run) {
 	select {
 	case <-started.dead.Done():
-	case <-time.After(supervisor.aliveWindow):
+	case <-supervisor.afterAliveWindow(supervisor.aliveWindow):
 		// Both can be true at once, and the select then picks at random.
 		if started.dead.Err() == nil {
 			supervisor.markReady(name, started)

@@ -54,6 +54,8 @@ type Supervisor struct {
 	recordMu      sync.Mutex
 	bootID        string
 	session       int
+	// A test replaces it to end the alive window at a chosen moment.
+	afterAliveWindow func(time.Duration) <-chan time.Time
 
 	mu         sync.Mutex
 	entries    map[string]*entry
@@ -102,6 +104,8 @@ func NewSupervisor(options SupervisorOptions) *Supervisor {
 		aliveWindow:   cmp.Or(options.AliveWindow, defaultAliveWindow),
 		recordFile:    options.RecordFile,
 		entries:       map[string]*entry{},
+
+		afterAliveWindow: time.After,
 	}
 }
 
