@@ -245,7 +245,11 @@ func (command *rmCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return executor.Remove(ctx, command.Stack)
+	if err := executor.Remove(ctx, command.Stack); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "removed stack %s\n", command.Stack)
+	return nil
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {

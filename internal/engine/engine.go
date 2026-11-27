@@ -691,6 +691,9 @@ func (executor *Executor) stop(ctx context.Context, stackName string, instancesO
 	if err := executor.deleteProcesses(ctx, snapshot, stopped); err != nil {
 		return err
 	}
+	for _, stoppedInstance := range stopped {
+		fmt.Fprintf(executor.Output, "stopped %s\n", snapshot.ProcessName(stoppedInstance))
+	}
 	return executor.sendRoutes(ctx)
 }
 
