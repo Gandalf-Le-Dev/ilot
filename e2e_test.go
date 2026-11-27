@@ -264,6 +264,9 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Errorf("ilot start printed %q, want the URL %s", startOutput, wantURL)
 	}
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")
+	if auditLog, err := os.ReadFile(filepath.Join(machine.daemonPaths().StateDir, "ilot.log")); err != nil || !strings.Contains(string(auditLog), `"msg":"port given"`) || !strings.Contains(string(auditLog), `"cmd":"start <apps>"`) {
+		t.Errorf("ilot.log = %q, %v; want the records of the start", auditLog, err)
+	}
 
 	worktree := filepath.Join(machine.homeDir, "src", "shop-retry")
 	machine.git(mainCheckout, "worktree", "add", "--quiet", worktree, "-b", "PROJ-1-retry-jobs")

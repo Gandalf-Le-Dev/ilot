@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 )
 
 const apiDrainTimeout = 5 * time.Second
@@ -45,7 +47,7 @@ func Run(ctx context.Context, options Options) error {
 
 	logger := options.Logger
 	if logger == nil {
-		logFile, err := openRotatingFile(paths.LogFile(), defaultLogMaxBytes, daemonLogPerm)
+		logFile, err := logs.OpenRotating(paths.LogFile(), logs.DefaultMaxBytes, daemonLogPerm)
 		if err != nil {
 			return err
 		}

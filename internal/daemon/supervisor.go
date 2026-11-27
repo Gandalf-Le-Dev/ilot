@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 )
 
 var (
@@ -79,7 +81,7 @@ type run struct {
 	pid int
 	// Tells this process from a later one with the same ID.
 	startedAt string
-	output    *rotatingFile
+	output    *logs.RotatingFile
 	// Cancelled when the process has exited, before its output is read to the end: a grandchild can hold that output open.
 	dead context.Context
 	// Cancelled when the process has exited and its output is in the log file.
@@ -99,7 +101,7 @@ func NewSupervisor(options SupervisorOptions) *Supervisor {
 		session:       session,
 		logger:        cmp.Or(options.Logger, slog.New(slog.DiscardHandler)),
 		stopTimeout:   cmp.Or(options.StopTimeout, defaultStopTimeout),
-		logMaxBytes:   cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
+		logMaxBytes:   cmp.Or(options.LogMaxBytes, logs.DefaultMaxBytes),
 		probeInterval: cmp.Or(options.ProbeInterval, defaultProbeInterval),
 		probeTimeout:  cmp.Or(options.ProbeTimeout, defaultProbeTimeout),
 		aliveWindow:   cmp.Or(options.AliveWindow, defaultAliveWindow),
@@ -282,11 +284,11 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 	spec := target.spec
 	supervisor.mu.Unlock()
 
-	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
+	output, err := logs.OpenRotating(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
 	if err != nil {
 		return fmt.Errorf("open the log file of %s: %w", name, err)
 	}
-	output.onRotationFailure = func(err error) {
+	output.OnRotationFailure = func(err error) {
 		supervisor.logger.Error("the log file does not rotate, so it grows", "process", name, "file", spec.LogFile, "error", err)
 	}
 	pipeReader, pipeWriter, err := os.Pipe()
@@ -405,7 +407,7 @@ func (supervisor *Supervisor) runStopCommand(name string, spec Spec) (hasSucceed
 	defer cancel()
 	command := shellCommand(deadline, spec, spec.Stop)
 	// Not the writer of the process: that one closes when the process exits, and a stop command often lives longer.
-	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
+	output, err := logs.OpenRotating(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
 	if err != nil {
 		supervisor.logger.Warn("the output of the stop command is lost", "process", name, "error", err)
 	} else {

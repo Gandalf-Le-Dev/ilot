@@ -115,9 +115,13 @@ func (executor *Executor) StackCheckouts() (map[string]map[string]workspace.Work
 }
 
 func (executor *Executor) printURLs(snapshot plan.Snapshot, requestedInstances []plan.Instance) {
+	data := executor.Data
+	if data == nil {
+		data = executor.Output
+	}
 	for _, appInstance := range requestedInstances {
 		if url := snapshot.URL(appInstance); url != "" && snapshot.IsWanted(appInstance) {
-			fmt.Fprintf(executor.Output, "%s: %s\n", plan.ProcessName(executor.Workspace, appInstance), url)
+			fmt.Fprintf(data, "%s: %s\n", plan.ProcessName(executor.Workspace, appInstance), url)
 		}
 	}
 }

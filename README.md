@@ -353,9 +353,11 @@ When you add a command, add it to the skill too: a test fails otherwise.
 | `~/.local/state/ilot/state.json`, `state.json.bak` | The state of every workspace: the stacks, their bindings, their apps and their ports. The backup is the version before the last change. |
 | `~/.local/state/ilot/state.lock` | The lock that one `ilot` at a time holds to read and change the state. A command waits 10 seconds for it at most. |
 | `~/.local/state/ilot/workspaces/<workspace>/<stack>/` | The binaries of a stack in `bin/` and its logs in `logs/<app>.log`. |
+| `~/.local/state/ilot/ilot.log` | The audit log of the commands: one JSON record for each lock wait, port, change of the state and call to the daemon, with the command, the workspace, the stack, the folder and the process ID. |
 | `~/.local/state/ilot/daemon.lock`, `daemon.sock`, `daemon.log`, `processes.json` | The lock, the socket and the log of the daemon, and the record of the processes that it runs. If the path of the socket is longer than 100 bytes, the socket is in `/tmp/ilot-<user ID>/`. |
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
+Every command prints its progress lines and its warnings on stderr, and only its data on stdout: the tables, the JSON of `--json`, the lines of `ilot env` and the URLs of `ilot start`.
 If another program has port 4580, each command prints a warning, the apps run, and their URLs do not answer.
 Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot daemon restart`.
 After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot daemon restart` to replace it.

@@ -88,7 +88,7 @@ func (daemonStopCommand) Run(ctx context.Context) error {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "stopping every app of every stack, and the ilot daemon")
-	if err := supervisor.Shutdown(ctx); err != nil {
+	if err := (engine.AuditedSupervisor{ProcessSupervisor: supervisor, Logger: auditLog}).Shutdown(ctx); err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stderr, "the ilot daemon stopped. The stacks keep their apps: ilot start --all starts them again")
@@ -108,7 +108,7 @@ func (command *daemonRestartCommand) Run(ctx context.Context) error {
 	if supervisor.IsUp(ctx) {
 		fmt.Fprintln(os.Stderr, "stopping every app of every stack, and the ilot daemon")
 	}
-	if err := supervisor.Shutdown(ctx); err != nil {
+	if err := (engine.AuditedSupervisor{ProcessSupervisor: supervisor, Logger: auditLog}).Shutdown(ctx); err != nil {
 		return err
 	}
 	if err := supervisor.Up(ctx); err != nil {

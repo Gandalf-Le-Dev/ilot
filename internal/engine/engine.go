@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -33,7 +34,11 @@ type Executor struct {
 	PortRange           ports.Range
 	ReadyTimeout        time.Duration
 	ProgressInterval    time.Duration
-	Output              io.Writer
+	// Output takes the progress lines and the warnings, and Data the results, such as the URL of each started app. Without Data, the results go to Output.
+	Output io.Writer
+	Data   io.Writer
+	// The audit log, with no record when it is nil.
+	Logger *slog.Logger
 }
 
 type StartOptions struct {
