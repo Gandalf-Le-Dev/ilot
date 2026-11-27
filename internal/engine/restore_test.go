@@ -212,7 +212,7 @@ func TestStartAllSkipsAStackWhoseWorktreesAreAllDeleted(t *testing.T) {
 			t.Errorf("started %s from the main checkout, want the stack left down", processName)
 		}
 	}
-	want := "task-1234 does not start: its worktree is deleted. ilot clean removes the stack"
+	want := "task-1234 does not start: it has no worktree of its own. ilot clean removes it, or binds it again if its worktree moved"
 	if output := environment.output.String(); !strings.Contains(output, want) {
 		t.Errorf("output %q, want %q", output, want)
 	}

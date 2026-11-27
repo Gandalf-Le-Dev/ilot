@@ -323,7 +323,7 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 		if executor.hasOnlyDeletedWorktrees(wantedInstance.Stack) {
 			if !isWarnedStack[wantedInstance.Stack] {
 				isWarnedStack[wantedInstance.Stack] = true
-				warnings = append(warnings, fmt.Sprintf("%s does not start: its worktree is deleted. ilot clean removes the stack", wantedInstance.Stack))
+				warnings = append(warnings, fmt.Sprintf("%s does not start: it has no worktree of its own. ilot clean removes it, or binds it again if its worktree moved", wantedInstance.Stack))
 			}
 			continue
 		}
