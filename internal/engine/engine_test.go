@@ -839,6 +839,20 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	}
 }
 
+func TestStopDoesNotWarnAboutADependentThatItStopsToo(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
+	environment.output.Reset()
+
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"internalapi", "publicapi"}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if strings.Contains(environment.output.String(), "warning") {
+		t.Errorf("output %q, want no warning: publicapi stops with internalapi", environment.output.String())
+	}
+}
+
 func TestTheProxyGetsARouteForEveryRoutedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
