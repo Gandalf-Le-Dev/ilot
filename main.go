@@ -382,12 +382,13 @@ func stateDirOf(homeDir string) string {
 }
 
 // newSource gives what a command of a stack reads: the state, the files of its checkouts and the login shell.
+// A configuration that cannot be read is an error for a command that renders, and the Source keeps it for the others.
 func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string) (ilotctl.Source, error) {
-	stackConfig, err := currentWorkspace.ConfigForStack(stackName)
-	if err != nil {
-		return ilotctl.Source{}, err
-	}
+	stackConfig, configErr := currentWorkspace.ConfigForStack(stackName)
 	global := currentWorkspace.Global
+	captureShell := sync.OnceValues(func() (map[string]string, error) {
+		return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
+	})
 	_, proxyPort, err := net.SplitHostPort(global.Proxy.Listen)
 	if err != nil {
 		return ilotctl.Source{}, err
@@ -408,15 +409,21 @@ func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store 
 		Workspace:         currentWorkspace.Name,
 		Root:              currentWorkspace.RootDir,
 		Config:            stackConfig,
+		ConfigErr:         configErr,
 		Store:             store,
 		CheckoutsForStack: currentWorkspace.CheckoutsForStack,
 		ConfigForStack:    currentWorkspace.ConfigForStack,
 		ReposNotCloned:    currentWorkspace.ReposNotCloned(),
 		Settings:          currentWorkspace.Settings,
-		Machine:           plan.Machine{StateDir: store.RootDir, Domain: global.Proxy.Domain, ProxyPort: proxyPort, Login: currentUser.Username, ShellEnv: nil, IlotBinary: ilotBinary, IlotEnv: ilotEnv},
-		ShellEnv: sync.OnceValues(func() (map[string]string, error) {
-			return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
-		}),
+		Machine:           plan.Machine{StateDir: store.RootDir, Domain: global.Proxy.Domain, ProxyPort: proxyPort, Login: currentUser.Username, ShellEnv: nil, SessionEnv: nil, IlotBinary: ilotBinary, IlotEnv: ilotEnv},
+		ShellEnv: func() (map[string]string, map[string]string, error) {
+			environment, err := captureShell()
+			if err != nil {
+				return nil, nil, err
+			}
+			stable, session := shellenv.SplitSession(environment)
+			return stable, session, nil
+		},
 	}, nil
 }
 
@@ -437,6 +444,7 @@ func newController(ctx context.Context, currentWorkspace workspace.Workspace, st
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
+		RemoveContainer:     removeContainer,
 		IsPortFreeOnHost:    ports.IsFreeOnLoopback,
 		IsExternalServiceUp: isListeningOnLocalhost,
 		PortRange:           ports.Range{First: global.Ports.First, Last: global.Ports.Last},
@@ -462,6 +470,14 @@ func ensureImage(ctx context.Context, image string) (string, error) {
 	}
 	fmt.Fprintln(os.Stderr, "pulling "+image)
 	return runCapturingOutput(ctx, "docker", "pull", image)
+}
+
+func removeContainer(ctx context.Context, name string) error {
+	output, err := exec.CommandContext(ctx, "docker", "rm", "--force", name).CombinedOutput()
+	if err != nil && !strings.Contains(string(output), "No such container") {
+		return fmt.Errorf("docker rm --force %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func runCapturingOutput(ctx context.Context, name string, arguments ...string) (string, error) {

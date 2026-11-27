@@ -18,15 +18,15 @@ type readySupervisor struct {
 	dirs    map[string]string
 }
 
-func (supervisor *readySupervisor) Apply(_ context.Context, specs []ilotctl.ProcessSpec) error {
-	for _, spec := range specs {
-		supervisor.started[spec.Name] = true
-		if supervisor.dirs != nil {
-			supervisor.dirs[spec.Name] = spec.Dir
-		}
+func (supervisor *readySupervisor) Put(_ context.Context, spec ilotctl.ProcessSpec) error {
+	supervisor.started[spec.Name] = true
+	if supervisor.dirs != nil {
+		supervisor.dirs[spec.Name] = spec.Dir
 	}
 	return nil
 }
+
+func (supervisor *readySupervisor) Delete(context.Context, string) error { return nil }
 
 func (supervisor *readySupervisor) Restart(context.Context, string) error { return nil }
 
@@ -72,7 +72,9 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	}
 	supervisor := &readySupervisor{started: map[string]bool{}}
 	controller.Supervisor = supervisor
-	controller.ShellEnv = func() (map[string]string, error) { return map[string]string{}, nil }
+	controller.ShellEnv = func() (map[string]string, map[string]string, error) {
+		return map[string]string{}, map[string]string{}, nil
+	}
 	controller.Output = io.Discard
 	if err := controller.Start(t.Context(), stackName, []string{"front"}, ilotctl.StartOptions{SkipDependencies: false}); err != nil {
 		t.Fatal(err)

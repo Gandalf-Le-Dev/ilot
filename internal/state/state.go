@@ -135,6 +135,16 @@ func (state State) App(workspaceName, stackName, appName string) App {
 	return stack.Apps[appName]
 }
 
+// HasApp tells if a stack of a workspace has an app, wanted or not.
+func (state State) HasApp(workspaceName, stackName, appName string) bool {
+	stack, isKnown := state.Stacks(workspaceName)[stackName]
+	if !isKnown {
+		return false
+	}
+	_, hasApp := stack.Apps[appName]
+	return hasApp
+}
+
 func (state *State) RemoveStack(workspaceName, stackName string) {
 	delete(state.Stacks(workspaceName), stackName)
 }

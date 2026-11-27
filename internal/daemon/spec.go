@@ -12,8 +12,11 @@ import (
 type Spec struct {
 	Command string `json:"command"`
 	Dir     string `json:"dir,omitempty"`
-	// The whole environment of the process: the daemon adds nothing of its own.
-	Env     map[string]string `json:"env,omitempty"`
+	// The whole environment of the process, with Session: the daemon adds nothing of its own.
+	Env map[string]string `json:"env,omitempty"`
+	// Variables of the terminal of the command that sent the specification, such as LANG or SSH_AUTH_SOCK.
+	// The process gets them below Env, and the hash leaves them out, so a command from another terminal does not replace the process.
+	Session map[string]string `json:"session,omitempty"`
 	LogFile string            `json:"log_file"`
 	// Runs instead of SIGTERM when the process stops.
 	Stop string `json:"stop,omitempty"`
@@ -47,6 +50,7 @@ func validateName(name string) error {
 
 // Hash is stable across daemon restarts, because encoding/json sorts map keys.
 func (spec Spec) Hash() string {
+	spec.Session = nil
 	encoded, err := json.Marshal(spec)
 	if err != nil {
 		panic("daemon: a specification always encodes: " + err.Error())

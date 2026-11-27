@@ -35,14 +35,16 @@ type fakeSupervisor struct {
 	daemonIsUp        bool
 	behaviorByProcess map[string]processBehavior
 	onWaitReady       func(processName string)
-	applyError        error
+	putError          error
 	routes            []daemon.Route
-	events            []string
-	runningSpecs      map[string]ProcessSpec
-	startedInOrder    []string
-	restarted         []string
-	waitedReady       []string
-	logBeforeReady    map[string]logLineBeforeReady
+	// Every call that names a process, in order.
+	calls          []string
+	events         []string
+	runningSpecs   map[string]ProcessSpec
+	startedInOrder []string
+	restarted      []string
+	waitedReady    []string
+	logBeforeReady map[string]logLineBeforeReady
 }
 
 type logLineBeforeReady struct {
@@ -50,29 +52,35 @@ type logLineBeforeReady struct {
 	message string
 }
 
-func (supervisor *fakeSupervisor) Apply(ctx context.Context, specs []ProcessSpec) error {
+func (supervisor *fakeSupervisor) Put(ctx context.Context, spec ProcessSpec) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if supervisor.applyError != nil {
-		return supervisor.applyError
-	}
-	if len(specs) == 0 && !supervisor.daemonIsUp {
-		return nil
+	supervisor.calls = append(supervisor.calls, "put "+spec.Name)
+	if supervisor.putError != nil {
+		return supervisor.putError
 	}
 	supervisor.daemonIsUp = true
-	nextRunningSpecs := map[string]ProcessSpec{}
-	for _, spec := range specs {
-		if _, wasRunning := supervisor.runningSpecs[spec.Name]; !wasRunning {
-			supervisor.startedInOrder = append(supervisor.startedInOrder, spec.Name)
-			supervisor.events = append(supervisor.events, "start "+spec.Name)
-			if supervisor.behaviorByProcess[spec.Name] == processEndedAfterItWasReady {
-				delete(supervisor.behaviorByProcess, spec.Name)
-			}
-		}
-		nextRunningSpecs[spec.Name] = spec
+	running, isKnown := supervisor.runningSpecs[spec.Name]
+	hasEnded := supervisor.behaviorByProcess[spec.Name] == processEndedAfterItWasReady || supervisor.behaviorByProcess[spec.Name] == processEndsAtEveryStart
+	supervisor.runningSpecs[spec.Name] = spec
+	if isKnown && !hasEnded && running.Hash() == spec.Hash() {
+		return nil
 	}
-	supervisor.runningSpecs = nextRunningSpecs
+	supervisor.startedInOrder = append(supervisor.startedInOrder, spec.Name)
+	supervisor.events = append(supervisor.events, "start "+spec.Name)
+	if supervisor.behaviorByProcess[spec.Name] == processEndedAfterItWasReady {
+		delete(supervisor.behaviorByProcess, spec.Name)
+	}
+	return nil
+}
+
+func (supervisor *fakeSupervisor) Delete(_ context.Context, processName string) error {
+	supervisor.calls = append(supervisor.calls, "delete "+processName)
+	if _, isKnown := supervisor.runningSpecs[processName]; isKnown {
+		supervisor.events = append(supervisor.events, "delete "+processName)
+	}
+	delete(supervisor.runningSpecs, processName)
 	return nil
 }
 
@@ -123,6 +131,7 @@ func (supervisor *fakeSupervisor) Restart(_ context.Context, processName string)
 	if _, isKnown := supervisor.runningSpecs[processName]; !isKnown {
 		return fmt.Errorf("%s: %w", processName, daemon.ErrUnknownProcess)
 	}
+	supervisor.calls = append(supervisor.calls, "restart "+processName)
 	supervisor.restarted = append(supervisor.restarted, processName)
 	supervisor.events = append(supervisor.events, "restart "+processName)
 	if supervisor.behaviorByProcess[processName] == processEndedAfterItWasReady {
@@ -320,7 +329,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 			ConfigForStack:    nil,
 			ReposNotCloned:    nil,
 			Settings:          config.WorkspaceSettings{Repos: nil, Env: nil, Apps: nil},
-			Machine:           plan.Machine{StateDir: "", Domain: "dev.example.net", ProxyPort: "", Login: "", ShellEnv: nil, IlotBinary: "/opt/ilot/bin/ilot", IlotEnv: nil},
+			Machine:           plan.Machine{StateDir: "", Domain: "dev.example.net", ProxyPort: "", Login: "", ShellEnv: nil, SessionEnv: nil, IlotBinary: "/opt/ilot/bin/ilot", IlotEnv: nil},
 			ShellEnv:          nil,
 		},
 		Supervisor: supervisor,
@@ -526,19 +535,19 @@ func TestStartOfARunningDependencyDoesNotRebuildIt(t *testing.T) {
 	}
 }
 
-func TestStartRestartsADependencyWhoseProcessEnded(t *testing.T) {
+func TestStartStartsAgainADependencyWhoseProcessEnded(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
 	environment.supervisor.setBehavior("internalapi.base.platform", processEndedAfterItWasReady)
-	environment.supervisor.restarted = nil
+	environment.supervisor.startedInOrder = nil
 
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.restarted, "internalapi.base.platform") {
-		t.Errorf("restarted %v, want internalapi.base.platform, whose process ended", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.platform") {
+		t.Errorf("started %v, want internalapi.base.platform, whose process ended", environment.supervisor.startedInOrder)
 	}
-	if slices.Contains(environment.supervisor.restarted, "temporal.base.platform") {
-		t.Errorf("restarted %v, want temporal.base.platform left alone: its process runs", environment.supervisor.restarted)
+	if slices.Contains(environment.supervisor.startedInOrder, "temporal.base.platform") || slices.Contains(environment.supervisor.restarted, "temporal.base.platform") {
+		t.Errorf("started %v, want temporal.base.platform left alone: its process runs", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -552,8 +561,8 @@ func TestStartKeepsACrashedDependencyInItsOwnStack(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.restarted, "internalapi.base.platform") {
-		t.Errorf("restarted %v, want internalapi.base.platform restarted in base", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.platform") {
+		t.Errorf("started %v, want internalapi.base.platform started again in base", environment.supervisor.startedInOrder)
 	}
 	if _, isApplied := environment.supervisor.runningSpecs["internalapi.proj-1234.platform"]; isApplied || slices.Contains(environment.supervisor.startedInOrder, "internalapi.proj-1234.platform") {
 		t.Errorf("started %v, want the crashed dependency kept in base, not moved to the ticket stack", environment.supervisor.startedInOrder)
@@ -605,7 +614,7 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 	}
 }
 
-func TestStartStopsTheAppItStartedWhenItsProcessEnds(t *testing.T) {
+func TestAFailedStartKeepsTheAppAMemberWithItsLog(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("publicapi.base.platform", processEndsAtEveryStart)
 	logFile := filepath.Join(environment.controller.StackDir("base"), "logs", "publicapi.log")
@@ -616,92 +625,14 @@ func TestStartStopsTheAppItStartedWhenItsProcessEnds(t *testing.T) {
 	if _, hasEnded := errors.AsType[*daemon.ExitedError](err); !hasEnded || !strings.Contains(err.Error(), "see "+logFile) {
 		t.Fatalf("Start = %v, want the ended process and its log %s", err, logFile)
 	}
-	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base.platform") {
-		t.Error("publicapi.base.platform ended but stays marked running or in the supervisor")
+	if !environment.isStoredAsRunning(t, "base", "publicapi") || !environment.isApplied("publicapi.base.platform") {
+		t.Error("publicapi.base.platform ended, and it must stay a member that the daemon holds as ended: a failed start does not change ownership")
 	}
 	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isApplied("internalapi.base.platform") {
 		t.Error("internalapi.base.platform started well in the same run but was stopped")
 	}
 	if _, err := os.Stat(logFile); err != nil {
-		t.Errorf("the log of publicapi.base.platform is gone after the cleanup, but the error names it: %v", err)
-	}
-}
-
-func TestStartStopsANamedRunningAppWhoseRestartEnds(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.base, StartOptions{}, "publicapi")
-	environment.supervisor.setBehavior("publicapi.base.platform", processEndsWhileWaitedFor)
-
-	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
-
-	if err == nil || !strings.Contains(err.Error(), "publicapi.base.platform exited with code 1") {
-		t.Fatalf("Start = %v, want the failure of publicapi.base.platform", err)
-	}
-	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base.platform") {
-		t.Error("the named publicapi.base.platform was restarted by this run and ended, but stays marked running or in the supervisor")
-	}
-}
-
-func TestACancelDuringTheCleanupDoesNotCutIt(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("publicapi.base.platform", processEndsAtEveryStart)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	hasPublicapiEnded := false
-	environment.supervisor.onWaitReady = func(processName string) {
-		switch {
-		case processName == "publicapi.base.platform":
-			hasPublicapiEnded = true
-		case processName == "gateway.base.platform" && hasPublicapiEnded:
-			cancel()
-		}
-	}
-
-	err := environment.controller.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
-
-	if err == nil || strings.Contains(err.Error(), "after its failure") {
-		t.Fatalf("Start = %v, want only the failure of publicapi.base.platform", err)
-	}
-	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base.platform") {
-		t.Error("a cancel while the cleanup restarted the gateway left publicapi.base.platform half stopped")
-	}
-}
-
-func TestAFailedCleanupSaysSoAndARetryStillRestartsTheApp(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("standalone.base.platform", processEndsAtEveryStart)
-	environment.supervisor.onWaitReady = func(processName string) {
-		if processName == "standalone.base.platform" {
-			environment.supervisor.applyError = errors.New("the ilot daemon does not answer")
-		}
-	}
-
-	err := environment.controller.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
-
-	if err == nil {
-		t.Fatal("Start = nil, want the failure of standalone.base.platform")
-	}
-	failureIndex := strings.Index(err.Error(), "standalone.base.platform exited with code 1")
-	cleanupIndex := strings.Index(err.Error(), "stop standalone.base.platform after its failure: the ilot daemon does not answer")
-	if failureIndex < 0 || cleanupIndex < failureIndex {
-		t.Fatalf("Start = %v, want the failure of standalone.base.platform first, then the failed stop", err)
-	}
-	if environment.isStoredAsRunning(t, "base", "standalone") || !environment.isApplied("standalone.base.platform") {
-		t.Fatal("want the half-done cleanup: standalone.base.platform stored as stopped, but still held by the supervisor")
-	}
-
-	environment.supervisor.applyError = nil
-	environment.supervisor.onWaitReady = nil
-	environment.supervisor.setBehavior("standalone.base.platform", processEndedAfterItWasReady)
-	environment.supervisor.restarted = nil
-
-	environment.start(t, environment.base, StartOptions{}, "standalone")
-
-	if !slices.Contains(environment.supervisor.restarted, "standalone.base.platform") {
-		t.Errorf("restarted %v, want standalone.base.platform: the supervisor still holds its ended process", environment.supervisor.restarted)
-	}
-	if !environment.isStoredAsRunning(t, "base", "standalone") {
-		t.Error("standalone.base.platform is not marked running after the retry")
+		t.Errorf("the log of publicapi.base.platform is gone, but the error names it: %v", err)
 	}
 }
 
@@ -711,7 +642,7 @@ func TestARetryStartsTheFailedAppAgain(t *testing.T) {
 	if err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{}); err == nil {
 		t.Fatal("Start = nil, want the failure of publicapi.base.platform")
 	}
-	delete(environment.supervisor.behaviorByProcess, "publicapi.base.platform")
+	environment.supervisor.setBehavior("publicapi.base.platform", processEndedAfterItWasReady)
 	environment.supervisor.startedInOrder = nil
 	environment.supervisor.restarted = nil
 	environment.supervisor.waitedReady = nil
@@ -735,10 +666,7 @@ func TestARetryStartsAFailedDependencyWithoutNamingIt(t *testing.T) {
 	if err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
 		t.Fatal("Start = nil, want the failure of internalapi.base.platform")
 	}
-	if environment.isStoredAsRunning(t, "base", "internalapi") || environment.isApplied("internalapi.base.platform") {
-		t.Fatal("internalapi.base.platform ended but stays marked running or in the supervisor")
-	}
-	delete(environment.supervisor.behaviorByProcess, "internalapi.base.platform")
+	environment.supervisor.setBehavior("internalapi.base.platform", processEndedAfterItWasReady)
 	environment.supervisor.startedInOrder = nil
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
@@ -751,18 +679,20 @@ func TestARetryStartsAFailedDependencyWithoutNamingIt(t *testing.T) {
 	}
 }
 
-func TestAFailedTicketStackDependencyNamesTheCommandThatStartsItThereAgain(t *testing.T) {
+func TestARetryStartsAFailedTicketStackDependencyInItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
 	environment.supervisor.setBehavior("internalapi.proj-1234.platform", processEndsAtEveryStart)
-
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
-
-	if err == nil || !strings.HasSuffix(err.Error(), "internalapi ran in proj-1234: name it to start it there again: ilot start internalapi publicapi") {
-		t.Fatalf("Start = %v, want it to end with the command that starts internalapi in proj-1234 again", err)
+	if err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
+		t.Fatal("Start = nil, want the failure of internalapi.proj-1234.platform")
 	}
-	if environment.isStoredAsRunning(t, "proj-1234", "internalapi") || environment.isApplied("internalapi.proj-1234.platform") {
-		t.Error("internalapi.proj-1234.platform ended but stays marked running or in the supervisor")
+	environment.supervisor.setBehavior("internalapi.proj-1234.platform", processEndedAfterItWasReady)
+	environment.supervisor.startedInOrder = nil
+
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.proj-1234.platform") || slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.platform") {
+		t.Errorf("started %v, want internalapi started again in proj-1234, which owns it", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -1191,7 +1121,7 @@ func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 	}
 }
 
-func TestBootStopsAFailedAppAndStartsTheOthers(t *testing.T) {
+func TestBootKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
 	environment.supervisor.simulateDaemonRestart()
@@ -1214,11 +1144,8 @@ func TestBootStopsAFailedAppAndStartsTheOthers(t *testing.T) {
 	if slices.Contains(started, "publicapi.base.platform") {
 		t.Errorf("started %v, want publicapi.base.platform skipped because internalapi.base.platform failed", started)
 	}
-	if environment.isStoredAsRunning(t, "base", "internalapi") || environment.isApplied("internalapi.base.platform") {
-		t.Error("internalapi.base.platform failed at boot but stays marked running or in the supervisor")
-	}
-	if environment.isStoredAsRunning(t, "base", "publicapi") {
-		t.Error("publicapi.base.platform was skipped at boot but is marked running")
+	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isStoredAsRunning(t, "base", "publicapi") {
+		t.Error("a failed or skipped app lost its membership at boot: the next ilot start would not start it again")
 	}
 	if !environment.isStoredAsRunning(t, "base", "temporal") || !environment.isApplied("temporal.base.platform") {
 		t.Error("temporal.base.platform started well at boot but is not kept running")
@@ -1743,6 +1670,6 @@ func TestStartWithNoContainerChecksNoImage(t *testing.T) {
 	}
 }
 
-func fixedShellEnv(valueByKey map[string]string) func() (map[string]string, error) {
-	return func() (map[string]string, error) { return valueByKey, nil }
+func fixedShellEnv(valueByKey map[string]string) func() (map[string]string, map[string]string, error) {
+	return func() (map[string]string, map[string]string, error) { return valueByKey, map[string]string{}, nil }
 }

@@ -420,3 +420,29 @@ func TestHashOfASpecification(t *testing.T) {
 		t.Fatal("a changed variable keeps the hash")
 	}
 }
+
+func TestTheSessionOfASpecificationReachesTheProcessAndLeavesTheHash(t *testing.T) {
+	spec := Spec{Command: "run", Env: map[string]string{"A": "1"}, Session: map[string]string{"LANG": "en_US.UTF-8"}, LogFile: "app.log"}
+	fromAnotherTerminal := spec
+	fromAnotherTerminal.Session = map[string]string{"LANG": "fr_FR.UTF-8", "SSH_AUTH_SOCK": "/tmp/agent"}
+	if spec.Hash() != fromAnotherTerminal.Hash() {
+		t.Fatal("the session of the caller changes the hash, so a command from another terminal replaces the process")
+	}
+
+	supervisor := newTestSupervisor(t, SupervisorOptions{})
+	logFile := filepath.Join(t.TempDir(), "env.log")
+	if _, err := supervisor.Put("env", Spec{Command: `echo "$LANG $A"`, Env: map[string]string{"A": "1", "LANG": "C"}, Session: map[string]string{"LANG": "en_US.UTF-8", "A": "session"}, LogFile: logFile}); err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, supervisor, "env", StateExited)
+	if output, _ := os.ReadFile(logFile); string(output) != "C 1\n" {
+		t.Errorf("the process printed %q, want the values of Env over the session", output)
+	}
+	if _, err := supervisor.Put("session", Spec{Command: `echo "$LANG"`, Session: map[string]string{"LANG": "en_US.UTF-8"}, LogFile: logFile}); err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, supervisor, "session", StateExited)
+	if output, _ := os.ReadFile(logFile); string(output) != "C 1\nen_US.UTF-8\n" {
+		t.Errorf("the log holds %q, want the session value of LANG", output)
+	}
+}

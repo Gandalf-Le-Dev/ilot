@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"os/user"
@@ -119,4 +120,17 @@ func truncate(output []byte) string {
 		return string(output[:longest]) + "..."
 	}
 	return string(output)
+}
+
+// SplitSession takes out of a captured environment each session variable that still has the value of the terminal of the caller.
+// That value depends on the terminal, not on the shell files, so it must not make the processes of two terminals differ.
+func SplitSession(environment map[string]string) (stable, session map[string]string) {
+	stable, session = maps.Clone(environment), map[string]string{}
+	for _, name := range sessionVariables {
+		if value, isSet := os.LookupEnv(name); isSet && stable[name] == value {
+			session[name] = value
+			delete(stable, name)
+		}
+	}
+	return stable, session
 }

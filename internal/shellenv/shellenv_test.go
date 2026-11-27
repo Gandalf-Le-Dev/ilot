@@ -134,3 +134,17 @@ func TestAShellThatDoesNotExitInTimeGivesAnErrorThatNamesTheTimeout(t *testing.T
 		t.Errorf("read = %v, want an error that names the timeout", err)
 	}
 }
+
+func TestSplitSessionKeepsAValueThatAShellFileSets(t *testing.T) {
+	t.Setenv("LANG", "fr_FR.UTF-8")
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+
+	stable, session := SplitSession(map[string]string{"LANG": "en_US.UTF-8", "SSH_AUTH_SOCK": "/tmp/agent.sock", "PATH": "/usr/bin"})
+
+	if stable["LANG"] != "en_US.UTF-8" || stable["PATH"] != "/usr/bin" || session["SSH_AUTH_SOCK"] != "/tmp/agent.sock" {
+		t.Errorf("stable = %v, session = %v; want LANG of the profile kept and the agent of the terminal in the session", stable, session)
+	}
+	if _, isStable := stable["SSH_AUTH_SOCK"]; isStable {
+		t.Error("SSH_AUTH_SOCK of the terminal stays in the stable part")
+	}
+}

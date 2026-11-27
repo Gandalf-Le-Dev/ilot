@@ -17,11 +17,14 @@ import (
 
 type ProcessSpec = plan.ProcessSpec
 
+// ProcessSupervisor is the daemon as a command sees it. Each call names one process, so a command touches only the processes that it acts on.
 type ProcessSupervisor interface {
-	// Apply starts each process that is new or that changed, and removes each process that specs does not name.
-	// It leaves an ended process as it is: only Restart starts it again.
-	Apply(ctx context.Context, specs []ProcessSpec) error
+	// Put starts a process. It replaces a process whose specification changed or that ended, and leaves a live one with the same specification as it is.
+	// It starts the daemon when none runs.
+	Put(ctx context.Context, spec ProcessSpec) error
 	Restart(ctx context.Context, processName string) error
+	// Delete stops a process and forgets it. A process or a daemon that does not exist is no error.
+	Delete(ctx context.Context, processName string) error
 	// Processes is empty when no daemon runs. It never starts one.
 	Processes(ctx context.Context) (map[string]daemon.Process, error)
 	// WaitReady returns a *daemon.ExitedError for an ended process, and a *daemon.NotReadyError after the timeout.
@@ -94,43 +97,23 @@ func withRetryHint(err error) error {
 	return err
 }
 
-func (supervisor *DaemonSupervisor) Apply(ctx context.Context, specs []ProcessSpec) error {
-	if len(specs) == 0 {
-		running, err := supervisor.Processes(ctx)
-		if err != nil || len(running) == 0 {
-			return err
-		}
-	}
+func (supervisor *DaemonSupervisor) Put(ctx context.Context, spec ProcessSpec) error {
 	client, err := supervisor.ensureDaemon(ctx)
 	if err != nil {
 		return err
 	}
-	known, err := supervisor.Processes(ctx)
-	if err != nil {
-		return err
-	}
-	isWanted := map[string]bool{}
-	for _, spec := range specs {
-		isWanted[spec.Name] = true
-	}
-	// The removals come first: a process that goes away can hold what a new one needs.
-	for _, name := range slices.Sorted(maps.Keys(known)) {
-		if isWanted[name] {
-			continue
-		}
-		if err := client.Delete(ctx, name); err != nil {
-			return withRetryHint(err)
-		}
-	}
-	for _, spec := range specs {
-		if process, isKnown := known[spec.Name]; isKnown && process.Hash == spec.Hash() {
-			continue
-		}
-		if _, err := client.Put(ctx, spec.Name, spec.Spec); err != nil {
-			return withRetryHint(fmt.Errorf("start %s: %w", spec.Name, err))
-		}
+	if _, err := client.Put(ctx, spec.Name, spec.Spec); err != nil {
+		return withRetryHint(fmt.Errorf("start %s: %w", spec.Name, err))
 	}
 	return nil
+}
+
+func (supervisor *DaemonSupervisor) Delete(ctx context.Context, processName string) error {
+	err := supervisor.client().Delete(ctx, processName)
+	if errors.Is(err, daemon.ErrDaemonDown) || errors.Is(err, daemon.ErrUnknownProcess) {
+		return nil
+	}
+	return withRetryHint(err)
 }
 
 func (supervisor *DaemonSupervisor) Restart(ctx context.Context, processName string) error {

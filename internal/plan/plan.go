@@ -284,10 +284,15 @@ func (snapshot Snapshot) PlanStart(requested []Instance, skipDependencies bool) 
 	return start
 }
 
-// DropUndeclared takes the membership away from each instance that no loaded configuration declares any more, and gives them.
+// DropUndeclared takes the membership away from each instance of a loaded stack that its configuration no longer declares, and gives them.
+// The stacks whose configuration the command did not load keep their members. So does the base stack:
+// the file of any stack can declare an app with the scope base, and the command reads two of them only.
 func (snapshot Snapshot) DropUndeclared() []Instance {
 	var dropped []Instance
 	for _, wantedInstance := range snapshot.Wanted() {
+		if _, isLoaded := snapshot.Configs[wantedInstance.Stack]; !isLoaded || wantedInstance.Stack == BaseStack {
+			continue
+		}
 		if _, isDeclared := snapshot.Declaration(wantedInstance); !isDeclared {
 			snapshot.SetWanted(wantedInstance, false)
 			dropped = append(dropped, wantedInstance)
