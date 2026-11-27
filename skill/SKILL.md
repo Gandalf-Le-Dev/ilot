@@ -53,7 +53,8 @@ ilot clean                      # ilot rm on every stack whose worktrees are del
 ilot boot --checkout <main checkout>  # runs at login; you do not need it
 ilot restart                    # stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran (ask first)
 ilot --version                  # the version of ilot
-ilot --skill                    # print this skill
+ilot skill print                # print this skill
+ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md
 ```
 
 `ilot start` rebuilds an app that already runs, then restarts it. An app with `watch` in its `ilot.yaml` (the Go APIs: internalapi, publicapi, billingapi) is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot start <app>` again.
