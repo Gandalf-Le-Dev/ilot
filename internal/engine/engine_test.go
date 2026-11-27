@@ -1002,7 +1002,7 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	if !isRunning {
 		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
-	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts 'pl,pm'", `-- 'cd '"'"'/src/shop'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'base'"'"' '"'"'restapi'"'"''`} {
+	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts 'pl,pm'", `-- ''"'"'/opt/ilot/bin/ilot'"'"' restart --workspace '"'"'shop'"'"' --stack '"'"'base'"'"' '"'"'restapi'"'"''`} {
 		if !strings.Contains(watcher.Command, wantPart) {
 			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
 		}
@@ -1031,7 +1031,7 @@ func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
 
 	watcher := environment.supervisor.runningSpecs["portal-standalone-watch.proj-1234.shop"]
-	if !strings.Contains(watcher.Command, "--watch '/src/portal'") || !strings.Contains(watcher.Command, `restart --stack '"'"'proj-1234'"'"' '"'"'portal-standalone'"'"'`) {
+	if !strings.Contains(watcher.Command, "--watch '/src/portal'") || !strings.Contains(watcher.Command, `restart --workspace '"'"'shop'"'"' --stack '"'"'proj-1234'"'"' '"'"'portal-standalone'"'"'`) {
 		t.Errorf("watcher command %q, want the main checkout of portal watched for the stack proj-1234", watcher.Command)
 	}
 }

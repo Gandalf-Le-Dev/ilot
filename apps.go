@@ -15,7 +15,8 @@ import (
 )
 
 type appsCommand struct {
-	JSON bool `help:"Print the apps and the external services as one JSON object, for tools and agents."`
+	JSON      bool      `help:"Print the apps and the external services as one JSON object, for tools and agents."`
+	Selection selection `embed:""`
 }
 
 type declaredServices struct {
@@ -36,7 +37,7 @@ type declaredExternalService struct {
 }
 
 func (command *appsCommand) Run(ctx context.Context) error {
-	currentWorkspace, worktree, err := findCurrentWorkspace()
+	currentWorkspace, worktree, err := selectedWorkspace(command.Selection.Workspace)
 	if err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func (command *appsCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(ctx, store, currentWorkspace, worktree, false, os.Stderr)
+	currentWorkspace, stackName, err := command.Selection.stackOf(ctx, store, currentWorkspace, worktree, false)
 	if err != nil {
 		return err
 	}

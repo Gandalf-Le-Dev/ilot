@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,7 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 // Executor runs the commands that change the stacks: it plans with the snapshot of its Source, then builds, calls the daemon and waits.
@@ -599,6 +601,30 @@ func (writer *linePrefixWriter) Write(content []byte) (int, error) {
 }
 
 func (executor *Executor) Stop(ctx context.Context, stackName string, appNames []string) error {
+	return executor.stop(ctx, stackName, func(current state.State, _ map[string]daemon.Process) ([]plan.Instance, error) {
+		return executor.instancesToStop(current, stackName, appNames)
+	})
+}
+
+// StopStack stops every app that a stack owns, and each app of the stack that the daemon still holds. It stops no dependency in another stack.
+func (executor *Executor) StopStack(ctx context.Context, stackName string) error {
+	return executor.stop(ctx, stackName, func(current state.State, processByName map[string]daemon.Process) ([]plan.Instance, error) {
+		var instances []plan.Instance
+		apps := current.Stacks(executor.Workspace)[stackName].Apps
+		for _, appName := range slices.Sorted(maps.Keys(apps)) {
+			appInstance := plan.Instance{Stack: stackName, App: appName}
+			if _, isHeld := processByName[plan.ProcessName(executor.Workspace, appInstance)]; isHeld || apps[appName].Wanted {
+				instances = append(instances, appInstance)
+			}
+		}
+		if len(instances) == 0 {
+			fmt.Fprintf(executor.Output, "the stack %s runs no app\n", stackName)
+		}
+		return instances, nil
+	})
+}
+
+func (executor *Executor) stop(ctx context.Context, stackName string, instancesOf func(state.State, map[string]daemon.Process) ([]plan.Instance, error)) error {
 	var snapshot plan.Snapshot
 	var stopped []plan.Instance
 	err := executor.underLock(ctx, func() error {
@@ -606,7 +632,7 @@ func (executor *Executor) Stop(ctx context.Context, stackName string, appNames [
 		if err != nil {
 			return err
 		}
-		snapshot, stopped, err = executor.planStop(stackName, appNames, processByName)
+		snapshot, stopped, err = executor.planStop(stackName, instancesOf, processByName)
 		return err
 	})
 	if err != nil {
@@ -621,12 +647,12 @@ func (executor *Executor) Stop(ctx context.Context, stackName string, appNames [
 // planStop takes the membership away from the stopped instances. An app that no ilot.yaml declares any more leaves the state, and gives its ports back.
 // An instance that is no member but that the daemon holds is stopped too: a start that raced an earlier stop can have left it.
 // The snapshot that it gives is the state before the stop, which still names the container of each instance.
-func (executor *Executor) planStop(stackName string, appNames []string, processByName map[string]daemon.Process) (plan.Snapshot, []plan.Instance, error) {
+func (executor *Executor) planStop(stackName string, instancesOf func(state.State, map[string]daemon.Process) ([]plan.Instance, error), processByName map[string]daemon.Process) (plan.Snapshot, []plan.Instance, error) {
 	current, err := executor.loadState()
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
-	stoppedInstances, err := executor.instancesToStop(current, stackName, appNames)
+	stoppedInstances, err := instancesOf(current, processByName)
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
