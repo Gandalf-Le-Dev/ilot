@@ -35,7 +35,7 @@ type declaredExternalService struct {
 }
 
 func (command *appsCommand) Run() error {
-	currentDir, err := os.Getwd()
+	currentDir, err := currentFolder()
 	if err != nil {
 		return err
 	}

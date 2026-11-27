@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 )
 
 func TestNameForCheckout(t *testing.T) {
@@ -76,8 +78,8 @@ func TestNameForCheckoutUsesTheTicketKey(t *testing.T) {
 }
 
 func TestLocateReadsTheBranch(t *testing.T) {
-	mainCheckoutDir := filepath.Join(t.TempDir(), "platform")
-	linkedWorktreeDir := filepath.Join(t.TempDir(), "example-feature")
+	mainCheckoutDir := filepath.Join(realpath.Of(t.TempDir()), "platform")
+	linkedWorktreeDir := filepath.Join(realpath.Of(t.TempDir()), "example-feature")
 	runGit(t, filepath.Dir(mainCheckoutDir), "init", "-q", mainCheckoutDir)
 	runGit(t, mainCheckoutDir, "commit", "-q", "--allow-empty", "-m", "initial")
 	runGit(t, mainCheckoutDir, "worktree", "add", "-q", "-b", "PROJ-1234-x", linkedWorktreeDir)
@@ -102,7 +104,7 @@ func runGit(t *testing.T, dir string, arguments ...string) {
 }
 
 func TestLocateIgnoresTheGitEnvironmentOfAnEnclosingHook(t *testing.T) {
-	decoyRepoDir := filepath.Join(t.TempDir(), "decoy")
+	decoyRepoDir := filepath.Join(realpath.Of(t.TempDir()), "decoy")
 	runGit(t, filepath.Dir(decoyRepoDir), "init", "-q", decoyRepoDir)
 	t.Setenv("GIT_DIR", filepath.Join(decoyRepoDir, ".git"))
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(decoyRepoDir, ".git", "index"))
@@ -119,8 +121,8 @@ func TestLocateIgnoresTheGitEnvironmentOfAnEnclosingHook(t *testing.T) {
 }
 
 func TestLocateFindsTheMainCheckoutFromALinkedWorktree(t *testing.T) {
-	mainCheckoutDir := filepath.Join(t.TempDir(), "platform")
-	linkedWorktreeDir := filepath.Join(t.TempDir(), "proj-1234")
+	mainCheckoutDir := filepath.Join(realpath.Of(t.TempDir()), "platform")
+	linkedWorktreeDir := filepath.Join(realpath.Of(t.TempDir()), "proj-1234")
 	runGit(t, filepath.Dir(mainCheckoutDir), "init", "-q", mainCheckoutDir)
 	runGit(t, mainCheckoutDir, "commit", "-q", "--allow-empty", "-m", "initial")
 	runGit(t, mainCheckoutDir, "worktree", "add", "-q", linkedWorktreeDir)
