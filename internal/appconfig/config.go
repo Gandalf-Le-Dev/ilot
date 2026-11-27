@@ -23,12 +23,15 @@ const (
 )
 
 type Config struct {
-	Domain   string                       `yaml:"domain"`
-	Repos    map[string]RepoConfig        `yaml:"repos"`
-	Env      map[string]string            `yaml:"env"`
+	Domain string                `yaml:"domain"`
+	Repos  map[string]RepoConfig `yaml:"repos"`
+	Env    map[string]string     `yaml:"env"`
+	// The prefix of every build, run and stop command of the repo of this file, for example "mise exec --".
+	Wrap     string                       `yaml:"wrap"`
 	External map[string]ExternalService   `yaml:"external"`
 	Apps     map[string]App               `yaml:"apps"`
 	RepoEnv  map[string]map[string]string `yaml:"-"`
+	RepoWrap map[string]string            `yaml:"-"`
 }
 
 type RepoConfig struct {
@@ -132,12 +135,16 @@ func Merge(configByRepo map[string]Config) (Config, error) {
 		External: map[string]ExternalService{},
 		Apps:     map[string]App{},
 		RepoEnv:  map[string]map[string]string{},
+		RepoWrap: map[string]string{},
 	}
 	var problems []error
 	repoByApp := map[string]string{}
 	for _, repoName := range slices.Sorted(maps.Keys(configByRepo)) {
 		repoConfig := configByRepo[repoName]
 		merged.RepoEnv[repoName] = repoConfig.Env
+		if repoConfig.Wrap != "" {
+			merged.RepoWrap[repoName] = repoConfig.Wrap
+		}
 		for _, appName := range slices.Sorted(maps.Keys(repoConfig.Apps)) {
 			if otherRepo, isTaken := repoByApp[appName]; isTaken {
 				problems = append(problems, fmt.Errorf("app %q is declared by both %s and %s", appName, otherRepo, repoName))

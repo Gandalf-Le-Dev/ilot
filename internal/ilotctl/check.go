@@ -44,7 +44,6 @@ func CheckRendering(config appconfig.Config) []error {
 		IsExternalServiceUp: nil,
 		CheckoutsForStack:   nil,
 		ConfigForStack:      nil,
-		UsesMise:            func(string) bool { return false },
 		ReposNotCloned:      nil,
 		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
 		ShellEnv:            nil,

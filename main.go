@@ -364,7 +364,6 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		IsExternalServiceUp: isListeningOnLocalhost,
 		CheckoutsForStack:   currentWorkspace.checkoutsForStack,
 		ConfigForStack:      currentWorkspace.configForStack,
-		UsesMise:            hasMiseConfig,
 		ReposNotCloned:      currentWorkspace.reposNotCloned(),
 		Personal:            currentWorkspace.settings,
 		ShellEnv:            shellEnv,
