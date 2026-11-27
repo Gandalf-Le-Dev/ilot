@@ -117,16 +117,17 @@ func (client *Client) SetRoutes(ctx context.Context, routes []Route) error {
 	return client.call(ctx, http.MethodPut, "/v1/routes", routeList{Routes: routes}, nil)
 }
 
-// Shutdown returns after every process stopped and the daemon removed its socket file.
-// The daemon removes that file as its last act before it frees the lock, so the next start does not meet the old daemon.
+// Shutdown returns after every process stopped and the daemon is gone.
+// The daemon removes its socket file as its last act before it frees the lock, so the next start does not meet the old daemon.
 func (client *Client) Shutdown(ctx context.Context) error {
-	if err := client.call(ctx, http.MethodPost, "/v1/shutdown", nil, nil); err != nil {
+	var stopped shutdownReply
+	if err := client.call(ctx, http.MethodPost, "/v1/shutdown", nil, &stopped); err != nil {
 		return err
 	}
 	deadline := time.NewTimer(shutdownExitWait)
 	defer deadline.Stop()
 	for {
-		if _, err := os.Lstat(client.socketPath); errors.Is(err, fs.ErrNotExist) {
+		if client.isDaemonGone(ctx, stopped.PID) {
 			return nil
 		}
 		select {
@@ -137,6 +138,18 @@ func (client *Client) Shutdown(ctx context.Context) error {
 		case <-time.After(shutdownPollInterval):
 		}
 	}
+}
+
+// The path alone proves nothing: another caller can start the next daemon, which makes the file again between two polls.
+func (client *Client) isDaemonGone(ctx context.Context, pid int) bool {
+	if _, err := os.Lstat(client.socketPath); errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if pid == 0 {
+		return false
+	}
+	status, err := client.Status(ctx)
+	return err == nil && status.PID != pid
 }
 
 // WaitReady returns a NotReadyError when ctx ends first. The process then still runs.

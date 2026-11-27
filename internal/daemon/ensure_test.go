@@ -328,3 +328,41 @@ func TestCheckPrivateFolder(t *testing.T) {
 		t.Errorf("a state folder is held to the rule of the fallback folder: %v", err)
 	}
 }
+
+func TestShutdownReturnsWhenTheNextDaemonAlreadyHoldsTheSocket(t *testing.T) {
+	helpers := newHelperDaemons(t)
+	const otherCallers = 10
+	for iteration := range 60 {
+		client, err := helpers.starter().Ensure(t.Context())
+		if err != nil {
+			t.Fatalf("iteration %d: %v", iteration, err)
+		}
+		var group sync.WaitGroup
+		var shutdownErr error
+		var shutdownTook time.Duration
+		ensureErrs := make([]error, otherCallers)
+		group.Go(func() {
+			begin := time.Now()
+			shutdownErr = client.Shutdown(t.Context())
+			shutdownTook = time.Since(begin)
+		})
+		// The delays move with the iteration, so that some start falls between two polls of Shutdown.
+		step := time.Duration(300+40*iteration) * time.Microsecond
+		for index := range otherCallers {
+			group.Go(func() {
+				time.Sleep(time.Duration(index) * step)
+				_, ensureErrs[index] = helpers.starter().Ensure(t.Context())
+			})
+		}
+		group.Wait()
+
+		if shutdownErr != nil {
+			t.Fatalf("iteration %d: Shutdown gives %v after %s", iteration, shutdownErr, shutdownTook)
+		}
+		for index, err := range ensureErrs {
+			if err != nil {
+				t.Fatalf("iteration %d: Ensure of the caller %d gives %v", iteration, index, err)
+			}
+		}
+	}
+}
