@@ -71,11 +71,12 @@ func (command *daemonRunCommand) Run(ctx context.Context) error {
 }
 
 type envCommand struct {
-	App string `arg:"" help:"App declared in an ilot.yaml."`
+	App       string    `arg:"" help:"App declared in an ilot.yaml."`
+	Selection selection `embed:""`
 }
 
 func (command *envCommand) Run(ctx context.Context) error {
-	source, stackName, err := sourceForCurrentWorktree(ctx)
+	source, stackName, err := sourceFor(ctx, command.Selection)
 	if err != nil {
 		return err
 	}
@@ -91,14 +92,15 @@ func (command *envCommand) Run(ctx context.Context) error {
 }
 
 type logsCommand struct {
-	App    string `arg:"" help:"App declared in an ilot.yaml."`
-	Follow bool   `short:"f" help:"Keep printing new lines."`
-	Lines  int    `short:"n" default:"100" help:"How many of the last lines to print first."`
-	JSON   bool   `help:"Print each line as the app wrote it. Without it, ilot turns a JSON line into one readable line."`
+	App       string    `arg:"" help:"App declared in an ilot.yaml."`
+	Follow    bool      `short:"f" help:"Keep printing new lines."`
+	Lines     int       `short:"n" default:"100" help:"How many of the last lines to print first."`
+	JSON      bool      `help:"Print each line as the app wrote it. Without it, ilot turns a JSON line into one readable line."`
+	Selection selection `embed:""`
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	source, stackName, err := sourceForCurrentWorktree(ctx)
+	source, stackName, err := sourceFor(ctx, command.Selection)
 	if err != nil {
 		return err
 	}
@@ -114,28 +116,13 @@ func (command *logsCommand) Run(ctx context.Context) error {
 }
 
 type restartCommand struct {
-	Apps    []string      `arg:"" help:"Apps to build again and restart."`
-	Stack   string        `help:"Stack of the apps. The default is the stack of the current folder. The watcher of an app uses it."`
-	Timeout time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
+	Apps      []string      `arg:"" help:"Apps to build again and restart."`
+	Timeout   time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
+	Selection selection     `embed:""`
 }
 
 func (command *restartCommand) Run(ctx context.Context) error {
-	if command.Stack != "" {
-		currentWorkspace, _, err := findCurrentWorkspace()
-		if err != nil {
-			return err
-		}
-		currentWorkspace, store, err := withBindings(currentWorkspace)
-		if err != nil {
-			return err
-		}
-		executor, err := newExecutor(ctx, currentWorkspace, store, command.Stack, command.Timeout)
-		if err != nil {
-			return err
-		}
-		return executor.RestartApps(ctx, command.Stack, command.Apps)
-	}
-	executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -143,7 +130,8 @@ func (command *restartCommand) Run(ctx context.Context) error {
 }
 
 type lsCommand struct {
-	JSON bool `help:"Print the apps, the external services and the checkout of each repo per stack as one JSON object, for tools and agents."`
+	JSON      bool               `help:"Print the apps, the external services and the checkout of each repo per stack as one JSON object, for tools and agents."`
+	Selection workspaceSelection `embed:""`
 }
 
 type lsJSONOutput struct {
@@ -153,24 +141,31 @@ type lsJSONOutput struct {
 }
 
 type rmCommand struct {
-	Stack string `arg:"" help:"Stack to remove, as ilot ls shows it."`
+	Stack     string             `arg:"" help:"Stack to remove, as ilot ls shows it."`
+	Selection workspaceSelection `embed:""`
 }
 
-type cleanCommand struct{}
+type cleanCommand struct {
+	DryRun    bool               `help:"Print what ilot clean would remove, and remove nothing."`
+	Selection workspaceSelection `embed:""`
+}
 
 type startCommand struct {
-	Apps    []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml. With no app, ilot starts every app that the stack owns and that does not run."`
-	All     bool          `help:"Start every app that a stack of the workspace owns and that does not run, for example after the daemon crashed."`
-	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
-	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
+	Apps      []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml. With no app, ilot starts every app that the stack owns and that does not run."`
+	All       bool          `help:"Start every app that a stack of the workspace owns and that does not run, for example after the daemon crashed."`
+	NoDeps    bool          `help:"Start only the named apps, not their dependencies."`
+	Timeout   time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
+	Selection selection     `embed:""`
 }
 
 type stopCommand struct {
-	Apps []string `arg:"" help:"Apps declared in an ilot.yaml."`
+	Apps      []string  `arg:"" optional:"" help:"Apps declared in an ilot.yaml."`
+	All       bool      `help:"Stop every app that the stack owns."`
+	Selection selection `embed:""`
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
-	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
+	executor, _, err := newExecutorFor(ctx, command.Selection.selection(), time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -249,7 +244,7 @@ func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[st
 }
 
 func (command *rmCommand) Run(ctx context.Context) error {
-	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
+	executor, _, err := newExecutorFor(ctx, command.Selection.selection(), time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -257,7 +252,7 @@ func (command *rmCommand) Run(ctx context.Context) error {
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	currentWorkspace, _, err := findCurrentWorkspace()
+	currentWorkspace, _, err := selectedWorkspace(command.Selection.Workspace)
 	if err != nil {
 		return err
 	}
@@ -269,11 +264,18 @@ func (command *cleanCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return cleanStacks(ctx, os.Stdout, currentWorkspace, store, executor)
+	return cleanStacks(ctx, os.Stdout, currentWorkspace, store, executor, command.DryRun)
 }
 
 // cleanStacks keeps a stack whose worktree was moved with git worktree move: it binds the stack to the new folder.
-func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspace.Workspace, store state.Store, executor *engine.Executor) error {
+// A dry run prints what a clean would do, and changes nothing.
+func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspace.Workspace, store state.Store, executor *engine.Executor, isDryRun bool) error {
+	verb := func(done, planned string) string {
+		if isDryRun {
+			return "would " + planned
+		}
+		return done
+	}
 	stacksWithoutWorktrees, err := executor.StacksWithoutWorktrees()
 	if err != nil {
 		return err
@@ -284,10 +286,12 @@ func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspa
 			return err
 		}
 		for _, repoName := range slices.Sorted(maps.Keys(movedByRepo)) {
-			if currentWorkspace, _, err = bindWorktree(ctx, store, currentWorkspace, movedByRepo[repoName], stackName); err != nil {
-				return err
+			if !isDryRun {
+				if currentWorkspace, _, err = bindWorktree(ctx, store, currentWorkspace, movedByRepo[repoName], stackName); err != nil {
+					return err
+				}
 			}
-			fmt.Fprintf(output, "kept %s: its worktree of %s moved to %s\n", stackName, repoName, movedByRepo[repoName].Dir)
+			fmt.Fprintf(output, "%s %s: its worktree of %s moved to %s\n", verb("kept", "keep"), stackName, repoName, movedByRepo[repoName].Dir)
 		}
 		if len(movedByRepo) > 0 {
 			continue
@@ -302,13 +306,15 @@ func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspa
 				wantedApps = append(wantedApps, appName)
 			}
 		}
-		if err := executor.Remove(ctx, stackName); err != nil {
-			return err
+		if !isDryRun {
+			if err := executor.Remove(ctx, stackName); err != nil {
+				return err
+			}
 		}
-		fmt.Fprintf(output, "removed %s\n", stackName)
+		fmt.Fprintf(output, "%s %s\n", verb("removed", "remove"), stackName)
 		slices.Sort(wantedApps)
 		for _, appName := range wantedApps {
-			fmt.Fprintf(output, "  stopped %s\n", appName)
+			fmt.Fprintf(output, "  %s %s\n", verb("stopped", "stop"), appName)
 		}
 	}
 	return nil
@@ -318,20 +324,22 @@ func (command *startCommand) Run(ctx context.Context) error {
 	switch {
 	case command.All && len(command.Apps) > 0:
 		return errors.New("--all starts every app that a stack owns: name no app with it")
+	case command.All && command.Selection.Stack != "":
+		return errors.New("--all starts the apps of every stack: give no --stack with it")
 	case command.All:
-		executor, _, err := newExecutorForCurrentWorktree(ctx, command.Timeout, baseStack)
+		executor, _, err := newExecutorFor(ctx, command.Selection, command.Timeout, baseStack)
 		if err != nil {
 			return err
 		}
 		return executor.StartAll(ctx)
 	case len(command.Apps) == 0:
-		executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
+		executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolder)
 		if err != nil {
 			return err
 		}
 		return executor.StartStack(ctx, stackName)
 	}
-	executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err
 	}
@@ -339,9 +347,18 @@ func (command *startCommand) Run(ctx context.Context) error {
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	executor, stackName, err := newExecutorForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
+	switch {
+	case command.All && len(command.Apps) > 0:
+		return errors.New("--all stops every app that the stack owns: name no app with it")
+	case !command.All && len(command.Apps) == 0:
+		return errors.New("name the apps to stop, or give --all to stop every app that the stack owns")
+	}
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
+	}
+	if command.All {
+		return executor.StopStack(ctx, stackName)
 	}
 	return executor.Stop(ctx, stackName, command.Apps)
 }
@@ -357,8 +374,8 @@ const (
 	stackOfCurrentFolderWithBinding
 )
 
-func newExecutorForCurrentWorktree(ctx context.Context, readyTimeout time.Duration, choice stackChoice) (*engine.Executor, string, error) {
-	currentWorkspace, worktree, err := findCurrentWorkspace()
+func newExecutorFor(ctx context.Context, chosen selection, readyTimeout time.Duration, choice stackChoice) (*engine.Executor, string, error) {
+	currentWorkspace, worktree, err := selectedWorkspace(chosen.Workspace)
 	if err != nil {
 		return nil, "", err
 	}
@@ -368,7 +385,7 @@ func newExecutorForCurrentWorktree(ctx context.Context, readyTimeout time.Durati
 	}
 	stackName := workspace.BaseStackName
 	if choice != baseStack {
-		currentWorkspace, stackName, err = stackOfWorktree(ctx, store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
+		currentWorkspace, stackName, err = chosen.stackOf(ctx, store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding)
 		if err != nil {
 			return nil, "", err
 		}
@@ -377,9 +394,9 @@ func newExecutorForCurrentWorktree(ctx context.Context, readyTimeout time.Durati
 	return executor, stackName, err
 }
 
-// sourceForCurrentWorktree is for a command that only reads: it records no binding.
-func sourceForCurrentWorktree(ctx context.Context) (engine.Source, string, error) {
-	currentWorkspace, worktree, err := findCurrentWorkspace()
+// sourceFor is for a command that only reads: it records no binding.
+func sourceFor(ctx context.Context, chosen selection) (engine.Source, string, error) {
+	currentWorkspace, worktree, err := selectedWorkspace(chosen.Workspace)
 	if err != nil {
 		return engine.Source{}, "", err
 	}
@@ -387,7 +404,7 @@ func sourceForCurrentWorktree(ctx context.Context) (engine.Source, string, error
 	if err != nil {
 		return engine.Source{}, "", err
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(ctx, store, currentWorkspace, worktree, false, os.Stderr)
+	currentWorkspace, stackName, err := chosen.stackOf(ctx, store, currentWorkspace, worktree, false)
 	if err != nil {
 		return engine.Source{}, "", err
 	}

@@ -184,10 +184,6 @@ func (snapshot Snapshot) Watcher(watchedInstance Instance) (ProcessSpec, bool, e
 	if err != nil {
 		return ProcessSpec{}, false, err
 	}
-	checkoutDir, err := snapshot.CheckoutDir(watchedInstance)
-	if err != nil {
-		return ProcessSpec{}, false, err
-	}
 	commandParts := []string{"watchexec --postpone"}
 	for _, watchedPath := range watch.Paths {
 		commandParts = append(commandParts, "--watch "+ShellQuote(filepath.Join(workingDir, watchedPath)))
@@ -195,8 +191,8 @@ func (snapshot Snapshot) Watcher(watchedInstance Instance) (ProcessSpec, bool, e
 	if len(watch.Exts) > 0 {
 		commandParts = append(commandParts, "--exts "+ShellQuote(strings.Join(watch.Exts, ",")))
 	}
-	// ilot finds the workspace from the repo of its folder, and the working folder of an app can be outside every repo.
-	onChange := "cd " + ShellQuote(checkoutDir) + " && " + ShellQuote(snapshot.Machine.IlotBinary) + " restart --stack " + ShellQuote(watchedInstance.Stack) + " " + ShellQuote(watchedInstance.App)
+	// The working folder of an app can be outside every repo, so the flags name the workspace and the stack.
+	onChange := ShellQuote(snapshot.Machine.IlotBinary) + " restart --workspace " + ShellQuote(snapshot.Workspace) + " --stack " + ShellQuote(watchedInstance.Stack) + " " + ShellQuote(watchedInstance.App)
 	commandParts = append(commandParts, "--", ShellQuote(onChange))
 	env := map[string]string{}
 	maps.Copy(env, snapshot.Machine.ShellEnv)

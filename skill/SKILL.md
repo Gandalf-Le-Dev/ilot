@@ -31,7 +31,7 @@ A stack is the set of apps that run for one branch of work.
 - A stack takes each repo's worktree that is bound to it. If a repo has no such worktree, the stack takes that repo's main checkout.
 - If a worktree does not start an app, the app comes from the `base` stack, and `ilot` starts it there if necessary. An app with `scope: stack` is the exception: an app that depends on it always gets the copy of its own stack.
 
-Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps`, `ilot env` and `ilot stack` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
+Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot restart`, `ilot logs`, `ilot apps`, `ilot env` and `ilot stack` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack. From another folder, give `--workspace <name>`, and `--stack <name>` for a stack other than `base`.
 
 ## Commands
 
@@ -45,6 +45,7 @@ ilot start                      # start every app that this folder's stack owns 
 ilot start api --no-deps        # start only this app
 ilot start --all                # start every app that a stack owns and that does not run, after a crash of the daemon
 ilot stop api                   # stop the app in this folder's stack
+ilot stop --all                 # stop every app that this folder's stack owns
 ilot logs api                   # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line
 ilot logs --json api            # the app's own lines, as they are: use this to read logs
 ilot logs -f -n 20 api          # the last 20 lines, then the new ones: it never ends, so run it in the background, never in a foreground command
@@ -53,6 +54,8 @@ ilot check                      # check the ilot.yaml of this folder's repo, wit
 ilot check path/to/ilot.yaml     # check that file
 ilot rm retry-jobs              # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose bound worktrees are all deleted (ask first); a moved worktree keeps its stack
+ilot clean --dry-run            # print what ilot clean would do, and change nothing: run it before you ask
+ilot logs --workspace shop --stack retry-jobs api  # select a workspace and a stack from any folder
 ilot stack show                 # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs      # put this worktree in the stack retry-jobs (ask first)
 ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already

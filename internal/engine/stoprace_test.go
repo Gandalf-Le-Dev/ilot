@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -107,5 +108,27 @@ func TestStopStopsAProcessThatRunsWithoutItsMembership(t *testing.T) {
 
 	if environment.isApplied("standalone.base.shop") || strings.Contains(environment.output.String(), "is not running") {
 		t.Errorf("applied %t, output %q; want the process stopped", environment.isApplied("standalone.base.shop"), environment.output.String())
+	}
+}
+
+func TestStopStackStopsTheMembersOfTheStackOnly(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.supervisor.calls = nil
+
+	if err := environment.executor.StopStack(t.Context(), environment.featureStack); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, stoppedName := range []string{"publicapi.proj-1234.shop", "gateway.proj-1234.shop"} {
+		if !slices.Contains(environment.supervisor.calls, "delete "+stoppedName) {
+			t.Errorf("calls = %v, want %s stopped", environment.supervisor.calls, stoppedName)
+		}
+	}
+	if slices.ContainsFunc(environment.supervisor.calls, func(call string) bool { return strings.HasSuffix(call, ".base.shop") }) {
+		t.Errorf("calls = %v, want no call for the base stack", environment.supervisor.calls)
+	}
+	if environment.isStoredAsRunning(t, environment.featureStack, "publicapi") {
+		t.Error("publicapi.proj-1234.shop is still a member")
 	}
 }

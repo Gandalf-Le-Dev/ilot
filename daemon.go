@@ -97,7 +97,7 @@ func (daemonStopCommand) Run(ctx context.Context) error {
 
 // Outside a workspace, the restart starts no app: only the files of a workspace say how to start its apps.
 func (command *daemonRestartCommand) Run(ctx context.Context) error {
-	executor, _, findErr := newExecutorForCurrentWorktree(ctx, command.Timeout, baseStack)
+	executor, _, findErr := newExecutorFor(ctx, selection{Workspace: "", Stack: ""}, command.Timeout, baseStack)
 	if findErr == nil {
 		return executor.RestartDaemon(ctx)
 	}
