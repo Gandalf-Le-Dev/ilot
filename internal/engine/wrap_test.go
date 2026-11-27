@@ -7,18 +7,18 @@ import (
 
 func TestCommandsOfARepoWithAWrapRunBehindItsPrefix(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.executor.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
-	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
-	portalStandalone.Stop = "api stop --port={{.Ports.http}}"
-	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
+	environment.executor.Config.RepoWrap = map[string]string{"studio": "mise exec --"}
+	studioStandalone := environment.executor.Config.Apps["studio-standalone"]
+	studioStandalone.Stop = "api stop --port={{.Ports.http}}"
+	environment.executor.Config.Apps["studio-standalone"] = studioStandalone
 
-	environment.start(t, environment.base, StartOptions{}, "portal-standalone")
+	environment.start(t, environment.base, StartOptions{}, "studio-standalone")
 
-	if want := (recordedBuild{workingDir: "/src/portal", command: "mise exec -- sh -c 'go build ./cmd/api'"}); len(*environment.builds) != 1 || (*environment.builds)[0] != want {
+	if want := (recordedBuild{workingDir: "/src/studio", command: "mise exec -- sh -c 'go build ./cmd/api'"}); len(*environment.builds) != 1 || (*environment.builds)[0] != want {
 		t.Errorf("builds = %+v, want %+v", *environment.builds, want)
 	}
-	spec := environment.supervisor.runningSpecs["portal-standalone.base.shop"]
-	if !strings.HasPrefix(spec.Command, "mise exec -- sh -c 'api --port=") || !strings.HasSuffix(spec.Command, " --from=/src/portal'") {
+	spec := environment.supervisor.runningSpecs["studio-standalone.base.shop"]
+	if !strings.HasPrefix(spec.Command, "mise exec -- sh -c 'api --port=") || !strings.HasSuffix(spec.Command, " --from=/src/studio'") {
 		t.Errorf("run command = %q, want the run command behind the prefix", spec.Command)
 	}
 	if !strings.HasPrefix(spec.Stop, "mise exec -- sh -c 'api stop --port=") {
@@ -28,7 +28,7 @@ func TestCommandsOfARepoWithAWrapRunBehindItsPrefix(t *testing.T) {
 
 func TestCommandsOfARepoWithoutAWrapRunAsTheyAre(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.executor.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
+	environment.executor.Config.RepoWrap = map[string]string{"studio": "mise exec --"}
 
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 

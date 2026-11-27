@@ -8,11 +8,11 @@ import (
 )
 
 func renderSnapshot() Snapshot {
-	snapshot := snapshotOf(ticket, map[string]config.Config{ticket: shopConfig()}, Instance{Stack: ticket, App: "api"})
-	snapshot.Checkouts = map[string]map[string]string{BaseStack: {"shop": "/code/shop"}, ticket: {"shop": "/code/shop-retry"}}
+	snapshot := snapshotOf(feature, map[string]config.Config{feature: shopConfig()}, Instance{Stack: feature, App: "api"})
+	snapshot.Checkouts = map[string]map[string]string{BaseStack: {"shop": "/code/shop"}, feature: {"shop": "/code/shop-retry"}}
 	snapshot.Machine = Machine{StateDir: "/state", Domain: "localhost", ProxyPort: "4580", Login: "me", ShellEnv: map[string]string{"PATH": "/usr/bin", "LOG": "shell"}, SessionEnv: nil, IlotBinary: "/bin/ilot", IlotEnv: nil}
 	snapshot.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"LOG": "global"}, Apps: nil}
-	snapshot.SetPort(Instance{Stack: ticket, App: "api"}, "http", 20001)
+	snapshot.SetPort(Instance{Stack: feature, App: "api"}, "http", 20001)
 	snapshot.SetPort(Instance{Stack: BaseStack, App: "db"}, "pg", 5432)
 	return snapshot
 }
@@ -22,9 +22,9 @@ func TestSpecRendersAnInstanceFromTheSnapshotAlone(t *testing.T) {
 	api := shopConfig().Apps["api"]
 	api.Run = `api --port={{.Ports.http}} --db=localhost:{{port "db"}}`
 	api.Env = map[string]string{"URL": `{{url "api"}}`, "LOG": "app"}
-	snapshot.Configs[ticket].Apps["api"] = api
+	snapshot.Configs[feature].Apps["api"] = api
 
-	spec, err := snapshot.Spec(Instance{Stack: ticket, App: "api"})
+	spec, err := snapshot.Spec(Instance{Stack: feature, App: "api"})
 
 	if err != nil {
 		t.Fatal(err)
@@ -44,9 +44,9 @@ func TestRoutesComeFromTheStateAloneAndKeepAStoppedApp(t *testing.T) {
 	snapshot := renderSnapshot()
 	api := shopConfig().Apps["api"]
 	api.Route = "http"
-	snapshot.Configs[ticket].Apps["api"] = api
-	snapshot.RecordRoutes([]Instance{{Stack: ticket, App: "api"}})
-	snapshot.SetWanted(Instance{Stack: ticket, App: "api"}, false)
+	snapshot.Configs[feature].Apps["api"] = api
+	snapshot.RecordRoutes([]Instance{{Stack: feature, App: "api"}})
+	snapshot.SetWanted(Instance{Stack: feature, App: "api"}, false)
 	snapshot.Configs = nil
 
 	routes := snapshot.Routes()
@@ -58,12 +58,12 @@ func TestRoutesComeFromTheStateAloneAndKeepAStoppedApp(t *testing.T) {
 
 func TestAReadyCommandRendersAsATemplateBehindTheWrapOfItsRepo(t *testing.T) {
 	snapshot := renderSnapshot()
-	shop := snapshot.Configs[ticket]
+	shop := snapshot.Configs[feature]
 	shop.RepoWrap = map[string]string{"shop": "mise exec --"}
 	db := shop.Apps["db"]
 	db.Ready = config.ReadyCheck{Port: "", Path: "", Command: "pg_isready -p {{.Ports.pg}}"}
 	shop.Apps["db"] = db
-	snapshot.Configs[ticket] = shop
+	snapshot.Configs[feature] = shop
 
 	spec, err := snapshot.Spec(Instance{Stack: BaseStack, App: "db"})
 
@@ -74,10 +74,10 @@ func TestAReadyCommandRendersAsATemplateBehindTheWrapOfItsRepo(t *testing.T) {
 
 func TestARelativeMountSourceIsAFolderOfTheCheckout(t *testing.T) {
 	snapshot := renderSnapshot()
-	snapshot.Configs[ticket].Apps["pg"] = config.App{Container: config.Container{Image: "postgres:17", Ports: map[string]int{"pg": 5432}, Mounts: map[string]string{"data/pg": "/var/lib/postgresql/data", "/abs": "/abs"}}}
-	snapshot.SetPort(Instance{Stack: ticket, App: "pg"}, "pg", 20002)
+	snapshot.Configs[feature].Apps["pg"] = config.App{Container: config.Container{Image: "postgres:17", Ports: map[string]int{"pg": 5432}, Mounts: map[string]string{"data/pg": "/var/lib/postgresql/data", "/abs": "/abs"}}}
+	snapshot.SetPort(Instance{Stack: feature, App: "pg"}, "pg", 20002)
 
-	spec, err := snapshot.Spec(Instance{Stack: ticket, App: "pg"})
+	spec, err := snapshot.Spec(Instance{Stack: feature, App: "pg"})
 
 	if err != nil || !strings.Contains(spec.Command, "-v '/code/shop-retry/data/pg:/var/lib/postgresql/data'") || !strings.Contains(spec.Command, "-v '/abs:/abs'") {
 		t.Errorf("command = %q, %v; want the relative source under the checkout and the absolute one as it is", spec.Command, err)

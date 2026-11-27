@@ -23,14 +23,14 @@ func TestAStartInAStackSendsNoCallForAnotherStack(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	if hashAfter := environment.supervisor.runningSpecs["publicapi.retry-jobs.shop"].Hash(); hashAfter != hashBefore {
-		t.Error("a start in proj-1234 from another terminal replaced publicapi.retry-jobs.shop")
+		t.Error("a start in task-1234 from another terminal replaced publicapi.retry-jobs.shop")
 	}
 	for _, call := range environment.supervisor.calls {
 		if strings.Contains(call, "retry-jobs") || strings.Contains(call, ".base.") {
 			t.Errorf("calls = %v, want none for another stack: %q", environment.supervisor.calls, call)
 		}
 	}
-	if want := []string{"standalone.proj-1234.shop"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
+	if want := []string{"standalone.task-1234.shop"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
 		t.Errorf("started %v, want %v only", environment.supervisor.startedInOrder, want)
 	}
 }
@@ -80,14 +80,14 @@ func TestAStartReplacesTheAppsOfItsStackWhoseTemplatesItChanged(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
 
-	readerCommand := environment.supervisor.runningSpecs["reader.proj-1234.shop"].Command
-	if want := "reader --api=" + strconv.Itoa(environment.appPort(t, "proj-1234", "internalapi")); readerCommand != want {
+	readerCommand := environment.supervisor.runningSpecs["reader.task-1234.shop"].Command
+	if want := "reader --api=" + strconv.Itoa(environment.appPort(t, "task-1234", "internalapi")); readerCommand != want {
 		t.Errorf("reader command = %q, want %q: the stack now runs its own internalapi", readerCommand, want)
 	}
-	if !strings.Contains(environment.output.String(), "restarting reader.proj-1234.shop: this start changed its specification") {
+	if !strings.Contains(environment.output.String(), "restarting reader.task-1234.shop: this start changed its specification") {
 		t.Errorf("output %q, want the line that says why reader restarts", environment.output.String())
 	}
-	if !slices.Contains(environment.supervisor.waitedReady, "reader.proj-1234.shop") {
+	if !slices.Contains(environment.supervisor.waitedReady, "reader.task-1234.shop") {
 		t.Errorf("waited for %v, want reader too: a replaced app is ready before the start ends", environment.supervisor.waitedReady)
 	}
 }
@@ -105,7 +105,7 @@ func TestAStartSaysNothingOfADependentThatAlreadyRunsItsNewSpecification(t *test
 
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
 
-	if strings.Contains(environment.output.String(), "restarting reader") || slices.Contains(environment.supervisor.calls, "put reader.proj-1234.shop") {
+	if strings.Contains(environment.output.String(), "restarting reader") || slices.Contains(environment.supervisor.calls, "put reader.task-1234.shop") {
 		t.Errorf("output %q, calls %v; want no restart of reader, which already runs with the port of this internalapi", environment.output.String(), environment.supervisor.calls)
 	}
 }
@@ -124,7 +124,7 @@ func TestStopRemovesTheContainerOfAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := []string{"ilot_search-cache_proj-1234_shop"}; !slices.Equal(removed, want) {
+	if want := []string{"ilot_search-cache_task-1234_shop"}; !slices.Equal(removed, want) {
 		t.Errorf("removed containers %v, want %v: no daemon stops it", removed, want)
 	}
 }
@@ -142,8 +142,8 @@ func TestStopLeavesTheRemovalOfAHeldContainerToItsStopCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(removed) != 0 || environment.isApplied("search-cache.proj-1234.shop") {
-		t.Errorf("removed %v, applied %t; want the daemon to stop the container with docker stop", removed, environment.isApplied("search-cache.proj-1234.shop"))
+	if len(removed) != 0 || environment.isApplied("search-cache.task-1234.shop") {
+		t.Errorf("removed %v, applied %t; want the daemon to stop the container with docker stop", removed, environment.isApplied("search-cache.task-1234.shop"))
 	}
 }
 

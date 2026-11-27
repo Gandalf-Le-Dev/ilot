@@ -11,21 +11,21 @@ import (
 func TestDeclaredServicesListEveryAppWithItsRepoAndDependenciesThenTheExternalServices(t *testing.T) {
 	config := config.Config{
 		Apps: map[string]config.App{
-			"publicapi":  {Repo: "platform", DependsOn: []string{"gateway", "keyring"}},
-			"gateway":    {Repo: "platform"},
-			"portal-api": {Repo: "portal", DependsOn: []string{"temporal"}},
+			"publicapi":  {Repo: "payments", DependsOn: []string{"router", "secrets"}},
+			"router":     {Repo: "payments"},
+			"studio-api": {Repo: "studio", DependsOn: []string{"scheduler"}},
 		},
-		External: map[string]config.ExternalService{"keyring": {Port: 8200}},
+		External: map[string]config.ExternalService{"secrets": {Port: 8200}},
 	}
 
-	encoded, err := json.Marshal(declaredServicesOf("proj-0001", config))
+	encoded, err := json.Marshal(declaredServicesOf("task-0001", config))
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"stack":"proj-0001",` +
-		`"apps":[{"name":"gateway","repo":"platform","depends_on":[]},{"name":"portal-api","repo":"portal","depends_on":["temporal"]},{"name":"publicapi","repo":"platform","depends_on":["gateway","keyring"]}],` +
-		`"external_services":[{"name":"keyring","port":8200}]}`
+	want := `{"stack":"task-0001",` +
+		`"apps":[{"name":"publicapi","repo":"payments","depends_on":["router","secrets"]},{"name":"router","repo":"payments","depends_on":[]},{"name":"studio-api","repo":"studio","depends_on":["scheduler"]}],` +
+		`"external_services":[{"name":"secrets","port":8200}]}`
 	if string(encoded) != want {
 		t.Errorf("JSON =\n%s\nwant\n%s", encoded, want)
 	}
@@ -34,8 +34,8 @@ func TestDeclaredServicesListEveryAppWithItsRepoAndDependenciesThenTheExternalSe
 func TestDeclaredServicesTableShowsTheAppsThenTheExternalServices(t *testing.T) {
 	services := declaredServices{
 		Stack:            "base",
-		Apps:             []declaredApp{{Name: "gateway", Repo: "platform", DependsOn: []string{}}, {Name: "publicapi", Repo: "platform", DependsOn: []string{"gateway", "keyring"}}},
-		ExternalServices: []declaredExternalService{{Name: "keyring", Port: 8200}},
+		Apps:             []declaredApp{{Name: "router", Repo: "payments", DependsOn: []string{}}, {Name: "publicapi", Repo: "payments", DependsOn: []string{"router", "secrets"}}},
+		ExternalServices: []declaredExternalService{{Name: "secrets", Port: 8200}},
 	}
 	var output bytes.Buffer
 
@@ -45,18 +45,18 @@ func TestDeclaredServicesTableShowsTheAppsThenTheExternalServices(t *testing.T) 
 
 	want := "stack: base\n\n" +
 		"APP        REPO      DEPENDS ON\n" +
-		"gateway    platform  \n" +
-		"publicapi  platform  gateway, keyring\n" +
+		"router     payments  \n" +
+		"publicapi  payments  router, secrets\n" +
 		"\n" +
 		"EXTERNAL  PORT\n" +
-		"keyring   8200\n"
+		"secrets   8200\n"
 	if output.String() != want {
 		t.Errorf("table =\n%q\nwant\n%q", output.String(), want)
 	}
 }
 
 func TestDeclaredServicesTableLeavesOutTheExternalTableWhenNoneIsDeclared(t *testing.T) {
-	services := declaredServices{Stack: "base", Apps: []declaredApp{{Name: "gateway", Repo: "platform", DependsOn: []string{}}}, ExternalServices: []declaredExternalService{}}
+	services := declaredServices{Stack: "base", Apps: []declaredApp{{Name: "router", Repo: "payments", DependsOn: []string{}}}, ExternalServices: []declaredExternalService{}}
 	var output bytes.Buffer
 
 	if err := printDeclaredServices(&output, services); err != nil {
@@ -64,8 +64,8 @@ func TestDeclaredServicesTableLeavesOutTheExternalTableWhenNoneIsDeclared(t *tes
 	}
 
 	want := "stack: base\n\n" +
-		"APP      REPO      DEPENDS ON\n" +
-		"gateway  platform  \n"
+		"APP     REPO      DEPENDS ON\n" +
+		"router  payments  \n"
 	if output.String() != want {
 		t.Errorf("table =\n%q\nwant\n%q", output.String(), want)
 	}

@@ -74,9 +74,9 @@ func TestDoctorWithABrokenGlobalFileSaysSoAndTestsNoDefaultAddress(t *testing.T)
 	}
 }
 
-func TestDoctorReportsTheStateOfTheCompanyVersionWithTheCommandThatClearsIt(t *testing.T) {
+func TestDoctorReportsTheStateOfTheOlderVersionWithTheCommandThatClearsIt(t *testing.T) {
 	machine := healthyMachine(t)
-	for _, oldDir := range []string{"stacks/master", "stacks/devbox", "process-compose"} {
+	for _, oldDir := range []string{"stacks/master", "stacks/feature-x", "process-compose"} {
 		if err := os.MkdirAll(filepath.Join(machine.StateDir, oldDir), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestDoctorReportsTheStateOfTheCompanyVersionWithTheCommandThatClearsIt(t *t
 	oldState := checkNamed(t, machine.run(t.Context()), "old state")
 
 	wants := []string{
-		"(devbox, master)",
+		"(feature-x, master)",
 		"rm -rf " + filepath.Join(machine.StateDir, "stacks"),
 		"rm -rf " + filepath.Join(machine.StateDir, "process-compose"),
 		"rm " + oldPersonalFile,

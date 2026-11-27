@@ -64,9 +64,9 @@ func TestAStartWritesARecordForEachPortEachStateChangeAndEachDaemonCall(t *testi
 		}
 	}
 	if port := environment.appPort(t, environment.featureStack, "publicapi"); !has(func(record auditRecord) bool {
-		return record.Message == "port given" && record.Process == "publicapi.proj-1234.shop" && record.PortName == "http" && record.Port == port
+		return record.Message == "port given" && record.Process == "publicapi.task-1234.shop" && record.PortName == "http" && record.Port == port
 	}) {
-		t.Errorf("no record of the port %d of publicapi.proj-1234.shop in %+v", port, parsed)
+		t.Errorf("no record of the port %d of publicapi.task-1234.shop in %+v", port, parsed)
 	}
 	if !has(func(record auditRecord) bool { return record.Message == "state saved" }) || !has(func(record auditRecord) bool { return record.Call == "routes" }) {
 		t.Errorf("records = %+v, want the save of the state and the call that sends the routes", parsed)

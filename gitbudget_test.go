@@ -52,7 +52,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  front: {run: front, depends_on: [api]}\n"})
 	gitRepoAt(t, filepath.Join(codeDir, "jobs"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  worker: {run: worker}\n"})
 	webWorktreeDir := filepath.Join(codeDir, "web-retry")
-	runGitInTest(t, filepath.Join(codeDir, "web"), "worktree", "add", "-q", "-b", "PROJ-1-retry", webWorktreeDir)
+	runGitInTest(t, filepath.Join(codeDir, "web"), "worktree", "add", "-q", "-b", "TASK-1-retry", webWorktreeDir)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	git, gitProcessCount := countingGit()
 
@@ -65,8 +65,8 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 		t.Fatal(err)
 	}
 	currentWorkspace, stackName, err := stackOfWorktree(t.Context(), store, currentWorkspace, worktree, true, io.Discard)
-	if err != nil || stackName != "proj-1" {
-		t.Fatalf("stackOfWorktree = %q, %v; want proj-1", stackName, err)
+	if err != nil || stackName != "task-1" {
+		t.Fatalf("stackOfWorktree = %q, %v; want task-1", stackName, err)
 	}
 	executor, err := newExecutor(t.Context(), currentWorkspace, store, stackName, time.Second)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	}
 
 	if len(supervisor.started) != 3 {
-		t.Fatalf("the start reached %v, want front in proj-1, with api and worker in base", supervisor.started)
+		t.Fatalf("the start reached %v, want front in task-1, with api and worker in base", supervisor.started)
 	}
 	if *gitProcessCount > 5 {
 		t.Errorf("ilot start ran %d git processes in a workspace of 3 repos, want 5 at most", *gitProcessCount)

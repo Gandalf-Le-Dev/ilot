@@ -34,8 +34,8 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row := rowFor(listing.Apps, "proj-1234", "publicapi"); row.Status != "down" {
-		t.Errorf("publicapi.proj-1234 = %q, want down: the stack owns it and the daemon does not run it", row.Status)
+	if row := rowFor(listing.Apps, "task-1234", "publicapi"); row.Status != "down" {
+		t.Errorf("publicapi.task-1234 = %q, want down: the stack owns it and the daemon does not run it", row.Status)
 	}
 	if row := rowFor(listing.Apps, "base", "standalone"); row.Status != "stopped" {
 		t.Errorf("standalone.base = %q, want stopped: no stack owns it", row.Status)
@@ -49,14 +49,14 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 	}
 
 	started := environment.supervisor.startedInOrder
-	for _, processName := range []string{"temporal.base.shop", "gateway.proj-1234.shop", "internalapi.base.shop", "publicapi.proj-1234.shop"} {
+	for _, processName := range []string{"scheduler.base.shop", "router.task-1234.shop", "internalapi.base.shop", "publicapi.task-1234.shop"} {
 		if !slices.Contains(started, processName) {
 			t.Errorf("started %v, want %s back", started, processName)
 		}
 	}
-	for _, dependency := range []string{"temporal.base.shop", "gateway.proj-1234.shop", "internalapi.base.shop"} {
-		if slices.Index(started, dependency) > slices.Index(started, "publicapi.proj-1234.shop") {
-			t.Errorf("started %v, want %s before publicapi.proj-1234.shop", started, dependency)
+	for _, dependency := range []string{"scheduler.base.shop", "router.task-1234.shop", "internalapi.base.shop"} {
+		if slices.Index(started, dependency) > slices.Index(started, "publicapi.task-1234.shop") {
+			t.Errorf("started %v, want %s before publicapi.task-1234.shop", started, dependency)
 		}
 	}
 	if slices.Contains(started, "standalone.base.shop") {
@@ -71,48 +71,48 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 func TestStartAllSendsNoCallForAMemberThatRuns(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-	environment.supervisor.forgetProcess("publicapi.proj-1234.shop")
+	environment.supervisor.forgetProcess("publicapi.task-1234.shop")
 	environment.supervisor.calls = nil
 
 	if err := environment.executor.StartAll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
-	if want := []string{"put publicapi.proj-1234.shop"}; !slices.Equal(environment.supervisor.calls, want) {
+	if want := []string{"put publicapi.task-1234.shop"}; !slices.Equal(environment.supervisor.calls, want) {
 		t.Errorf("calls = %v, want %v", environment.supervisor.calls, want)
 	}
 }
 
-// brokenTemplateInAStack makes members of proj-1234 whose run template no longer renders, as after an edit of its ilot.yaml.
+// brokenTemplateInAStack makes members of task-1234 whose run template no longer renders, as after an edit of its ilot.yaml.
 func brokenTemplateInAStack(t *testing.T, environment testEnvironment) {
 	t.Helper()
 	baseConfig := testConfig()
-	ticketConfig := configWithApps(baseConfig, map[string]config.App{
+	featureConfig := configWithApps(baseConfig, map[string]config.App{
 		"reader":        {Scope: "stack", Run: "reader"},
 		"reader-client": {Scope: "stack", Run: "client", DependsOn: []string{"reader"}},
 	})
-	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": ticketConfig})
-	environment.executor.Config = ticketConfig
+	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "task-1234": featureConfig})
+	environment.executor.Config = featureConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "reader-client")
 	environment.executor.Config = baseConfig
 	environment.start(t, environment.base, StartOptions{}, "standalone")
-	ticketConfig.Apps["reader"] = config.App{Scope: "stack", Run: "sleep {{.Ports.nope}}"}
+	featureConfig.Apps["reader"] = config.App{Scope: "stack", Run: "sleep {{.Ports.nope}}"}
 	environment.supervisor.simulateDaemonRestart()
 }
 
 func checkOnlyTheBrokenStackStaysDown(t *testing.T, environment testEnvironment, err error) {
 	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), "reader.proj-1234.shop does not start") || !strings.Contains(err.Error(), "reader-client.proj-1234.shop skipped: it depends on reader.proj-1234.shop") {
+	if err == nil || !strings.Contains(err.Error(), "reader.task-1234.shop does not start") || !strings.Contains(err.Error(), "reader-client.task-1234.shop skipped: it depends on reader.task-1234.shop") {
 		t.Errorf("error = %v, want the broken template and its dependent named", err)
 	}
 	started := environment.supervisor.startedInOrder
 	if !slices.Contains(started, "standalone.base.shop") {
 		t.Errorf("started %v, want standalone.base.shop back: its stack has no broken template", started)
 	}
-	if slices.Contains(started, "reader.proj-1234.shop") || slices.Contains(started, "reader-client.proj-1234.shop") {
+	if slices.Contains(started, "reader.task-1234.shop") || slices.Contains(started, "reader-client.task-1234.shop") {
 		t.Errorf("started %v, want reader and reader-client left down", started)
 	}
-	if !environment.isStoredAsRunning(t, "proj-1234", "reader") {
+	if !environment.isStoredAsRunning(t, "task-1234", "reader") {
 		t.Error("reader lost its membership, want it kept for the next start")
 	}
 }
@@ -168,7 +168,7 @@ func TestAStartWithNoAppStartsTheMembersOfItsStackAndTheirDependencies(t *testin
 	}
 
 	started := environment.supervisor.startedInOrder
-	for _, processName := range []string{"temporal.base.shop", "gateway.proj-1234.shop", "internalapi.base.shop", "publicapi.proj-1234.shop"} {
+	for _, processName := range []string{"scheduler.base.shop", "router.task-1234.shop", "internalapi.base.shop", "publicapi.task-1234.shop"} {
 		if !slices.Contains(started, processName) {
 			t.Errorf("started %v, want %s", started, processName)
 		}
@@ -185,7 +185,7 @@ func TestAStartWithNoAppInAStackThatOwnsNoAppSaysSo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(environment.supervisor.startedInOrder) != 0 || !strings.Contains(environment.output.String(), "the stack proj-1234 owns no app") {
+	if len(environment.supervisor.startedInOrder) != 0 || !strings.Contains(environment.output.String(), "the stack task-1234 owns no app") {
 		t.Errorf("started %v, output %q; want nothing started and a line that says why", environment.supervisor.startedInOrder, environment.output.String())
 	}
 }

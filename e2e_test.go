@@ -269,12 +269,12 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	}
 
 	worktree := filepath.Join(machine.homeDir, "src", "shop-retry")
-	machine.git(mainCheckout, "worktree", "add", "--quiet", worktree, "-b", "PROJ-1-retry-jobs")
+	machine.git(mainCheckout, "worktree", "add", "--quiet", worktree, "-b", "TASK-1-retry-jobs")
 	machine.ilot(worktree, "start", "hello")
-	machine.wantBody("hello.proj-1.shop.localhost", "hello from proj-1\n")
+	machine.wantBody("hello.task-1.shop.localhost", "hello from task-1\n")
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")
 
-	if status, body, err := machine.get("unknown.localhost"); err != nil || status != http.StatusNotFound || !strings.Contains(body, "hello.proj-1.shop.localhost") {
+	if status, body, err := machine.get("unknown.localhost"); err != nil || status != http.StatusNotFound || !strings.Contains(body, "hello.task-1.shop.localhost") {
 		t.Errorf("GET of an unknown host = %d %q, %v; want the 404 page that lists the routes", status, body, err)
 	}
 
@@ -298,12 +298,12 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Fatal("the proxy still answers after the daemon was killed")
 	}
 
-	// The first start bound the worktree to proj-1, so another branch does not move it to another stack.
+	// The first start bound the worktree to task-1, so another branch does not move it to another stack.
 	machine.git(worktree, "switch", "--quiet", "--create", "another-idea")
-	if stackOutput := machine.ilot(worktree, "stack", "show"); !strings.Contains(stackOutput, "stack: proj-1 (this worktree is bound to it)") {
-		t.Errorf("ilot stack show after git switch printed %q, want the stack proj-1", stackOutput)
+	if stackOutput := machine.ilot(worktree, "stack", "show"); !strings.Contains(stackOutput, "stack: task-1 (this worktree is bound to it)") {
+		t.Errorf("ilot stack show after git switch printed %q, want the stack task-1", stackOutput)
 	}
-	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "down" || statusByApp["hello.proj-1"] != "down" {
+	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "down" || statusByApp["hello.task-1"] != "down" {
 		t.Errorf("ilot ls after the kill = %v, want both apps down", statusByApp)
 	}
 	if listOutput := machine.ilot(worktree, "ls"); !strings.Contains(listOutput, "ilot start --all starts them again") {
@@ -311,17 +311,17 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	}
 	machine.ilot(worktree, "start", "--all")
 
-	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.base.shop"], pidsBeforeTheKill["hello.proj-1.shop"])
+	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.base.shop"], pidsBeforeTheKill["hello.task-1.shop"])
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")
-	machine.wantBody("hello.proj-1.shop.localhost", "hello from proj-1\n")
-	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "ready" || statusByApp["hello.proj-1"] != "ready" {
+	machine.wantBody("hello.task-1.shop.localhost", "hello from task-1\n")
+	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "ready" || statusByApp["hello.task-1"] != "ready" {
 		t.Errorf("ilot ls = %v, want both apps ready", statusByApp)
 	}
 
 	pidByName := machine.appPIDs()
 	machine.ilot(worktree, "stop", "hello")
-	waitUntilGone(t, "the stopped app", pidByName["hello.proj-1.shop"])
-	if status, body, err := machine.get("hello.proj-1.shop.localhost"); err != nil || status != http.StatusServiceUnavailable || !strings.Contains(body, "ilot start hello") {
+	waitUntilGone(t, "the stopped app", pidByName["hello.task-1.shop"])
+	if status, body, err := machine.get("hello.task-1.shop.localhost"); err != nil || status != http.StatusServiceUnavailable || !strings.Contains(body, "ilot start hello") {
 		t.Errorf("GET of the stopped app = %d %q, %v; want the 503 page with the command that starts it", status, body, err)
 	}
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")

@@ -9,7 +9,7 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
-const ticket = "retry-jobs"
+const feature = "retry-jobs"
 
 func shopConfig() config.Config {
 	return config.Config{
@@ -35,7 +35,7 @@ func snapshotOf(own string, configs map[string]config.Config, wanted ...Instance
 }
 
 func TestMembershipDecidesTheStackThatServesAnApp(t *testing.T) {
-	configs := map[string]config.Config{ticket: shopConfig()}
+	configs := map[string]config.Config{feature: shopConfig()}
 	tests := []struct {
 		name   string
 		wanted []Instance
@@ -43,14 +43,14 @@ func TestMembershipDecidesTheStackThatServesAnApp(t *testing.T) {
 		want   string
 	}{
 		{name: "an app that the stack does not own comes from base", wanted: nil, app: "db", want: BaseStack},
-		{name: "an app that the stack owns comes from the stack", wanted: []Instance{{Stack: ticket, App: "db"}}, app: "db", want: ticket},
-		{name: "an app with the scope stack always comes from the stack", wanted: nil, app: "cache", want: ticket},
-		{name: "an app with the scope base always comes from base", wanted: []Instance{{Stack: ticket, App: "auth"}}, app: "auth", want: BaseStack},
+		{name: "an app that the stack owns comes from the stack", wanted: []Instance{{Stack: feature, App: "db"}}, app: "db", want: feature},
+		{name: "an app with the scope stack always comes from the stack", wanted: nil, app: "cache", want: feature},
+		{name: "an app with the scope base always comes from base", wanted: []Instance{{Stack: feature, App: "auth"}}, app: "auth", want: BaseStack},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := snapshotOf(ticket, configs, test.wanted...).Serving(ticket, test.app); got != test.want {
-				t.Errorf("Serving(%s, %s) = %s, want %s", ticket, test.app, got, test.want)
+			if got := snapshotOf(feature, configs, test.wanted...).Serving(feature, test.app); got != test.want {
+				t.Errorf("Serving(%s, %s) = %s, want %s", feature, test.app, got, test.want)
 			}
 		})
 	}
@@ -58,18 +58,18 @@ func TestMembershipDecidesTheStackThatServesAnApp(t *testing.T) {
 
 func TestEachInstanceUsesTheConfigurationOfItsOwnStack(t *testing.T) {
 	baseConfig := shopConfig()
-	ticketConfig := shopConfig()
-	ticketConfig.Apps["api"] = config.App{Run: "api --retry", Ports: []string{"http"}}
-	ticketConfig.Apps["iam"] = config.App{Run: "iam", Scope: config.ScopeBase}
-	ticketConfig.Apps["search"] = config.App{Run: "search"}
-	snapshot := snapshotOf(ticket, map[string]config.Config{BaseStack: baseConfig, ticket: ticketConfig})
+	featureConfig := shopConfig()
+	featureConfig.Apps["api"] = config.App{Run: "api --retry", Ports: []string{"http"}}
+	featureConfig.Apps["iam"] = config.App{Run: "iam", Scope: config.ScopeBase}
+	featureConfig.Apps["search"] = config.App{Run: "search"}
+	snapshot := snapshotOf(feature, map[string]config.Config{BaseStack: baseConfig, feature: featureConfig})
 
 	tests := []struct {
 		instance     Instance
 		wantRun      string
 		wantDeclared bool
 	}{
-		{instance: Instance{Stack: ticket, App: "api"}, wantRun: "api --retry", wantDeclared: true},
+		{instance: Instance{Stack: feature, App: "api"}, wantRun: "api --retry", wantDeclared: true},
 		{instance: Instance{Stack: BaseStack, App: "api"}, wantRun: "api", wantDeclared: true},
 		{instance: Instance{Stack: BaseStack, App: "iam"}, wantRun: "iam", wantDeclared: true},
 		{instance: Instance{Stack: BaseStack, App: "search"}, wantRun: "", wantDeclared: false},
@@ -83,7 +83,7 @@ func TestEachInstanceUsesTheConfigurationOfItsOwnStack(t *testing.T) {
 }
 
 func TestStartOrderPutsEachDependencyFirstInTheStackThatServesIt(t *testing.T) {
-	configs := map[string]config.Config{ticket: shopConfig()}
+	configs := map[string]config.Config{feature: shopConfig()}
 	tests := []struct {
 		name          string
 		requested     []string
@@ -95,27 +95,27 @@ func TestStartOrderPutsEachDependencyFirstInTheStackThatServesIt(t *testing.T) {
 		{
 			name:          "dependencies come from base, and a scope stack dependency from the stack of its dependent",
 			requested:     []string{"front"},
-			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: BaseStack, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: BaseStack, App: "api"}, {Stack: ticket, App: "front"}},
+			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: BaseStack, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: BaseStack, App: "api"}, {Stack: feature, App: "front"}},
 			wantExternals: []string{"vault"},
 		},
 		{
 			name:          "a dependency that the command names runs in the stack",
 			requested:     []string{"front", "api"},
-			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: ticket, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: ticket, App: "api"}, {Stack: ticket, App: "front"}},
+			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: feature, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: feature, App: "api"}, {Stack: feature, App: "front"}},
 			wantExternals: []string{"vault"},
 		},
 		{
 			name:          "a dependency that the stack owns runs in the stack",
 			requested:     []string{"front"},
-			wanted:        []Instance{{Stack: ticket, App: "api"}},
-			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: ticket, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: ticket, App: "api"}, {Stack: ticket, App: "front"}},
+			wanted:        []Instance{{Stack: feature, App: "api"}},
+			wantOrder:     []Instance{{Stack: BaseStack, App: "db"}, {Stack: feature, App: "cache"}, {Stack: BaseStack, App: "auth"}, {Stack: feature, App: "api"}, {Stack: feature, App: "front"}},
 			wantExternals: []string{"vault"},
 		},
 		{
 			name:      "no dependency with skip",
 			requested: []string{"front"},
 			skip:      true,
-			wantOrder: []Instance{{Stack: ticket, App: "front"}},
+			wantOrder: []Instance{{Stack: feature, App: "front"}},
 		},
 		{
 			name:      "an app with the scope base runs in base",
@@ -125,8 +125,8 @@ func TestStartOrderPutsEachDependencyFirstInTheStackThatServesIt(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			snapshot := snapshotOf(ticket, configs, test.wanted...)
-			requested, err := snapshot.Instances(ticket, test.requested)
+			snapshot := snapshotOf(feature, configs, test.wanted...)
+			requested, err := snapshot.Instances(feature, test.requested)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,10 +139,10 @@ func TestStartOrderPutsEachDependencyFirstInTheStackThatServesIt(t *testing.T) {
 }
 
 func TestAnUnknownAppNamesTheKnownAppsAndTheReposThatAreNotCloned(t *testing.T) {
-	snapshot := snapshotOf(ticket, map[string]config.Config{ticket: shopConfig()})
+	snapshot := snapshotOf(feature, map[string]config.Config{feature: shopConfig()})
 	snapshot.ReposNotCloned = map[string]string{"web": "/code/web"}
 
-	_, err := snapshot.Instances(ticket, []string{"nope"})
+	_, err := snapshot.Instances(feature, []string{"nope"})
 
 	if err == nil || !containsAll(err.Error(), `unknown app "nope"`, "single", "repo web is not at /code/web", "workspaces.shop.repos.web") {
 		t.Errorf("Instances = %v, want the known apps and the repo that is not cloned", err)
@@ -150,9 +150,9 @@ func TestAnUnknownAppNamesTheKnownAppsAndTheReposThatAreNotCloned(t *testing.T) 
 }
 
 func TestPlanStartMakesEveryInstanceAMemberAndListsThePortsToGive(t *testing.T) {
-	snapshot := snapshotOf(ticket, map[string]config.Config{ticket: shopConfig()})
+	snapshot := snapshotOf(feature, map[string]config.Config{feature: shopConfig()})
 	snapshot.SetPort(Instance{Stack: BaseStack, App: "auth"}, "http", 20005)
-	requested, err := snapshot.Instances(ticket, []string{"api"})
+	requested, err := snapshot.Instances(feature, []string{"api"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,9 +171,9 @@ func TestPlanStartMakesEveryInstanceAMemberAndListsThePortsToGive(t *testing.T) 
 		t.Errorf("fixed ports = %v, want %v", start.FixedPorts, want)
 	}
 	wantNeeds := []PortNeed{
-		{Instance: Instance{Stack: ticket, App: "cache"}, PortName: "redis"},
-		{Instance: Instance{Stack: ticket, App: "api"}, PortName: "http"},
-		{Instance: Instance{Stack: ticket, App: "api"}, PortName: "admin"},
+		{Instance: Instance{Stack: feature, App: "cache"}, PortName: "redis"},
+		{Instance: Instance{Stack: feature, App: "api"}, PortName: "http"},
+		{Instance: Instance{Stack: feature, App: "api"}, PortName: "admin"},
 	}
 	if !slices.Equal(start.PortNeeds, wantNeeds) {
 		t.Errorf("port needs = %v, want %v", start.PortNeeds, wantNeeds)
@@ -181,9 +181,9 @@ func TestPlanStartMakesEveryInstanceAMemberAndListsThePortsToGive(t *testing.T) 
 }
 
 func TestAFixedPortIsForTheBaseStackOnly(t *testing.T) {
-	snapshot := snapshotOf(ticket, map[string]config.Config{ticket: shopConfig()})
-	if ports := snapshot.FixedPorts(Instance{Stack: ticket, App: "db"}); len(ports) != 0 {
-		t.Errorf("fixed ports of db in %s = %v, want none: two stacks would ask for one port", ticket, ports)
+	snapshot := snapshotOf(feature, map[string]config.Config{feature: shopConfig()})
+	if ports := snapshot.FixedPorts(Instance{Stack: feature, App: "db"}); len(ports) != 0 {
+		t.Errorf("fixed ports of db in %s = %v, want none: two stacks would ask for one port", feature, ports)
 	}
 	if ports := snapshot.FixedPorts(Instance{Stack: BaseStack, App: "db"}); ports["pg"] != 5432 {
 		t.Errorf("fixed ports of db in base = %v, want pg 5432", ports)

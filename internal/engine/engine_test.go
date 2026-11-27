@@ -219,16 +219,16 @@ func (environment testEnvironment) executorOfANewCommand() *Executor {
 
 func testConfig() config.Config {
 	const buildShop = "go build -o {{.BinDir}}/shop ./cmd/shop"
-	const gatewayAddress = `http://localhost:{{port "gateway" "http"}}`
+	const routerAddress = `http://localhost:{{port "router" "http"}}`
 	return config.Config{
 		External: map[string]config.ExternalService{
-			"keyring":   {Port: 8200, StartHint: "restart base"},
+			"secrets":   {Port: 8200, StartHint: "restart base"},
 			"legacyapi": {Port: 10004, StartHint: "start it by hand"},
 		},
 		Apps: map[string]config.App{
-			"temporal": {
+			"scheduler": {
 				Scope:      "base",
-				Run:        "temporal server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
+				Run:        "scheduler server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
 				Ports:      []string{"grpc", "ui"},
 				FixedPorts: map[string]int{"grpc": 7233, "ui": 10012},
 				Route:      "ui",
@@ -250,27 +250,27 @@ func testConfig() config.Config {
 				FixedPorts: map[string]int{"http": 10007},
 				Route:      "http",
 			},
-			"gateway": {
+			"router": {
 				Scope:      "stack",
-				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
+				Run:        "routerd -listen-addr :{{.Ports.http}}",
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 9090},
 			},
 			"internalapi": {
 				Build:     buildShop,
 				Run:       "{{.BinDir}}/shop api internalapi --port={{.Ports.http}}",
-				Env:       map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},
+				Env:       map[string]string{"ROUTER_URL": routerAddress, "SCHEDULER_ADDRESS": `localhost:{{port "scheduler" "grpc"}}`},
 				Ports:     []string{"http"},
 				Route:     "http",
-				DependsOn: []string{"gateway", "temporal"},
+				DependsOn: []string{"router", "scheduler"},
 			},
 			"publicapi": {
 				Build:     buildShop,
 				Run:       "{{.BinDir}}/shop api publicapi --port={{.Ports.http}}",
-				Env:       map[string]string{"GATEWAY_URL": gatewayAddress},
+				Env:       map[string]string{"ROUTER_URL": routerAddress},
 				Ports:     []string{"http"},
 				Route:     "http",
-				DependsOn: []string{"gateway", "internalapi", "temporal", "keyring"},
+				DependsOn: []string{"router", "internalapi", "scheduler", "secrets"},
 			},
 			"standalone": {
 				Run:   "standalone --port={{.Ports.http}}",
@@ -280,15 +280,15 @@ func testConfig() config.Config {
 				Scope: "stack",
 				Route: "http",
 				Env: map[string]string{
-					"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`,
-					"CACHE_URL":   `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
-					"REGION":      "DEV1",
+					"ROUTER_URL": `http://{{host "router"}}:{{port "router" "http"}}`,
+					"CACHE_URL":  `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
+					"REGION":     "DEV1",
 				},
-				DependsOn: []string{"search-cache", "gateway"},
+				DependsOn: []string{"search-cache", "router"},
 				Container: config.Container{
 					Image:    "registry/search:latest",
 					Ports:    map[string]int{"http": 16271},
-					Mounts:   map[string]string{`{{repo "portal"}}/schemas`: "/src/schemas"},
+					Mounts:   map[string]string{`{{repo "studio"}}/schemas`: "/src/schemas"},
 					EnvFiles: []string{"/etc/acme.conf.d/search.conf"},
 					Args:     []string{"--shm-size=1g", "--label=stack={{.Stack}}"},
 				},
@@ -299,12 +299,12 @@ func testConfig() config.Config {
 				Container: config.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
 			},
 			"front-like": {
-				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"gateway\"}}",
+				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"router\"}}",
 				Ports:     []string{"http"},
 				DependsOn: []string{"search"},
 			},
-			"portal-standalone": {
-				Repo:  "portal",
+			"studio-standalone": {
+				Repo:  "studio",
 				Build: "go build ./cmd/api",
 				Run:   "api --port={{.Ports.http}} --from={{.WorktreeDir}}",
 				Ports: []string{"http"},
@@ -316,10 +316,10 @@ func testConfig() config.Config {
 func fakeCheckoutsForStack(stackName string) (map[string]workspace.Worktree, error) {
 	checkoutByRepo := map[string]workspace.Worktree{
 		"shop":   {Repo: "shop", Dir: "/src/shop", Branch: "base", IsMain: true},
-		"portal": {Repo: "portal", Dir: "/src/portal", Branch: "base", IsMain: true},
+		"studio": {Repo: "studio", Dir: "/src/studio", Branch: "base", IsMain: true},
 	}
-	if stackName == "proj-1234" {
-		checkoutByRepo["shop"] = workspace.Worktree{Repo: "shop", Dir: "/worktrees/proj-1234", Branch: "PROJ-1234-x", IsMain: false}
+	if stackName == "task-1234" {
+		checkoutByRepo["shop"] = workspace.Worktree{Repo: "shop", Dir: "/worktrees/task-1234", Branch: "TASK-1234-x", IsMain: false}
 	}
 	return checkoutByRepo, nil
 }
@@ -365,7 +365,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		buildEnvirons: buildEnvirons,
 		output:        output,
 		base:          "base",
-		featureStack:  "proj-1234",
+		featureStack:  "task-1234",
 	}
 }
 
@@ -409,7 +409,7 @@ func TestStartInAWorktreeTakesMissingDependenciesFromBase(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	wantOrder := []string{"gateway.proj-1234.shop", "gateway.base.shop", "temporal.base.shop", "internalapi.base.shop", "publicapi.proj-1234.shop"}
+	wantOrder := []string{"router.task-1234.shop", "router.base.shop", "scheduler.base.shop", "internalapi.base.shop", "publicapi.task-1234.shop"}
 	if firstWaits := firstOccurrences(environment.supervisor.waitedReady); !slices.Equal(firstWaits, wantOrder) {
 		t.Errorf("waited ready in order %v, want %v", firstWaits, wantOrder)
 	}
@@ -428,26 +428,26 @@ func TestStartBuildsEachStackOnceInItsOwnWorktree(t *testing.T) {
 		buildDirs = append(buildDirs, build.workingDir)
 	}
 	slices.Sort(buildDirs)
-	if want := []string{"/src/shop", "/worktrees/proj-1234"}; !slices.Equal(buildDirs, want) {
+	if want := []string{"/src/shop", "/worktrees/task-1234"}; !slices.Equal(buildDirs, want) {
 		t.Errorf("builds ran in %v, want %v", buildDirs, want)
 	}
 }
 
-func TestEnvironmentTemplatesUseTheGatewayOfTheStackAndThePortsOfTheBaseStack(t *testing.T) {
+func TestEnvironmentTemplatesUseTheRouterOfTheStackAndThePortsOfTheBaseStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	worktreePublicapi := environment.supervisor.runningSpecs["publicapi.proj-1234.shop"]
-	if want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "gateway")); worktreePublicapi.Env["GATEWAY_URL"] != want {
-		t.Errorf("GATEWAY_URL = %q, want %q", worktreePublicapi.Env["GATEWAY_URL"], want)
+	worktreePublicapi := environment.supervisor.runningSpecs["publicapi.task-1234.shop"]
+	if want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "task-1234", "router")); worktreePublicapi.Env["ROUTER_URL"] != want {
+		t.Errorf("ROUTER_URL = %q, want %q", worktreePublicapi.Env["ROUTER_URL"], want)
 	}
-	if got := environment.supervisor.runningSpecs["internalapi.base.shop"].Env["TEMPORAL_ADDRESS"]; got != "localhost:7233" {
-		t.Errorf("TEMPORAL_ADDRESS = %q", got)
+	if got := environment.supervisor.runningSpecs["internalapi.base.shop"].Env["SCHEDULER_ADDRESS"]; got != "localhost:7233" {
+		t.Errorf("SCHEDULER_ADDRESS = %q", got)
 	}
-	if worktreePublicapi.Dir != "/worktrees/proj-1234" {
+	if worktreePublicapi.Dir != "/worktrees/task-1234" {
 		t.Errorf("WorkingDir = %q", worktreePublicapi.Dir)
 	}
-	wantBinDir := filepath.Join(environment.executor.StackDir("proj-1234"), "bin")
+	wantBinDir := filepath.Join(environment.executor.StackDir("task-1234"), "bin")
 	if !strings.HasPrefix(worktreePublicapi.Command, wantBinDir+"/shop api publicapi --port=") {
 		t.Errorf("Command = %q", worktreePublicapi.Command)
 	}
@@ -460,7 +460,7 @@ func TestStartRefusesWhenAnExternalDependencyIsDown(t *testing.T) {
 	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "restart base") {
-		t.Fatalf("err = %v, want the start hint of keyring", err)
+		t.Fatalf("err = %v, want the start hint of secrets", err)
 	}
 	if len(*environment.builds) != 0 || len(environment.supervisor.startedInOrder) != 0 {
 		t.Errorf("built %v and started %v before refusing", *environment.builds, environment.supervisor.startedInOrder)
@@ -469,11 +469,11 @@ func TestStartRefusesWhenAnExternalDependencyIsDown(t *testing.T) {
 
 func TestStartWithoutDependenciesStartsOnlyTheRequestedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.base, StartOptions{}, "gateway")
+	environment.start(t, environment.base, StartOptions{}, "router")
 
 	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "internalapi")
 
-	if want := []string{"gateway.base.shop", "internalapi.base.shop"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
+	if want := []string{"router.base.shop", "internalapi.base.shop"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
 		t.Errorf("started %v, want %v", environment.supervisor.startedInOrder, want)
 	}
 }
@@ -483,8 +483,8 @@ func TestStartWithoutDependenciesFailsWhenATemplateNeedsAMissingPort(t *testing.
 
 	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"internalapi"}, StartOptions{SkipDependencies: true})
 
-	if err == nil || !strings.Contains(err.Error(), `"gateway"`) {
-		t.Fatalf("err = %v, want an error naming the gateway", err)
+	if err == nil || !strings.Contains(err.Error(), `"router"`) {
+		t.Fatalf("err = %v, want an error naming the router", err)
 	}
 }
 
@@ -577,8 +577,8 @@ func TestStartStartsAgainADependencyWhoseProcessEnded(t *testing.T) {
 	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") {
 		t.Errorf("started %v, want internalapi.base.shop, whose process ended", environment.supervisor.startedInOrder)
 	}
-	if slices.Contains(environment.supervisor.startedInOrder, "temporal.base.shop") || slices.Contains(environment.supervisor.restarted, "temporal.base.shop") {
-		t.Errorf("started %v, want temporal.base.shop left alone: its process runs", environment.supervisor.startedInOrder)
+	if slices.Contains(environment.supervisor.startedInOrder, "scheduler.base.shop") || slices.Contains(environment.supervisor.restarted, "scheduler.base.shop") {
+		t.Errorf("started %v, want scheduler.base.shop left alone: its process runs", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -595,8 +595,8 @@ func TestStartKeepsACrashedDependencyInItsOwnStack(t *testing.T) {
 	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") {
 		t.Errorf("started %v, want internalapi.base.shop started again in base", environment.supervisor.startedInOrder)
 	}
-	if _, isApplied := environment.supervisor.runningSpecs["internalapi.proj-1234.shop"]; isApplied || slices.Contains(environment.supervisor.startedInOrder, "internalapi.proj-1234.shop") {
-		t.Errorf("started %v, want the crashed dependency kept in base, not moved to the ticket stack", environment.supervisor.startedInOrder)
+	if _, isApplied := environment.supervisor.runningSpecs["internalapi.task-1234.shop"]; isApplied || slices.Contains(environment.supervisor.startedInOrder, "internalapi.task-1234.shop") {
+		t.Errorf("started %v, want the crashed dependency kept in base, not moved to the feature stack", environment.supervisor.startedInOrder)
 	}
 	if !slices.ContainsFunc(*environment.builds, func(build recordedBuild) bool { return build.workingDir == "/src/shop" }) {
 		t.Errorf("builds = %+v, want base built again before its internalapi restarts", *environment.builds)
@@ -697,28 +697,28 @@ func TestARetryStartsAFailedDependencyWithoutNamingIt(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") || !environment.isApplied("publicapi.proj-1234.shop") {
-		t.Errorf("started %v, want internalapi.base.shop and publicapi.proj-1234.shop", environment.supervisor.startedInOrder)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") || !environment.isApplied("publicapi.task-1234.shop") {
+		t.Errorf("started %v, want internalapi.base.shop and publicapi.task-1234.shop", environment.supervisor.startedInOrder)
 	}
-	if environment.isApplied("internalapi.proj-1234.shop") {
-		t.Error("the retry moved internalapi into the ticket stack")
+	if environment.isApplied("internalapi.task-1234.shop") {
+		t.Error("the retry moved internalapi into the feature stack")
 	}
 }
 
-func TestARetryStartsAFailedTicketStackDependencyInItsStack(t *testing.T) {
+func TestARetryStartsAFailedFeatureStackDependencyInItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
-	environment.supervisor.setBehavior("internalapi.proj-1234.shop", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("internalapi.task-1234.shop", processEndsAtEveryStart)
 	if err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
-		t.Fatal("Start = nil, want the failure of internalapi.proj-1234.shop")
+		t.Fatal("Start = nil, want the failure of internalapi.task-1234.shop")
 	}
-	environment.supervisor.setBehavior("internalapi.proj-1234.shop", processEndedAfterItWasReady)
+	environment.supervisor.setBehavior("internalapi.task-1234.shop", processEndedAfterItWasReady)
 	environment.supervisor.startedInOrder = nil
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.proj-1234.shop") || slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") {
-		t.Errorf("started %v, want internalapi started again in proj-1234, which owns it", environment.supervisor.startedInOrder)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.task-1234.shop") || slices.Contains(environment.supervisor.startedInOrder, "internalapi.base.shop") {
+		t.Errorf("started %v, want internalapi started again in task-1234, which owns it", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -728,7 +728,7 @@ func TestAFailedNamedAppOrBaseDependencyNeedsNoCommandToStartItAgain(t *testing.
 		failedProcess string
 		appNames      []string
 	}{
-		{name: "named app in the ticket stack", failedProcess: "internalapi.proj-1234.shop", appNames: []string{"internalapi", "publicapi"}},
+		{name: "named app in the feature stack", failedProcess: "internalapi.task-1234.shop", appNames: []string{"internalapi", "publicapi"}},
 		{name: "dependency in base", failedProcess: "internalapi.base.shop", appNames: []string{"publicapi"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -831,7 +831,7 @@ func TestAllocationSkipsPortsOfOtherStacksAndBusyPorts(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	masterPort := environment.appPort(t, "base", "standalone")
-	worktreePort := environment.appPort(t, "proj-1234", "standalone")
+	worktreePort := environment.appPort(t, "task-1234", "standalone")
 	if masterPort == config.DefaultFirstPort || masterPort == worktreePort {
 		t.Errorf("base got %d and the worktree got %d", masterPort, worktreePort)
 	}
@@ -848,8 +848,8 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base.shop"]; isRunning {
 		t.Error("internalapi.base.shop still runs")
 	}
-	if !strings.Contains(environment.output.String(), "publicapi.proj-1234.shop") {
-		t.Errorf("output %q does not warn about publicapi.proj-1234.shop", environment.output.String())
+	if !strings.Contains(environment.output.String(), "publicapi.task-1234.shop") {
+		t.Errorf("output %q does not warn about publicapi.task-1234.shop", environment.output.String())
 	}
 }
 
@@ -871,15 +871,15 @@ func TestTheProxyGetsARouteForEveryRoutedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	route, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.shop.dev.example.net")
-	if !isRouted || route.Port != environment.appPort(t, "proj-1234", "publicapi") {
+	route, isRouted := environment.supervisor.routeOf("publicapi.task-1234.shop.dev.example.net")
+	if !isRouted || route.Port != environment.appPort(t, "task-1234", "publicapi") {
 		t.Errorf("route of publicapi = %+v, routed %t; want its http port. Routes: %+v", route, isRouted, environment.supervisor.routes)
 	}
-	if want := "cd '/worktrees/proj-1234' && ilot start publicapi"; route.StartHint != want {
+	if want := "cd '/worktrees/task-1234' && ilot start publicapi"; route.StartHint != want {
 		t.Errorf("start hint = %q, want %q", route.StartHint, want)
 	}
-	if _, isRouted := environment.supervisor.routeOf("gateway.base.shop.dev.example.net"); isRouted {
-		t.Error("gateway.base.shop has a route, but the app declares none")
+	if _, isRouted := environment.supervisor.routeOf("router.base.shop.dev.example.net"); isRouted {
+		t.Error("router.base.shop has a route, but the app declares none")
 	}
 }
 
@@ -891,7 +891,7 @@ func TestAStoppedAppKeepsItsRoute(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 
-	if _, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.shop.dev.example.net"); !isRouted {
+	if _, isRouted := environment.supervisor.routeOf("publicapi.task-1234.shop.dev.example.net"); !isRouted {
 		t.Errorf("routes after the stop = %+v, want the route of publicapi kept: its URL then says how to start it", environment.supervisor.routes)
 	}
 }
@@ -905,17 +905,17 @@ func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	publicapiRow := rowFor(listing.Apps, "proj-1234", "publicapi")
-	if publicapiRow.Status != "ready" || publicapiRow.URL != "http://publicapi.proj-1234.shop.dev.example.net:18080" {
+	publicapiRow := rowFor(listing.Apps, "task-1234", "publicapi")
+	if publicapiRow.Status != "ready" || publicapiRow.URL != "http://publicapi.task-1234.shop.dev.example.net:18080" {
 		t.Errorf("publicapi row = %+v", publicapiRow)
 	}
-	if publicapiRow.Ports["http"] != environment.appPort(t, "proj-1234", "publicapi") {
+	if publicapiRow.Ports["http"] != environment.appPort(t, "task-1234", "publicapi") {
 		t.Errorf("publicapi ports = %v, want the http port of its state", publicapiRow.Ports)
 	}
-	if temporalRow := rowFor(listing.Apps, "base", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.base.shop.dev.example.net:18080" {
-		t.Errorf("temporal row = %+v", temporalRow)
+	if schedulerRow := rowFor(listing.Apps, "base", "scheduler"); schedulerRow.Status != "ready" || schedulerRow.URL != "http://scheduler.base.shop.dev.example.net:18080" {
+		t.Errorf("scheduler row = %+v", schedulerRow)
 	}
-	wantExternalServices := []ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}, {Name: "legacyapi", Status: "up", Port: 10004}}
+	wantExternalServices := []ExternalServiceRow{{Name: "legacyapi", Status: "up", Port: 10004}, {Name: "secrets", Status: "up", Port: 8200}}
 	if !slices.Equal(listing.ExternalServices, wantExternalServices) {
 		t.Errorf("external services = %+v, want %+v", listing.ExternalServices, wantExternalServices)
 	}
@@ -954,16 +954,16 @@ func TestAnAppWithTheScopeBaseRunsOnceInTheBaseStackWithItsFixedPorts(t *testing
 	}
 }
 
-func TestBaseGatewayUsesItsFixedPortAndWorktreeGatewaysDoNot(t *testing.T) {
+func TestBaseRouterUsesItsFixedPortAndWorktreeRoutersDoNot(t *testing.T) {
 	environment := newTestEnvironment(t)
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if port := environment.appPort(t, "base", "gateway"); port != 9090 {
-		t.Errorf("base gateway port = %d, want 9090", port)
+	if port := environment.appPort(t, "base", "router"); port != 9090 {
+		t.Errorf("base router port = %d, want 9090", port)
 	}
-	if port := environment.appPort(t, "proj-1234", "gateway"); port < config.DefaultFirstPort || port > config.DefaultLastPort {
-		t.Errorf("worktree gateway port = %d, want one from the reserved range", port)
+	if port := environment.appPort(t, "task-1234", "router"); port < config.DefaultFirstPort || port > config.DefaultLastPort {
+		t.Errorf("worktree router port = %d, want one from the reserved range", port)
 	}
 }
 
@@ -971,7 +971,7 @@ func TestStartRefusesAFixedPortHeldByAnotherProcess(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.IsPortFreeOnHost = func(port int) bool { return port != 9090 }
 
-	err := environment.executor.Start(t.Context(), environment.base, []string{"gateway"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.base, []string{"router"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "9090") {
 		t.Fatalf("err = %v, want an error naming port 9090", err)
@@ -989,7 +989,7 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 	if got := environment.supervisor.runningSpecs["restapi.base.shop"].Dir; got != "/legacy/restapi" {
 		t.Errorf("restapi WorkingDir = %q", got)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Dir; got != "/worktrees/proj-1234" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Dir; got != "/worktrees/task-1234" {
 		t.Errorf("standalone WorkingDir = %q", got)
 	}
 }
@@ -1025,17 +1025,17 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	}
 }
 
-func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
+func TestTheWatcherOfAFeatureStackNamesItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
-	portalStandalone.Watch = config.Watch{Paths: []string{"."}, Exts: []string{"go"}}
-	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
+	studioStandalone := environment.executor.Config.Apps["studio-standalone"]
+	studioStandalone.Watch = config.Watch{Paths: []string{"."}, Exts: []string{"go"}}
+	environment.executor.Config.Apps["studio-standalone"] = studioStandalone
 
-	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+	environment.start(t, environment.featureStack, StartOptions{}, "studio-standalone")
 
-	watcher := environment.supervisor.runningSpecs["portal-standalone-watch.proj-1234.shop"]
-	if !strings.Contains(watcher.Command, "--watch '/src/portal'") || !strings.Contains(watcher.Command, `restart --workspace '"'"'shop'"'"' --stack '"'"'proj-1234'"'"' '"'"'portal-standalone'"'"'`) {
-		t.Errorf("watcher command %q, want the main checkout of portal watched for the stack proj-1234", watcher.Command)
+	watcher := environment.supervisor.runningSpecs["studio-standalone-watch.task-1234.shop"]
+	if !strings.Contains(watcher.Command, "--watch '/src/studio'") || !strings.Contains(watcher.Command, `restart --workspace '"'"'shop'"'"' --stack '"'"'task-1234'"'"' '"'"'studio-standalone'"'"'`) {
+		t.Errorf("watcher command %q, want the main checkout of studio watched for the stack task-1234", watcher.Command)
 	}
 }
 
@@ -1066,10 +1066,10 @@ func TestRestartAppsBuildsThenRestartsTheNamedApp(t *testing.T) {
 		t.Fatalf("RestartApps: %v", err)
 	}
 
-	if len(*environment.builds) != 1 || (*environment.builds)[0].workingDir != "/worktrees/proj-1234" {
+	if len(*environment.builds) != 1 || (*environment.builds)[0].workingDir != "/worktrees/task-1234" {
 		t.Errorf("builds = %+v, want one build in the worktree", *environment.builds)
 	}
-	if want := []string{"restart internalapi.proj-1234.shop", "ready internalapi.proj-1234.shop"}; !slices.Equal(environment.supervisor.events, want) {
+	if want := []string{"restart internalapi.task-1234.shop", "ready internalapi.task-1234.shop"}; !slices.Equal(environment.supervisor.events, want) {
 		t.Errorf("events = %v, want %v: the dependencies stay as they are", environment.supervisor.events, want)
 	}
 }
@@ -1082,10 +1082,10 @@ func TestRestartAppsKeepsTheRunningAppWhenItsBuildFails(t *testing.T) {
 
 	err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
 
-	if err == nil || !strings.Contains(err.Error(), "build internalapi.proj-1234.shop") {
+	if err == nil || !strings.Contains(err.Error(), "build internalapi.task-1234.shop") {
 		t.Fatalf("RestartApps = %v, want the failed build", err)
 	}
-	if len(environment.supervisor.events) != 0 || !environment.isApplied("internalapi.proj-1234.shop") {
+	if len(environment.supervisor.events) != 0 || !environment.isApplied("internalapi.task-1234.shop") {
 		t.Errorf("events = %v, want none: the old version keeps running", environment.supervisor.events)
 	}
 }
@@ -1095,7 +1095,7 @@ func TestRestartAppsRefusesAnAppThatDoesNotRun(t *testing.T) {
 
 	err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
 
-	if err == nil || !strings.Contains(err.Error(), "internalapi.proj-1234.shop does not run") || !strings.Contains(err.Error(), "ilot start internalapi") {
+	if err == nil || !strings.Contains(err.Error(), "internalapi.task-1234.shop does not run") || !strings.Contains(err.Error(), "ilot start internalapi") {
 		t.Fatalf("RestartApps = %v, want a refusal that names ilot start", err)
 	}
 	if len(*environment.builds) != 0 || environment.supervisor.daemonIsUp {
@@ -1112,7 +1112,7 @@ func TestRestartAppsRefusesAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 
 	err := environment.executorOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"})
 
-	if err == nil || !strings.Contains(err.Error(), "standalone.proj-1234.shop does not run: start it with ilot start standalone") {
+	if err == nil || !strings.Contains(err.Error(), "standalone.task-1234.shop does not run: start it with ilot start standalone") {
 		t.Fatalf("RestartApps = %v, want a refusal that names ilot start", err)
 	}
 	if len(*environment.builds) != 0 || len(environment.supervisor.events) != 0 {
@@ -1123,7 +1123,7 @@ func TestRestartAppsRefusesAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 func TestRestartAppsRestartsAnAppThatExited(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.supervisor.setBehavior("standalone.proj-1234.shop", processEndedAfterItWasReady)
+	environment.supervisor.setBehavior("standalone.task-1234.shop", processEndedAfterItWasReady)
 	environment.supervisor.events = nil
 
 	if err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
@@ -1137,10 +1137,10 @@ func TestRestartAppsRestartsAnAppThatExited(t *testing.T) {
 
 func TestAnAppWithTheScopeBaseHasItsRouteInTheBaseStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.base, StartOptions{}, "temporal")
+	environment.start(t, environment.base, StartOptions{}, "scheduler")
 
-	if route, isRouted := environment.supervisor.routeOf("temporal.base.shop.dev.example.net"); !isRouted || route.Port != 10012 {
-		t.Errorf("route of temporal = %+v, routed %t; want the temporal UI on port 10012", route, isRouted)
+	if route, isRouted := environment.supervisor.routeOf("scheduler.base.shop.dev.example.net"); !isRouted || route.Port != 10012 {
+		t.Errorf("route of scheduler = %+v, routed %t; want the scheduler UI on port 10012", route, isRouted)
 	}
 }
 
@@ -1159,7 +1159,7 @@ func TestStartAllKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 		t.Errorf("StartAll = %v, want it to name publicapi.base.shop as skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	for _, wantStarted := range []string{"temporal.base.shop", "gateway.base.shop"} {
+	for _, wantStarted := range []string{"scheduler.base.shop", "router.base.shop"} {
 		if !slices.Contains(started, wantStarted) {
 			t.Errorf("started %v, want %s despite the failure", started, wantStarted)
 		}
@@ -1170,24 +1170,24 @@ func TestStartAllKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isStoredAsRunning(t, "base", "publicapi") {
 		t.Error("a failed or skipped app lost its membership at a restore: the next ilot start would not start it again")
 	}
-	if !environment.isStoredAsRunning(t, "base", "temporal") || !environment.isApplied("temporal.base.shop") {
-		t.Error("temporal.base.shop started well at a restore but is not kept running")
+	if !environment.isStoredAsRunning(t, "base", "scheduler") || !environment.isApplied("scheduler.base.shop") {
+		t.Error("scheduler.base.shop started well at a restore but is not kept running")
 	}
 }
 
-func TestStartAllSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
+func TestStartAllSkipsAnAppWhoseDependencyFailedInTheFeatureStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
 	environment.supervisor.simulateDaemonRestart()
-	environment.supervisor.setBehavior("internalapi.proj-1234.shop", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("internalapi.task-1234.shop", processEndsAtEveryStart)
 
 	err := environment.executor.StartAll(t.Context())
 
-	if err == nil || !strings.Contains(err.Error(), "publicapi.proj-1234.shop skipped: it depends on internalapi.proj-1234.shop") {
-		t.Fatalf("StartAll = %v, want publicapi.proj-1234.shop skipped because internalapi.proj-1234.shop failed", err)
+	if err == nil || !strings.Contains(err.Error(), "publicapi.task-1234.shop skipped: it depends on internalapi.task-1234.shop") {
+		t.Fatalf("StartAll = %v, want publicapi.task-1234.shop skipped because internalapi.task-1234.shop failed", err)
 	}
-	if slices.Contains(environment.supervisor.startedInOrder, "publicapi.proj-1234.shop") {
-		t.Errorf("started %v, want publicapi.proj-1234.shop skipped", environment.supervisor.startedInOrder)
+	if slices.Contains(environment.supervisor.startedInOrder, "publicapi.task-1234.shop") {
+		t.Errorf("started %v, want publicapi.task-1234.shop skipped", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -1199,11 +1199,11 @@ func TestStartAllSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 
 	err := environment.executor.StartAll(t.Context())
 
-	if err == nil || !strings.Contains(err.Error(), "search.proj-1234.shop skipped: it depends on search-cache.proj-1234.shop") {
-		t.Fatalf("StartAll = %v, want search.proj-1234.shop skipped because the image of search-cache.proj-1234.shop failed", err)
+	if err == nil || !strings.Contains(err.Error(), "search.task-1234.shop skipped: it depends on search-cache.task-1234.shop") {
+		t.Fatalf("StartAll = %v, want search.task-1234.shop skipped because the image of search-cache.task-1234.shop failed", err)
 	}
-	if slices.Contains(environment.supervisor.startedInOrder, "search.proj-1234.shop") {
-		t.Errorf("started %v, want search.proj-1234.shop skipped", environment.supervisor.startedInOrder)
+	if slices.Contains(environment.supervisor.startedInOrder, "search.task-1234.shop") {
+		t.Errorf("started %v, want search.task-1234.shop skipped", environment.supervisor.startedInOrder)
 	}
 }
 
@@ -1224,7 +1224,7 @@ func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if route, _ := environment.supervisor.routeOf("publicapi.proj-1234.shop.dev.example.net"); route.HomePath != "/swagger/" {
+	if route, _ := environment.supervisor.routeOf("publicapi.task-1234.shop.dev.example.net"); route.HomePath != "/swagger/" {
 		t.Errorf("route of publicapi = %+v, want the home path /swagger/", route)
 	}
 }
@@ -1241,7 +1241,7 @@ func TestListShowsTheHomePathInTheURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if url := rowFor(listing.Apps, "proj-1234", "publicapi").URL; url != "http://publicapi.proj-1234.shop.dev.example.net:18080/swagger/" {
+	if url := rowFor(listing.Apps, "task-1234", "publicapi").URL; url != "http://publicapi.task-1234.shop.dev.example.net:18080/swagger/" {
 		t.Errorf("publicapi URL = %q", url)
 	}
 }
@@ -1253,15 +1253,15 @@ func TestLogFileOfAnAppIsInTheStackThatRunsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LogFile(publicapi): %v", err)
 	}
-	if want := filepath.Join(environment.executor.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
+	if want := filepath.Join(environment.executor.StackDir("task-1234"), "logs", "publicapi.log"); worktreeLog != want {
 		t.Errorf("publicapi log = %q, want %q", worktreeLog, want)
 	}
-	baseLog, err := environment.executor.LogFile(environment.featureStack, "temporal")
+	baseLog, err := environment.executor.LogFile(environment.featureStack, "scheduler")
 	if err != nil {
-		t.Fatalf("LogFile(temporal): %v", err)
+		t.Fatalf("LogFile(scheduler): %v", err)
 	}
-	if want := filepath.Join(environment.executor.StackDir("base"), "logs", "temporal.log"); baseLog != want {
-		t.Errorf("temporal log = %q, want %q", baseLog, want)
+	if want := filepath.Join(environment.executor.StackDir("base"), "logs", "scheduler.log"); baseLog != want {
+		t.Errorf("scheduler log = %q, want %q", baseLog, want)
 	}
 	if _, err := environment.executor.LogFile(environment.featureStack, "nope"); err == nil {
 		t.Error("want an error for an unknown app")
@@ -1271,17 +1271,17 @@ func TestLogFileOfAnAppIsInTheStackThatRunsIt(t *testing.T) {
 func TestAppRunsFromTheCheckoutOfItsRepo(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone", "standalone")
+	environment.start(t, environment.featureStack, StartOptions{}, "studio-standalone", "standalone")
 
-	portalSpec := environment.supervisor.runningSpecs["portal-standalone.proj-1234.shop"]
-	if portalSpec.Dir != "/src/portal" || !strings.HasSuffix(portalSpec.Command, "--from=/src/portal") {
-		t.Errorf("portal-standalone spec = %+v, want portal's main checkout", portalSpec)
+	studioSpec := environment.supervisor.runningSpecs["studio-standalone.task-1234.shop"]
+	if studioSpec.Dir != "/src/studio" || !strings.HasSuffix(studioSpec.Command, "--from=/src/studio") {
+		t.Errorf("studio-standalone spec = %+v, want studio's main checkout", studioSpec)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Dir; got != "/worktrees/proj-1234" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Dir; got != "/worktrees/task-1234" {
 		t.Errorf("standalone WorkingDir = %q, want shop's worktree", got)
 	}
-	if !slices.Contains(*environment.builds, recordedBuild{workingDir: "/src/portal", command: "go build ./cmd/api"}) {
-		t.Errorf("builds = %+v, want the portal build in portal's checkout", *environment.builds)
+	if !slices.Contains(*environment.builds, recordedBuild{workingDir: "/src/studio", command: "go build ./cmd/api"}) {
+		t.Errorf("builds = %+v, want the studio build in studio's checkout", *environment.builds)
 	}
 }
 
@@ -1314,7 +1314,7 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 
 	entryByKey := environmentOf(t, environment, "standalone")
 
-	wantPort := strconv.Itoa(environment.appPort(t, "proj-1234", "standalone"))
+	wantPort := strconv.Itoa(environment.appPort(t, "task-1234", "standalone"))
 	want := map[string]plan.EnvEntry{
 		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "global"},
 		"REGION":    {Key: "REGION", Value: "EU1", Source: "app"},
@@ -1326,8 +1326,8 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
 		}
 	}
-	if environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["LOG_LEVEL"] != "debug" {
-		t.Errorf("the process does not get the environment: %v", environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env)
+	if environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env["LOG_LEVEL"] != "debug" {
+		t.Errorf("the process does not get the environment: %v", environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env)
 	}
 }
 
@@ -1336,13 +1336,13 @@ func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 	environment.executor.Machine.Login = "jdoe"
 	environment.executor.Machine.ProxyPort = "18080"
 	standalone := environment.executor.Config.Apps["standalone"]
-	standalone.Run = `run {{.Stack}} {{.User}} {{repo "portal"}} {{url "temporal"}} {{url "internalapi"}}`
+	standalone.Run = `run {{.Stack}} {{.User}} {{repo "studio"}} {{url "scheduler"}} {{url "internalapi"}}`
 	environment.executor.Config.Apps["standalone"] = standalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	want := "run proj-1234 jdoe /src/portal http://temporal.base.shop.dev.example.net:18080 http://internalapi.base.shop.dev.example.net:18080"
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Command; got != want {
+	want := "run task-1234 jdoe /src/studio http://scheduler.base.shop.dev.example.net:18080 http://internalapi.base.shop.dev.example.net:18080"
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
 }
@@ -1351,8 +1351,8 @@ func TestContainerCommandRemovesALeftoverContainerFirst(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	command := environment.supervisor.runningSpecs["search.proj-1234.shop"].Command
-	if !strings.HasPrefix(command, "docker rm -f 'ilot_search_proj-1234_shop' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot_search_proj-1234_shop' ") {
+	command := environment.supervisor.runningSpecs["search.task-1234.shop"].Command
+	if !strings.HasPrefix(command, "docker rm -f 'ilot_search_task-1234_shop' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot_search_task-1234_shop' ") {
 		t.Errorf("command = %q", command)
 	}
 }
@@ -1378,16 +1378,16 @@ func TestContainerCommandPublishesItsPortsOnTheLoopbackAddress(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	command := environment.supervisor.runningSpecs["search.proj-1234.shop"].Command
-	searchPort := environment.appPort(t, "proj-1234", "search")
+	command := environment.supervisor.runningSpecs["search.task-1234.shop"].Command
+	searchPort := environment.appPort(t, "task-1234", "search")
 	for _, wantPart := range []string{
 		"--add-host 'host.docker.internal:host-gateway'",
 		"-p 127.0.0.1:" + strconv.Itoa(searchPort) + ":16271",
 		"--env-file '/etc/acme.conf.d/search.conf'",
 		"-e 'REGION'",
-		"-e 'GATEWAY_URL'",
-		"-v '/src/portal/schemas:/src/schemas'",
-		"'--shm-size=1g' '--label=stack=proj-1234' 'registry/search:latest'",
+		"-e 'ROUTER_URL'",
+		"-v '/src/studio/schemas:/src/schemas'",
+		"'--shm-size=1g' '--label=stack=task-1234' 'registry/search:latest'",
 	} {
 		if !strings.Contains(command, wantPart) {
 			t.Errorf("command %q lacks %q", command, wantPart)
@@ -1407,7 +1407,7 @@ func TestContainerCommandPublishesItsPortsOnTheLoopbackAddress(t *testing.T) {
 	if searchPort < config.DefaultFirstPort || searchPort > config.DefaultLastPort {
 		t.Errorf("search is published on port %d, want a port of the range of ilot", searchPort)
 	}
-	if order := environment.supervisor.startedInOrder; slices.Index(order, "search-cache.proj-1234.shop") > slices.Index(order, "search.proj-1234.shop") {
+	if order := environment.supervisor.startedInOrder; slices.Index(order, "search-cache.task-1234.shop") > slices.Index(order, "search.task-1234.shop") {
 		t.Errorf("started %v: want the cache before search", order)
 	}
 }
@@ -1416,11 +1416,11 @@ func TestAContainerReachesTheOtherAppsThroughTheNameOfTheMachine(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	searchEnv := environment.supervisor.runningSpecs["search.proj-1234.shop"].Env
-	wantGateway := "http://host.docker.internal:" + strconv.Itoa(environment.appPort(t, "proj-1234", "gateway"))
-	wantCache := "postgres://host.docker.internal:" + strconv.Itoa(environment.storedApp(t, "proj-1234", "search-cache").Ports["postgres"]) + "/cache"
-	if searchEnv["REGION"] != "DEV1" || searchEnv["GATEWAY_URL"] != wantGateway || searchEnv["CACHE_URL"] != wantCache {
-		t.Errorf("search env = %v, want %s for a process and %s for another container", searchEnv, wantGateway, wantCache)
+	searchEnv := environment.supervisor.runningSpecs["search.task-1234.shop"].Env
+	wantRouter := "http://host.docker.internal:" + strconv.Itoa(environment.appPort(t, "task-1234", "router"))
+	wantCache := "postgres://host.docker.internal:" + strconv.Itoa(environment.storedApp(t, "task-1234", "search-cache").Ports["postgres"]) + "/cache"
+	if searchEnv["REGION"] != "DEV1" || searchEnv["ROUTER_URL"] != wantRouter || searchEnv["CACHE_URL"] != wantCache {
+		t.Errorf("search env = %v, want %s for a process and %s for another container", searchEnv, wantRouter, wantCache)
 	}
 }
 
@@ -1428,14 +1428,14 @@ func TestAContainerIsProbedAndRoutedOnItsLoopbackPort(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	searchPort := environment.appPort(t, "proj-1234", "search")
-	if probe := environment.supervisor.runningSpecs["search.proj-1234.shop"].Ready; probe == nil || probe.Host != "" || probe.Port != searchPort {
+	searchPort := environment.appPort(t, "task-1234", "search")
+	if probe := environment.supervisor.runningSpecs["search.task-1234.shop"].Ready; probe == nil || probe.Host != "" || probe.Port != searchPort {
 		t.Errorf("search probe = %+v, want the published port %d on the loopback address", probe, searchPort)
 	}
-	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234.shop"].Ready; probe == nil || probe.Command != "docker exec 'ilot_search-cache_proj-1234_shop' sh -c 'pg_isready -U postgres'" {
+	if probe := environment.supervisor.runningSpecs["search-cache.task-1234.shop"].Ready; probe == nil || probe.Command != "docker exec 'ilot_search-cache_task-1234_shop' sh -c 'pg_isready -U postgres'" {
 		t.Errorf("cache probe = %+v", probe)
 	}
-	if route, isRouted := environment.supervisor.routeOf("search.proj-1234.shop.dev.example.net"); !isRouted || route.Port != searchPort {
+	if route, isRouted := environment.supervisor.routeOf("search.task-1234.shop.dev.example.net"); !isRouted || route.Port != searchPort {
 		t.Errorf("route of search = %+v, routed %t; want the published port %d", route, isRouted, searchPort)
 	}
 }
@@ -1444,8 +1444,8 @@ func TestAProcessReachesAContainerOnLocalhost(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
-	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "search")) + " --gw=localhost"
-	if got := environment.supervisor.runningSpecs["front-like.proj-1234.shop"].Command; got != want {
+	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "task-1234", "search")) + " --gw=localhost"
+	if got := environment.supervisor.runningSpecs["front-like.task-1234.shop"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
 }
@@ -1455,9 +1455,9 @@ func TestTwoStacksPublishTheSameContainerOnTwoPorts(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 	environment.start(t, environment.base, StartOptions{}, "search")
 
-	ticketPort, masterPort := environment.appPort(t, "proj-1234", "search"), environment.appPort(t, "base", "search")
-	if ticketPort == masterPort {
-		t.Errorf("both stacks publish search on port %d: the second container could not start", ticketPort)
+	featurePort, masterPort := environment.appPort(t, "task-1234", "search"), environment.appPort(t, "base", "search")
+	if featurePort == masterPort {
+		t.Errorf("both stacks publish search on port %d: the second container could not start", featurePort)
 	}
 }
 
@@ -1467,7 +1467,7 @@ func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 
-	if port := environment.storedApp(t, "proj-1234", "search-cache").Ports["postgres"]; port == config.DefaultFirstPort || port == 0 {
+	if port := environment.storedApp(t, "task-1234", "search-cache").Ports["postgres"]; port == config.DefaultFirstPort || port == 0 {
 		t.Errorf("search-cache is published on port %d, want a free port", port)
 	}
 }
@@ -1481,8 +1481,8 @@ func TestADependencyWithoutAScopeComesFromBase(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
 	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "base", "search")) + " --gw=localhost"
-	if environment.supervisor.runningSpecs["front-like.proj-1234.shop"].Command != want {
-		t.Errorf("Command = %q, want %q", environment.supervisor.runningSpecs["front-like.proj-1234.shop"].Command, want)
+	if environment.supervisor.runningSpecs["front-like.task-1234.shop"].Command != want {
+		t.Errorf("Command = %q, want %q", environment.supervisor.runningSpecs["front-like.task-1234.shop"].Command, want)
 	}
 }
 
@@ -1494,7 +1494,7 @@ func TestDomainTemplateGivesTheProxyDomain(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["ALLOWED_HOSTS"]; got != ".dev.example.net" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env["ALLOWED_HOSTS"]; got != ".dev.example.net" {
 		t.Errorf("ALLOWED_HOSTS = %q, want .dev.example.net", got)
 	}
 }
@@ -1508,7 +1508,7 @@ func TestProxyPortTemplateGivesTheProxyPort(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["EXPOSED_PORT"]; got != "18080" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env["EXPOSED_PORT"]; got != "18080" {
 		t.Errorf("EXPOSED_PORT = %q, want 18080", got)
 	}
 }
@@ -1522,7 +1522,7 @@ func TestAnAppWithAStopCommandStopsWithItRendered(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	if got, want := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Stop, "docker stop standalone-proj-1234"; got != want {
+	if got, want := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Stop, "docker stop standalone-task-1234"; got != want {
 		t.Errorf("Stop = %q, want %q", got, want)
 	}
 }
@@ -1532,11 +1532,11 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234.shop"].Stop; got != "docker stop -t 10 'ilot_search-cache_proj-1234_shop'" {
+	if got := environment.supervisor.runningSpecs["search-cache.task-1234.shop"].Stop; got != "docker stop -t 10 'ilot_search-cache_task-1234_shop'" {
 		t.Errorf("search-cache Stop = %q", got)
 	}
-	if got := environment.supervisor.runningSpecs["gateway.proj-1234.shop"].Stop; got != "" {
-		t.Errorf("gateway Stop = %q, want none", got)
+	if got := environment.supervisor.runningSpecs["router.task-1234.shop"].Stop; got != "" {
+		t.Errorf("router Stop = %q, want none", got)
 	}
 }
 
@@ -1544,16 +1544,16 @@ func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t
 	environment := newTestEnvironment(t)
 	environment.executor.Config.RepoEnv = map[string]map[string]string{
 		"shop":   {"LOG_LEVEL": "info", "REGION": "DEV1", "STACK_NAME": "{{.Stack}}"},
-		"portal": {"REGION": "EU2"},
+		"studio": {"REGION": "EU2"},
 	}
-	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+	environment.start(t, environment.featureStack, StartOptions{}, "studio-standalone")
 
-	entryByKey := environmentOf(t, environment, "portal-standalone")
+	entryByKey := environmentOf(t, environment, "studio-standalone")
 
 	want := map[string]plan.EnvEntry{
 		"LOG_LEVEL":  {Key: "LOG_LEVEL", Value: "info", Source: "root repo"},
 		"REGION":     {Key: "REGION", Value: "EU2", Source: "repo"},
-		"STACK_NAME": {Key: "STACK_NAME", Value: "proj-1234", Source: "computed"},
+		"STACK_NAME": {Key: "STACK_NAME", Value: "task-1234", Source: "computed"},
 	}
 	for key, wantEntry := range want {
 		if entryByKey[key] != wantEntry {
@@ -1566,20 +1566,20 @@ func TestAMoreSpecificLiteralBeatsATemplatedValueOfTheRootRepo(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.Config.RepoEnv = map[string]map[string]string{
 		"shop":   {"REGION": "{{.Stack}}", "DB_URL": "db-{{.Stack}}", "TOKEN": "{{.Stack}}"},
-		"portal": {"DB_URL": "db-of-portal"},
+		"studio": {"DB_URL": "db-of-studio"},
 	}
-	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
-	portalStandalone.Env = map[string]string{"REGION": "EU1"}
-	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
+	studioStandalone := environment.executor.Config.Apps["studio-standalone"]
+	studioStandalone.Env = map[string]string{"REGION": "EU1"}
+	environment.executor.Config.Apps["studio-standalone"] = studioStandalone
 	environment.executor.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"DB_URL": "db-of-the-user", "TOKEN": "of-the-user"}, Apps: nil}
-	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+	environment.start(t, environment.featureStack, StartOptions{}, "studio-standalone")
 
-	entryByKey := environmentOf(t, environment, "portal-standalone")
+	entryByKey := environmentOf(t, environment, "studio-standalone")
 
 	want := map[string]plan.EnvEntry{
 		"REGION": {Key: "REGION", Value: "EU1", Source: "app"},
 		"DB_URL": {Key: "DB_URL", Value: "db-of-the-user", Source: "global"},
-		"TOKEN":  {Key: "TOKEN", Value: "proj-1234", Source: "computed"},
+		"TOKEN":  {Key: "TOKEN", Value: "task-1234", Source: "computed"},
 	}
 	for key, wantEntry := range want {
 		if entryByKey[key] != wantEntry {
@@ -1591,11 +1591,11 @@ func TestAMoreSpecificLiteralBeatsATemplatedValueOfTheRootRepo(t *testing.T) {
 func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	environment := newTestEnvironment(t)
-	environment.executor.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}
+	environment.executor.ReposNotCloned = map[string]string{"studio": "/home/user/go/src/studio"}
 
-	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"portal-front"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"studio-front"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "workspaces.shop.repos.portal in ~/.config/ilot/config.yaml") || !strings.Contains(err.Error(), "/home/user/go/src/portal") {
+	if err == nil || !strings.Contains(err.Error(), "workspaces.shop.repos.studio in ~/.config/ilot/config.yaml") || !strings.Contains(err.Error(), "/home/user/go/src/studio") {
 		t.Fatalf("Start = %v, want an error naming the repo that is not cloned", err)
 	}
 }
@@ -1610,7 +1610,7 @@ func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	searchSpec := environment.supervisor.runningSpecs["search.proj-1234.shop"]
+	searchSpec := environment.supervisor.runningSpecs["search.task-1234.shop"]
 	if strings.Contains(searchSpec.Command, "DEBUG_TOKEN") || searchSpec.Env["DEBUG_TOKEN"] != "" {
 		t.Errorf("search gets the personal env: command %q, env %v", searchSpec.Command, searchSpec.Env)
 	}
@@ -1700,7 +1700,7 @@ func TestStartAllSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 		t.Fatalf("StartAll = %v, want the failed image named with its app and stack, and front-like.base.shop skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	if !slices.Contains(started, "search-cache.base.shop") || !slices.Contains(started, "gateway.base.shop") {
+	if !slices.Contains(started, "search-cache.base.shop") || !slices.Contains(started, "router.base.shop") {
 		t.Errorf("started %v, want the other apps started", started)
 	}
 	if slices.Contains(started, "search.base.shop") || slices.Contains(started, "front-like.base.shop") {
