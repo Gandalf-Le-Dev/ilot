@@ -48,19 +48,19 @@ func TestACommandFromBaseKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": ticketConfig})
 	environment.executor.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search", "ticket-iam")
-	searchSpecBefore := environment.supervisor.runningSpecs["ticket-search.proj-1234.platform"]
-	iamSpecBefore := environment.supervisor.runningSpecs["ticket-iam.base.platform"]
+	searchSpecBefore := environment.supervisor.runningSpecs["ticket-search.proj-1234.shop"]
+	iamSpecBefore := environment.supervisor.runningSpecs["ticket-iam.base.shop"]
 
 	environment.executor.Config = baseConfig
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if got := environment.supervisor.runningSpecs["ticket-search.proj-1234.platform"]; got.Command != searchSpecBefore.Command || got.Stop == "" {
+	if got := environment.supervisor.runningSpecs["ticket-search.proj-1234.shop"]; got.Command != searchSpecBefore.Command || got.Stop == "" {
 		t.Errorf("ticket-search spec after a base command = %+v, want %+v", got, searchSpecBefore)
 	}
-	if got := environment.supervisor.runningSpecs["ticket-iam.base.platform"]; got.Command != iamSpecBefore.Command {
+	if got := environment.supervisor.runningSpecs["ticket-iam.base.shop"]; got.Command != iamSpecBefore.Command {
 		t.Errorf("ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
 	}
-	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.platform.dev.example.net"); !isRouted {
+	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.shop.dev.example.net"); !isRouted {
 		t.Errorf("routes = %+v, want the ticket-search route kept", environment.supervisor.routes)
 	}
 }
@@ -78,10 +78,10 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 	environment.executor.Config = baseConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	if _, isRunning := environment.supervisor.runningSpecs["ticket-search.proj-1234.platform"]; isRunning {
-		t.Error("ticket-search.proj-1234.platform still runs, but no config declares it")
+	if _, isRunning := environment.supervisor.runningSpecs["ticket-search.proj-1234.shop"]; isRunning {
+		t.Error("ticket-search.proj-1234.shop still runs, but no config declares it")
 	}
-	if !strings.Contains(environment.output.String(), "ticket-search.proj-1234.platform") {
+	if !strings.Contains(environment.output.String(), "ticket-search.proj-1234.shop") {
 		t.Errorf("output %q does not warn about the stopped app", environment.output.String())
 	}
 }
@@ -119,7 +119,7 @@ func TestABrokenConfigOfAStackDoesNotStopAStartInAnother(t *testing.T) {
 	}
 	environment.supervisor.calls = nil
 
-	environment.start(t, "proj-5678", StartOptions{SkipDependencies: true}, "standalone")
+	environment.start(t, "retry-jobs", StartOptions{SkipDependencies: true}, "standalone")
 
 	if slices.ContainsFunc(environment.supervisor.calls, func(call string) bool { return strings.Contains(call, "proj-1234") }) {
 		t.Errorf("calls = %v, want none for proj-1234", environment.supervisor.calls)
@@ -152,13 +152,13 @@ func TestStopWorksWithABrokenConfig(t *testing.T) {
 		t.Fatalf("Stop = %v, want the stop to work from the state alone", err)
 	}
 
-	for _, stoppedProcess := range []string{"publicapi.proj-1234.platform", "temporal.base.platform"} {
+	for _, stoppedProcess := range []string{"publicapi.proj-1234.shop", "temporal.base.shop"} {
 		if environment.isApplied(stoppedProcess) {
 			t.Errorf("%s still runs after ilot stop", stoppedProcess)
 		}
 	}
-	if !environment.isApplied("internalapi.base.platform") {
-		t.Error("internalapi.base.platform stopped, but the stop did not name it")
+	if !environment.isApplied("internalapi.base.shop") {
+		t.Error("internalapi.base.shop stopped, but the stop did not name it")
 	}
 	if err := environment.executor.Stop(t.Context(), environment.featureStack, []string{"nope"}); err == nil || !strings.Contains(err.Error(), "bad indentation") {
 		t.Errorf("Stop of an app that no stack has = %v, want the config error", err)
@@ -169,7 +169,7 @@ func TestListNeedsNoConfig(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 	environment.executor.ConfigForStack = func(string) (config.Config, error) {
-		return config.Config{}, errors.New("repo platform has several worktrees for stack proj-1234")
+		return config.Config{}, errors.New("repo shop has several worktrees for stack proj-1234")
 	}
 	environment.executor.Config = config.Config{}
 	environment.executor.ConfigErr = errors.New("parse ilot.yaml: bad indentation")
@@ -181,7 +181,7 @@ func TestListNeedsNoConfig(t *testing.T) {
 		t.Fatalf("List = %v, want the rows of every stack", err)
 	}
 	row := rowFor(listing.Apps, "proj-1234", "publicapi")
-	if row.Status != "ready" || row.URL != "http://publicapi.proj-1234.platform.dev.example.net" {
+	if row.Status != "ready" || row.URL != "http://publicapi.proj-1234.shop.dev.example.net" {
 		t.Errorf("publicapi.proj-1234 = %+v, want its status and its URL from the state", row)
 	}
 	if !strings.Contains(environment.output.String(), "bad indentation") {
@@ -204,12 +204,12 @@ func TestAnAppWithTheScopeBaseAndNoFixedPortGetsOnePortForEveryStack(t *testing.
 	if docPort < config.DefaultFirstPort || docPort > config.DefaultLastPort {
 		t.Errorf("doc port = %d, want a port of the range", docPort)
 	}
-	for _, processName := range []string{"reader.proj-1234.platform", "reader.base.platform"} {
+	for _, processName := range []string{"reader.proj-1234.shop", "reader.base.shop"} {
 		if want := "reader --doc=" + strconv.Itoa(docPort); environment.supervisor.runningSpecs[processName].Command != want {
 			t.Errorf("%s command = %q, want %q", processName, environment.supervisor.runningSpecs[processName].Command, want)
 		}
 	}
-	if slices.Contains(environment.supervisor.startedInOrder, "doc.proj-1234.platform") {
+	if slices.Contains(environment.supervisor.startedInOrder, "doc.proj-1234.shop") {
 		t.Errorf("started %v, want doc in the base stack only", environment.supervisor.startedInOrder)
 	}
 }

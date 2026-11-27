@@ -33,10 +33,10 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	if _, err := os.Stat(environment.executor.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)
 	}
-	otherStack := "proj-5678"
+	otherStack := "retry-jobs"
 	environment.start(t, otherStack, StartOptions{}, "internalapi")
-	if port := environment.appPort(t, "proj-5678", "internalapi"); port != portOfRemovedStack {
-		t.Errorf("internalapi.proj-5678.platform got port %d, want the freed port %d", port, portOfRemovedStack)
+	if port := environment.appPort(t, "retry-jobs", "internalapi"); port != portOfRemovedStack {
+		t.Errorf("internalapi.retry-jobs.shop got port %d, want the freed port %d", port, portOfRemovedStack)
 	}
 }
 
@@ -50,8 +50,8 @@ func TestRemoveRefusesTheBaseStack(t *testing.T) {
 			t.Errorf("Remove(%s) = %v, want a refusal", stackName, err)
 		}
 	}
-	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base.platform"]; !isRunning {
-		t.Error("internalapi.base.platform stopped after a refused remove")
+	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base.shop"]; !isRunning {
+		t.Error("internalapi.base.shop stopped after a refused remove")
 	}
 }
 
@@ -85,9 +85,9 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 	deletedWorktreeDir := filepath.Join(t.TempDir(), "deleted")
 	boundWorktreesByStack := map[string]map[string]string{
 		"base":         nil,
-		"all-deleted":  {"platform": deletedWorktreeDir, "portal": deletedWorktreeDir + "-portal"},
-		"one-deleted":  {"platform": deletedWorktreeDir, "portal": existingWorktreeDir},
-		"none-deleted": {"platform": otherExistingWorktreeDir},
+		"all-deleted":  {"shop": deletedWorktreeDir, "portal": deletedWorktreeDir + "-portal"},
+		"one-deleted":  {"shop": deletedWorktreeDir, "portal": existingWorktreeDir},
+		"none-deleted": {"shop": otherExistingWorktreeDir},
 		"moved-away":   nil,
 	}
 	saveStacks(t, environment.executor, boundWorktreesByStack)
@@ -108,8 +108,8 @@ func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StackCheckouts: %v", err)
 	}
-	if dir := checkoutsByStack["proj-1234"]["platform"].Dir; dir != "/worktrees/proj-1234" {
-		t.Errorf("platform checkout of proj-1234 = %q", dir)
+	if dir := checkoutsByStack["proj-1234"]["shop"].Dir; dir != "/worktrees/proj-1234" {
+		t.Errorf("shop checkout of proj-1234 = %q", dir)
 	}
 	if dir := checkoutsByStack["proj-1234"]["portal"].Dir; dir != "/src/portal" {
 		t.Errorf("portal checkout of proj-1234 = %q", dir)
