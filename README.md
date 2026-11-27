@@ -42,7 +42,7 @@ A Traefik proxy sends each URL to its app.
 
 - Linux, and Go 1.26 to build `ilot`.
 - A development container, the devbox, that holds the file `/etc/devhost.env`. Without that file, `ilot` refuses to run, except for `ilot check` and `ilot apps`.
-- The Docker daemon of the host of the devbox, the devhost. `ilot` turns a path under your devbox home into the same path under `/home/<login>/devbox` on the devhost, so that bind mounts work. `LC_DEVBOX_LOGIN` gives `<login>`.
+- Docker, for the proxy container and for container apps. A mount of a container app names a path on this machine.
 - process-compose on `PATH`.
 - zsh. `ilot` reads the environment of the apps from a clean zsh.
 - A Traefik container named `ilotproxy_<login>` that mounts its routes folder at `/etc/traefik/routes`. To skip that lookup, set `ILOT_ROUTES_DIR` to the routes folder.
@@ -205,7 +205,7 @@ It needs no `run`. If the app has a `build`, it runs before the container starts
 | Field | Meaning |
 |---|---|
 | `image` | Image to run. Required. |
-| `mounts` | Folders to mount, from the path in the container to the path in the devbox. The value can use templates. |
+| `mounts` | Folders to mount, from the path in the container to the path on this machine. The value can use templates. |
 | `env_files` | Env files that `docker run` reads. |
 | `links` | Other container apps of the same stack, from the host name that the container uses to the app name. `ilot start` starts them first. |
 | `external_links` | Containers that `ilot` does not run, from the host name that the container uses to the container name. |

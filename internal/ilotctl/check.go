@@ -46,7 +46,6 @@ func CheckRendering(config appconfig.Config) []error {
 		ConfigForStack:      nil,
 		UsesMise:            func(string) bool { return false },
 		ReposNotCloned:      nil,
-		HostPath:            func(devboxPath string) string { return devboxPath },
 		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
 		KeyringFile:         "",
 		ShellEnv:            nil,

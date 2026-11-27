@@ -326,18 +326,12 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
 		UsesMise:            func(string) bool { return false },
-		HostPath: func(devboxPath string) string {
-			if rest, isUnderHome := strings.CutPrefix(devboxPath, "/src/"); isUnderHome {
-				return "/home/jdoe/devbox/src/" + rest
-			}
-			return devboxPath
-		},
-		KeyringFile:      "",
-		RoutesDir:        routesDir,
-		BackendHost:      "devbox",
-		ReadyTimeout:     time.Second,
-		ProgressInterval: 0,
-		Output:           output,
+		KeyringFile:         "",
+		RoutesDir:           routesDir,
+		BackendHost:         "devbox",
+		ReadyTimeout:        time.Second,
+		ProgressInterval:    0,
+		Output:              output,
 	}
 	supervisor.envAtStart = shellEnvOf(controller)
 	return testEnvironment{
@@ -1392,7 +1386,7 @@ func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
 		"--env-file '/etc/acme.conf.d/devhost.conf'",
 		"-e 'REGION'",
 		"-e 'GATEWAY_URL'",
-		"-v '/home/jdoe/devbox/src/portal/schemas:/src/schemas'",
+		"-v '/src/portal/schemas:/src/schemas'",
 		"--link 'ilot-proj-1234-search-cache:postgres-cache'",
 		"--link 'devhost_legacy_jdoe:legacy-db'",
 		" 'registry/search:latest'",
