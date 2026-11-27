@@ -358,7 +358,7 @@ func (supervisor *Supervisor) stop(name string, target *entry) {
 	deadline, cancel := context.WithTimeout(context.Background(), supervisor.stopTimeout)
 	defer cancel()
 	supervisor.logger.Info("process stops", "process", name, "pid", stopped.pid)
-	if spec.Stop == "" || !supervisor.runStopCommand(deadline, name, spec, stopped) {
+	if spec.Stop == "" || !supervisor.runStopCommand(deadline, name, spec) {
 		_ = syscall.Kill(-stopped.pid, syscall.SIGTERM)
 	}
 	select {
@@ -371,9 +371,16 @@ func (supervisor *Supervisor) stop(name string, target *entry) {
 	<-stopped.exited.Done()
 }
 
-func (supervisor *Supervisor) runStopCommand(deadline context.Context, name string, spec Spec, stopped *run) (hasSucceeded bool) {
+func (supervisor *Supervisor) runStopCommand(deadline context.Context, name string, spec Spec) (hasSucceeded bool) {
 	command := shellCommand(deadline, spec, spec.Stop)
-	command.Stdout, command.Stderr = stopped.output, stopped.output
+	// Not the writer of the process: that one closes when the process exits, and a stop command often lives longer.
+	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes)
+	if err != nil {
+		supervisor.logger.Warn("the output of the stop command is lost", "process", name, "error", err)
+	} else {
+		defer output.Close()
+		command.Stdout, command.Stderr = output, output
+	}
 	if err := command.Run(); err != nil {
 		supervisor.logger.Warn("the stop command failed, the process gets SIGTERM", "process", name, "error", err)
 		return false
