@@ -236,3 +236,27 @@ func TestANamedStartInAStackWhoseWorktreesAreAllDeletedIsRefused(t *testing.T) {
 		t.Errorf("started %v, want nothing from the main checkout", environment.supervisor.startedInOrder)
 	}
 }
+
+func TestStartAllStartsAStackWhenOnlyOneOfItsWorktreesIsDeleted(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.supervisor.simulateDaemonRestart()
+	environment.supervisor.startedInOrder = nil
+	environment.executor.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
+		return map[string]workspace.Worktree{
+			"shop":   {Repo: "shop", Dir: "/src/shop", Branch: "base", IsMain: true},
+			"studio": {Repo: "studio", Dir: "/worktrees/studio-task-1234", Branch: "TASK-1234-x", IsMain: false},
+		}, nil
+	}
+
+	if err := environment.executor.StartAll(t.Context()); err != nil {
+		t.Fatalf("StartAll = %v", err)
+	}
+
+	if !slices.Contains(environment.supervisor.startedInOrder, "publicapi.task-1234.shop") {
+		t.Errorf("started %v, want publicapi.task-1234.shop: one worktree of the stack still exists", environment.supervisor.startedInOrder)
+	}
+	if strings.Contains(environment.output.String(), "has no worktree of its own") {
+		t.Errorf("output %q, want no skip line", environment.output.String())
+	}
+}
