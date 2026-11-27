@@ -41,6 +41,18 @@ func TestBootAndARestartWithNoAppAreGone(t *testing.T) {
 	}
 }
 
+func TestTheAuditLogNamesTheCommandWithoutArgumentPlaceholders(t *testing.T) {
+	for arguments, want := range map[string]string{"start api front": "start", "logs -f api": "logs", "daemon restart": "daemon restart", "stack bind shop-12": "stack bind"} {
+		parsed, err := parse(t, strings.Fields(arguments)...)
+		if err != nil {
+			t.Fatalf("parse %s: %v", arguments, err)
+		}
+		if got := commandPath(parsed); got != want {
+			t.Errorf("commandPath(%s) = %q, want %q", arguments, got, want)
+		}
+	}
+}
+
 func TestAStartWithNoAppParses(t *testing.T) {
 	if parsed, err := parse(t, "start"); err != nil || parsed.Command() != "start" {
 		t.Errorf("parse start = %v, %v", parsed, err)
