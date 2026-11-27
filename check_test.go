@@ -58,7 +58,7 @@ func TestCheckOfAFileOutsideAnyCheckoutNeedsARepoList(t *testing.T) {
 }
 
 func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
-	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  gateway: {run: gw, gateway: true, ports: [http]}\n")
+	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  gateway: {run: gw, ports: [http]}\n")
 	portalFile := writeConfigFile(t, "apps:\n  portal-api: {run: 'api --port={{port \"gateway\" \"htp\"}}'}\n")
 
 	problems := checkConfigFile("platform", platformFile, map[string]string{"portal": portalFile})
@@ -71,14 +71,14 @@ func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
 
 func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
 	configFile := writeConfigFile(t, "domain: dev.example.net\napps:\n"+
-		"  first: {run: one, ports: [http], route: http, gateway_aliases: [same-alias]}\n"+
-		"  second: {run: 'two --port={{port \"ghost\" \"http\"}}', ports: [http], route: http, gateway_aliases: [same-alias]}\n")
+		"  first: {run: one, ports: [http], route: no-such-port}\n"+
+		"  second: {run: 'two --port={{port \"ghost\" \"http\"}}', ports: [http], route: http}\n")
 
 	problems := checkConfigFile("platform", configFile, nil)
 
 	joined := errors.Join(problems...)
-	if joined == nil || !strings.Contains(joined.Error(), "same-alias") || !strings.Contains(joined.Error(), "ghost") {
-		t.Fatalf("checkConfigFile = %v, want both the alias claimed twice and the template typo", joined)
+	if joined == nil || !strings.Contains(joined.Error(), "no-such-port") || !strings.Contains(joined.Error(), "ghost") {
+		t.Fatalf("checkConfigFile = %v, want both the route without a port and the template typo", joined)
 	}
 }
 

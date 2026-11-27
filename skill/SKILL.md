@@ -69,7 +69,7 @@ ilot --skill                    # print this skill
 
 ## When you edit an ilot.yaml
 
-Run `ilot check` after every change to a `ilot.yaml`. It merges the file with the other repos' `ilot.yaml`, runs the config checks, and renders every app's command, env and mounts. It finds typos in fields and templates, duplicate app names and gateway aliases claimed twice.
+Run `ilot check` after every change to a `ilot.yaml`. It merges the file with the other repos' `ilot.yaml`, runs the config checks, and renders every app's command, env and mounts. It finds typos in fields and templates, and duplicate app names.
 
 When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too: CI checks only platform's file.
 

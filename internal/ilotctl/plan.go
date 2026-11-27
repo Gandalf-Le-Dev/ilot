@@ -50,13 +50,13 @@ func (controller *Controller) planStart(stacks stackSet, requestedInstances []in
 	return startOrder, slices.Sorted(maps.Keys(isExternalDependency))
 }
 
-// The apps of a stack use its own instance of an app when it runs one (the gateway and per_stack apps always), master's otherwise.
+// The apps of a stack use its own instance of an app when it runs one (per_stack apps always), master's otherwise.
 func (controller *Controller) stackServing(stacks stackSet, stackName, appName string) string {
 	app, _ := controller.anyDeclaration(stackName, appName)
 	switch {
 	case app.Shared:
 		return stack.SharedStackName
-	case app.Gateway || app.PerStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
+	case app.PerStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
 		return stackName
 	}
 	return stack.MasterStackName

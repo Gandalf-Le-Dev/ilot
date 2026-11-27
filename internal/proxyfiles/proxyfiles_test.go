@@ -1,7 +1,6 @@
 package proxyfiles
 
 import (
-	"encoding/json"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -52,22 +51,6 @@ func TestTraefikRoutesSendsEachAppHostToItsPort(t *testing.T) {
 func TestRoutesFileNameDoesNotCollideWithCommittedRouteFiles(t *testing.T) {
 	if got := RoutesFileName("master"); got != "ilot-master.yml" {
 		t.Errorf("RoutesFileName = %q", got)
-	}
-}
-
-func TestLocalServicesMapsEachAliasToItsURL(t *testing.T) {
-	content, err := LocalServices(map[string]string{
-		"acme-internalapi": "http://localhost:20001",
-	})
-	if err != nil {
-		t.Fatalf("LocalServices: %v", err)
-	}
-	var parsed map[string]string
-	if err := json.Unmarshal(content, &parsed); err != nil {
-		t.Fatalf("output is not JSON: %v", err)
-	}
-	if parsed["acme-internalapi"] != "http://localhost:20001" || len(parsed) != 1 {
-		t.Errorf("LocalServices = %v", parsed)
 	}
 }
 

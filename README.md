@@ -150,7 +150,7 @@ When the timeout passes while the app still runs, `ilot` keeps the app and says 
 ## The ilot.yaml files
 
 The root file is `devbox/ilot.yaml` in the main checkout of the platform repo.
-Only this file sets `domain`, `gateway_base_file` and `repos`.
+Only this file sets `domain` and `repos`.
 Each entry of `repos` gives the default path of a repo and, for a repo with apps, the name of its file.
 Every repo can declare `env`, `external` and `apps`.
 
@@ -168,8 +168,6 @@ The fields of an app:
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
 | `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. |
 | `depends_on` | Apps and external services that the app needs at startup. |
-| `gateway_aliases` | Names that other apps use to call this app through the gateway. It needs a `route`. |
-| `gateway` | Marks the gateway app. Only one app can have it. |
 | `autostart` | `ilot boot` starts the app in the `master` stack. |
 | `shared` | The app runs once, in the `devbox` stack, for every worktree. Each of its ports needs a number in `fixed_ports`. |
 | `per_stack` | An app that depends on this app gets the copy of its own stack, not the `master` copy. |
@@ -195,15 +193,8 @@ The `build`, `run` and `env` values can use these templates:
 
 An app never chooses its own port. It reads the port from a flag or a variable that its `run` command gives it.
 
-An external service is a service that `ilot` does not start. It has a `port`, a `start_hint` and optional `gateway_aliases`.
+An external service is a service that `ilot` does not start. It has a `port` and a `start_hint`.
 `ilot start` makes sure that its port answers. If the port does not answer, `ilot start` prints the `start_hint`.
-
-### The gateway
-
-One app can be the gateway of a stack.
-For each stack, `ilot` writes `services.json` in the folder of the stack.
-This file maps the `gateway_aliases` of the running apps to their addresses, on top of the file that `gateway_base_file` names.
-Give that path to your gateway with `{{.StackDir}}/services.json`.
 
 ### Container apps
 
@@ -263,7 +254,7 @@ When you add a command, add it to the skill too: a test fails otherwise.
 | Path | Content |
 |---|---|
 | `~/.config/ilot/env.yaml` | Your personal settings. |
-| `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/`, its logs in `logs/<app>.log` and its `services.json`. |
+| `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/` and its logs in `logs/<app>.log`. |
 | `~/.local/state/ilot/process-compose/` | The state of the daemon, and the environment that it started with. |
 | `<routes folder>/ilot-<stack>.yml` | The proxy routes of a stack. |
 

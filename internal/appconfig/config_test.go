@@ -29,7 +29,6 @@ apps:
     route: http
     watch: {paths: [lib, main.pl], exts: [pl, pm]}
   gateway:
-    gateway: true
     run: gatewayd -listen-addr :{{.Ports.http}}
     ports: [http]
     fixed_ports: {http: 9090}
@@ -41,7 +40,6 @@ apps:
     route: http
     ready: {port: monitoring, path: /health}
     depends_on: [gateway, temporal]
-    gateway_aliases: [acme-internalapi]
 `
 
 func writeConfigFile(t *testing.T, content string) string {
@@ -76,9 +74,6 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 	internalapi := config.Apps["internalapi"]
 	if internalapi.Route != "http" || internalapi.Ready.Path != "/health" || internalapi.Env["DEBUG"] != "1" {
 		t.Errorf("internalapi = %+v", internalapi)
-	}
-	if !config.Apps["gateway"].Gateway {
-		t.Error("gateway app is not marked as the stack gateway")
 	}
 }
 
@@ -121,7 +116,7 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 			name: "duplicate fixed port between an app and an external service",
 			config: Config{
 				External: map[string]ExternalService{"keyring": {Port: 9090}},
-				Apps:     map[string]App{"gateway": {Run: "gw", Gateway: true, Ports: []string{"http"}, FixedPorts: map[string]int{"http": 9090}}},
+				Apps:     map[string]App{"gateway": {Run: "gw", Ports: []string{"http"}, FixedPorts: map[string]int{"http": 9090}}},
 			},
 			wantErrorSubstr: "port 9090",
 		},
@@ -144,11 +139,6 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 			name:            "shared app with a port that is not fixed",
 			config:          Config{Apps: map[string]App{"temporal": {Run: "temporal", Shared: true, Ports: []string{"grpc", "ui"}, FixedPorts: map[string]int{"grpc": 7233}}}},
 			wantErrorSubstr: `shared app "temporal" needs a fixed number for port "ui"`,
-		},
-		{
-			name:            "shared gateway",
-			config:          Config{Apps: map[string]App{"gateway": {Run: "gw", Gateway: true, Shared: true, Ports: []string{"http"}, FixedPorts: map[string]int{"http": 9090}}}},
-			wantErrorSubstr: "gateway app \"gateway\" cannot be shared",
 		},
 		{
 			name:            "home path without a route",
@@ -189,35 +179,6 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 			wantErrorSubstr: "dependency cycle",
 		},
 		{
-			name: "two gateway apps",
-			config: Config{Apps: map[string]App{
-				"gateway":  {Run: "gw", Gateway: true, Ports: []string{"http"}},
-				"gateway2": {Run: "gw", Gateway: true, Ports: []string{"http"}},
-			}},
-			wantErrorSubstr: "one gateway app",
-		},
-		{
-			name:            "gateway alias without a route",
-			config:          Config{Apps: map[string]App{"api": {Run: "api", GatewayAliases: []string{"acme-api"}}}},
-			wantErrorSubstr: "gateway_aliases need a route",
-		},
-		{
-			name: "gateway alias claimed twice",
-			config: Config{Apps: map[string]App{
-				"api":  {Run: "api", Ports: []string{"http"}, Route: "http", GatewayAliases: []string{"acme-api"}},
-				"api2": {Run: "api", Ports: []string{"http"}, Route: "http", GatewayAliases: []string{"acme-api"}},
-			}},
-			wantErrorSubstr: `gateway alias "acme-api"`,
-		},
-		{
-			name: "gateway alias claimed by an app and an external service",
-			config: Config{
-				External: map[string]ExternalService{"restapi": {Port: 10003, GatewayAliases: []string{"acme-api"}}},
-				Apps:     map[string]App{"api": {Run: "api", Ports: []string{"http"}, Route: "http", GatewayAliases: []string{"acme-api"}}},
-			},
-			wantErrorSubstr: `gateway alias "acme-api"`,
-		},
-		{
 			name: "app and external service share a name",
 			config: Config{
 				External: map[string]ExternalService{"temporal": {Port: 7233}},
@@ -250,19 +211,6 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 func TestValidateAcceptsValidConfig(t *testing.T) {
 	if _, err := Load(writeConfigFile(t, validConfigYAML)); err != nil {
 		t.Fatalf("Load: %v", err)
-	}
-}
-
-func TestValidateReportsEveryGatewayProblemAtOnce(t *testing.T) {
-	config := Config{Apps: map[string]App{
-		"gateway":  {Run: "gw", Gateway: true},
-		"gateway2": {Run: "gw", Gateway: true, Ports: []string{"http"}},
-	}}
-
-	err := config.Validate()
-
-	if err == nil || !strings.Contains(err.Error(), `gateway app "gateway" needs a port`) || !strings.Contains(err.Error(), "one gateway app") {
-		t.Fatalf("Validate() = %v, want both the missing port and the second gateway", err)
 	}
 }
 
