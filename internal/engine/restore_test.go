@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"slices"
@@ -21,12 +21,12 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 	environment.start(t, environment.base, StartOptions{}, "standalone")
-	if err := environment.controller.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
 		t.Fatal(err)
 	}
 	environment.supervisor.simulateDaemonRestart()
 
-	listing, err := environment.controller.List(t.Context())
+	listing, err := environment.executor.List(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 		t.Errorf("restore = %q, want the command that restores the members", listing.Restore)
 	}
 
-	if err := environment.controller.StartAll(t.Context()); err != nil {
+	if err := environment.executor.StartAll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -58,7 +58,7 @@ func TestAfterADaemonRestartListShowsDownAndStartAllRestoresInOrder(t *testing.T
 	if slices.Contains(started, "standalone.base.platform") {
 		t.Errorf("started %v, want standalone.base.platform left stopped", started)
 	}
-	listing, err = environment.controller.List(t.Context())
+	listing, err = environment.executor.List(t.Context())
 	if err != nil || listing.Restore != "" {
 		t.Errorf("restore after ilot start --all = %q, %v; want nothing left down", listing.Restore, err)
 	}
@@ -70,7 +70,7 @@ func TestStartAllSendsNoCallForAMemberThatRuns(t *testing.T) {
 	environment.supervisor.forgetProcess("publicapi.proj-1234.platform")
 	environment.supervisor.calls = nil
 
-	if err := environment.controller.StartAll(t.Context()); err != nil {
+	if err := environment.executor.StartAll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 

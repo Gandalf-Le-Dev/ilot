@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
-func (controller *Controller) checkExternalServicesUp(externalNames []string) error {
+func (executor *Executor) checkExternalServicesUp(externalNames []string) error {
 	var problems []error
 	for _, externalName := range externalNames {
-		externalService := controller.Config.External[externalName]
-		if !controller.IsExternalServiceUp(externalService.Port) {
+		externalService := executor.Config.External[externalName]
+		if !executor.IsExternalServiceUp(externalService.Port) {
 			problems = append(problems, fmt.Errorf("external service %s is down on port %d, start it with: %s", externalName, externalService.Port, externalService.StartHint))
 		}
 	}
@@ -29,7 +29,7 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 
 // checkStoredPorts tests each port that an instance to start already has: its fixed ports, and the ports of an earlier start.
 // Another program can have taken one since, and the app would then fail with an error of its own.
-func (controller *Controller) checkStoredPorts(before plan.Snapshot, start plan.Start, processByName map[string]daemon.Process) error {
+func (executor *Executor) checkStoredPorts(before plan.Snapshot, start plan.Start, processByName map[string]daemon.Process) error {
 	fixedPortsOf := map[plan.Instance]map[string]int{}
 	for _, fixedPort := range start.FixedPorts {
 		if fixedPortsOf[fixedPort.Instance] == nil {
@@ -44,7 +44,7 @@ func (controller *Controller) checkStoredPorts(before plan.Snapshot, start plan.
 		ports := maps.Clone(before.Ports(appInstance))
 		maps.Copy(ports, fixedPortsOf[appInstance])
 		for _, portName := range slices.Sorted(maps.Keys(ports)) {
-			if !controller.IsPortFreeOnHost(ports[portName]) {
+			if !executor.IsPortFreeOnHost(ports[portName]) {
 				return fmt.Errorf("port %d (%s) of %s is taken by another process: stop that process, then run the command again", ports[portName], portName, before.ProcessName(appInstance))
 			}
 		}
@@ -53,8 +53,8 @@ func (controller *Controller) checkStoredPorts(before plan.Snapshot, start plan.
 }
 
 // allocatePorts gives each instance of the start, in the state after it, a free port for each port that has no number yet.
-func (controller *Controller) allocatePorts(start plan.Start) error {
-	allocated, err := controller.PortRange.Allocate(len(start.PortNeeds), start.After.State.PortsInUse(), controller.IsPortFreeOnHost)
+func (executor *Executor) allocatePorts(start plan.Start) error {
+	allocated, err := executor.PortRange.Allocate(len(start.PortNeeds), start.After.State.PortsInUse(), executor.IsPortFreeOnHost)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (controller *Controller) allocatePorts(start plan.Start) error {
 	return nil
 }
 
-func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, needsBuild func(plan.Instance) bool) error {
+func (executor *Executor) buildApps(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, needsBuild func(plan.Instance) bool) error {
 	type buildInWorktree struct {
 		workingDir string
 		command    string
@@ -94,16 +94,16 @@ func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snaps
 		if err := os.MkdirAll(snapshot.BinDir(appInstance.Stack), 0o755); err != nil {
 			return err
 		}
-		releaseBuilds, err := controller.lockBuilds(ctx, appInstance.Stack)
+		releaseBuilds, err := executor.lockBuilds(ctx, appInstance.Stack)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(controller.Output, "building %s in %s\n", plan.ProcessName(controller.Workspace, appInstance), workingDir)
-		stopProgress := controller.printProgressUntilStopped("building " + plan.ProcessName(controller.Workspace, appInstance))
-		err = controller.RunBuild(ctx, workingDir, build.command, buildEnviron(snapshot.Machine))
+		fmt.Fprintf(executor.Output, "building %s in %s\n", plan.ProcessName(executor.Workspace, appInstance), workingDir)
+		stopProgress := executor.printProgressUntilStopped("building " + plan.ProcessName(executor.Workspace, appInstance))
+		err = executor.RunBuild(ctx, workingDir, build.command, buildEnviron(snapshot.Machine))
 		stopProgress()
 		if err := errors.Join(err, releaseBuilds()); err != nil {
-			return fmt.Errorf("build %s: %w", plan.ProcessName(controller.Workspace, appInstance), err)
+			return fmt.Errorf("build %s: %w", plan.ProcessName(executor.Workspace, appInstance), err)
 		}
 	}
 	return nil
@@ -113,11 +113,11 @@ const buildLockPollInterval = 100 * time.Millisecond
 
 // lockBuilds lets one build run in a stack at a time: two apps of a stack can write the same binary.
 // ilot start, ilot restart and the watcher of an app all build through it.
-func (controller *Controller) lockBuilds(ctx context.Context, stackName string) (release func() error, err error) {
-	if err := os.MkdirAll(controller.StackDir(stackName), 0o700); err != nil {
+func (executor *Executor) lockBuilds(ctx context.Context, stackName string) (release func() error, err error) {
+	if err := os.MkdirAll(executor.StackDir(stackName), 0o700); err != nil {
 		return nil, err
 	}
-	lockFile, err := os.OpenFile(filepath.Join(controller.StackDir(stackName), "build.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := os.OpenFile(filepath.Join(executor.StackDir(stackName), "build.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (controller *Controller) lockBuilds(ctx context.Context, stackName string) 
 			return nil, errors.Join(fmt.Errorf("lock %s: %w", lockFile.Name(), err), lockFile.Close())
 		}
 		if !hasSaidThatItWaits {
-			fmt.Fprintf(controller.Output, "waiting for another build of stack %s\n", stackName)
+			fmt.Fprintf(executor.Output, "waiting for another build of stack %s\n", stackName)
 			hasSaidThatItWaits = true
 		}
 		// A poll, and not a blocking lock, so that Ctrl-C ends the wait.
@@ -143,31 +143,31 @@ func (controller *Controller) lockBuilds(ctx context.Context, stackName string) 
 	}
 }
 
-func (controller *Controller) loadState() (state.State, error) {
-	return controller.Store.Load()
+func (executor *Executor) loadState() (state.State, error) {
+	return executor.Store.Load()
 }
 
 // loadStacks gives the snapshot of a command of a stack, and the apps that its config no longer declares, which the command stops.
-func (controller *Controller) loadStacks(stackName string) (plan.Snapshot, []plan.Instance, error) {
-	snapshot, dropped, err := controller.Snapshot(stackName)
+func (executor *Executor) loadStacks(stackName string) (plan.Snapshot, []plan.Instance, error) {
+	snapshot, dropped, err := executor.Snapshot(stackName)
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
-	controller.warnAboutUndeclared(snapshot, dropped)
+	executor.warnAboutUndeclared(snapshot, dropped)
 	return snapshot, dropped, nil
 }
 
-func (controller *Controller) warnAboutUndeclared(snapshot plan.Snapshot, dropped []plan.Instance) {
+func (executor *Executor) warnAboutUndeclared(snapshot plan.Snapshot, dropped []plan.Instance) {
 	for _, droppedInstance := range dropped {
-		fmt.Fprintf(controller.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", snapshot.ProcessName(droppedInstance), droppedInstance.Stack)
+		fmt.Fprintf(executor.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", snapshot.ProcessName(droppedInstance), droppedInstance.Stack)
 	}
 }
 
-func (controller *Controller) saveStacks(snapshot plan.Snapshot) error {
-	if err := snapshot.State.Claim(controller.Workspace, controller.Root); err != nil {
+func (executor *Executor) saveStacks(snapshot plan.Snapshot) error {
+	if err := snapshot.State.Claim(executor.Workspace, executor.Root); err != nil {
 		return err
 	}
-	return controller.Store.Save(snapshot.State)
+	return executor.Store.Save(snapshot.State)
 }
 
 // A build runs in the terminal of the command, so it gets the session variables too, for example SSH_AUTH_SOCK for a private module.

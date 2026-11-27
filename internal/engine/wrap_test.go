@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"strings"
@@ -7,10 +7,10 @@ import (
 
 func TestCommandsOfARepoWithAWrapRunBehindItsPrefix(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
-	portalStandalone := environment.controller.Config.Apps["portal-standalone"]
+	environment.executor.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
+	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
 	portalStandalone.Stop = "api stop --port={{.Ports.http}}"
-	environment.controller.Config.Apps["portal-standalone"] = portalStandalone
+	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
 
 	environment.start(t, environment.base, StartOptions{}, "portal-standalone")
 
@@ -28,7 +28,7 @@ func TestCommandsOfARepoWithAWrapRunBehindItsPrefix(t *testing.T) {
 
 func TestCommandsOfARepoWithoutAWrapRunAsTheyAre(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
+	environment.executor.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
 
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 

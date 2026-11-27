@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"maps"
@@ -12,9 +12,9 @@ import (
 
 func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "LOG_LEVEL": "info", "REGION": "DEV1"})
-	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"REGION": "EU1"}}
-	environment.controller.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"LOG_LEVEL": "debug"}, Apps: nil}
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "LOG_LEVEL": "info", "REGION": "DEV1"})
+	environment.executor.Config.RepoEnv = map[string]map[string]string{"platform": {"REGION": "EU1"}}
+	environment.executor.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"LOG_LEVEL": "debug"}, Apps: nil}
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	entryByKey := environmentOf(t, environment, "standalone")
@@ -37,9 +37,9 @@ func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 
 func TestAChangeOfTheShellReachesAnAppAtItsNextStart(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	laterCommand := environment.controllerOfANewCommand()
+	laterCommand := environment.executorOfANewCommand()
 	laterCommand.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
 
 	if err := laterCommand.Start(t.Context(), environment.featureStack, []string{"standalone"}, StartOptions{}); err != nil {
@@ -53,7 +53,7 @@ func TestAChangeOfTheShellReachesAnAppAtItsNextStart(t *testing.T) {
 
 func TestBuildsRunWithTheShellEnvironment(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "PATH": "/usr/bin"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "PATH": "/usr/bin"})
 
 	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "publicapi")
 
@@ -64,7 +64,7 @@ func TestBuildsRunWithTheShellEnvironment(t *testing.T) {
 
 func TestAContainerGetsNoShellVariable(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"API_TOKEN": "secret"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"API_TOKEN": "secret"})
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234.platform"].Command
@@ -81,9 +81,9 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 
 func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	restart := environment.controllerOfANewCommand()
+	restart := environment.executorOfANewCommand()
 	restart.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
 	environment.supervisor.events = nil
 
@@ -112,7 +112,7 @@ func TestRestartOfADownDaemonBootsIt(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controllerOfANewCommand().Restart(t.Context(), environment.base); err != nil {
+	if err := environment.executorOfANewCommand().Restart(t.Context(), environment.base); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 

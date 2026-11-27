@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"context"
@@ -13,10 +13,10 @@ import (
 // A command from another terminal, or after a profile edit, gets another shell environment.
 func TestAStartInAStackSendsNoCallForAnotherStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "TMPDIR": "/tmp/first"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "TMPDIR": "/tmp/first"})
 	environment.start(t, "proj-5678", StartOptions{}, "publicapi")
 	hashBefore := environment.supervisor.runningSpecs["publicapi.proj-5678.platform"].Hash()
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "TMPDIR": "/tmp/second"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "TMPDIR": "/tmp/second"})
 	environment.supervisor.calls = nil
 	environment.supervisor.startedInOrder = nil
 
@@ -37,9 +37,9 @@ func TestAStartInAStackSendsNoCallForAnotherStack(t *testing.T) {
 
 func TestAStartLeavesARunningDependencyWhoseSpecificationChanged(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin"})
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
 	environment.supervisor.calls = nil
 
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
@@ -53,9 +53,9 @@ func TestAStartLeavesARunningDependencyWhoseSpecificationChanged(t *testing.T) {
 
 func TestAStartOfAChangedAppReplacesItOneTimeAndSaysSo(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin"})
 	environment.start(t, environment.base, StartOptions{}, "standalone")
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/local/bin:/usr/bin"})
 	environment.supervisor.startedInOrder = nil
 	environment.supervisor.restarted = nil
 	environment.output.Reset()
@@ -72,7 +72,7 @@ func TestAStartOfAChangedAppReplacesItOneTimeAndSaysSo(t *testing.T) {
 
 func TestAStartReplacesTheAppsOfItsStackWhoseTemplatesItChanged(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Config.Apps["reader"] = config.App{Run: `reader --api={{port "internalapi"}}`, DependsOn: []string{"internalapi"}}
+	environment.executor.Config.Apps["reader"] = config.App{Run: `reader --api={{port "internalapi"}}`, DependsOn: []string{"internalapi"}}
 	environment.start(t, environment.featureStack, StartOptions{}, "reader")
 	environment.supervisor.startedInOrder = nil
 	environment.output.Reset()
@@ -91,14 +91,14 @@ func TestAStartReplacesTheAppsOfItsStackWhoseTemplatesItChanged(t *testing.T) {
 func TestStopRemovesTheContainerOfAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 	environment := newTestEnvironment(t)
 	var removed []string
-	environment.controller.RemoveContainer = func(_ context.Context, name string) error {
+	environment.executor.RemoveContainer = func(_ context.Context, name string) error {
 		removed = append(removed, name)
 		return nil
 	}
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"search-cache"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.featureStack, []string{"search-cache"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,13 +110,13 @@ func TestStopRemovesTheContainerOfAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 func TestStopLeavesTheRemovalOfAHeldContainerToItsStopCommand(t *testing.T) {
 	environment := newTestEnvironment(t)
 	var removed []string
-	environment.controller.RemoveContainer = func(_ context.Context, name string) error {
+	environment.executor.RemoveContainer = func(_ context.Context, name string) error {
 		removed = append(removed, name)
 		return nil
 	}
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 
-	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"search-cache"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.featureStack, []string{"search-cache"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -127,7 +127,7 @@ func TestStopLeavesTheRemovalOfAHeldContainerToItsStopCommand(t *testing.T) {
 
 func TestTheSessionOfTheTerminalReachesAnAppOutsideItsHash(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = func() (map[string]string, map[string]string, error) {
+	environment.executor.ShellEnv = func() (map[string]string, map[string]string, error) {
 		return map[string]string{"PATH": "/usr/bin"}, map[string]string{"SSH_AUTH_SOCK": "/tmp/agent"}, nil
 	}
 

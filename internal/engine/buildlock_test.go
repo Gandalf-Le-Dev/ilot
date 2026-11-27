@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"bytes"
@@ -30,20 +30,20 @@ func (output *lockedOutput) String() string {
 func TestASecondBuildOfAStackWaitsForTheBuildLock(t *testing.T) {
 	environment := newTestEnvironment(t)
 	output := &lockedOutput{}
-	environment.controller.Output = output
+	environment.executor.Output = output
 	buildStarted := make(chan struct{}, 1)
-	environment.controller.RunBuild = func(context.Context, string, string, []string) error {
+	environment.executor.RunBuild = func(context.Context, string, string, []string) error {
 		buildStarted <- struct{}{}
 		return nil
 	}
-	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "base")
+	releaseFirstBuild, err := environment.executor.lockBuilds(t.Context(), "base")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
 
 	started := make(chan error, 1)
 	go func() {
-		started <- environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{SkipDependencies: true})
+		started <- environment.executor.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{SkipDependencies: true})
 	}()
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -74,7 +74,7 @@ func TestASecondBuildOfAStackWaitsForTheBuildLock(t *testing.T) {
 
 func TestABuildInAnotherStackDoesNotWait(t *testing.T) {
 	environment := newTestEnvironment(t)
-	releaseOtherStack, err := environment.controller.lockBuilds(t.Context(), "proj-1234")
+	releaseOtherStack, err := environment.executor.lockBuilds(t.Context(), "proj-1234")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestABuildInAnotherStackDoesNotWait(t *testing.T) {
 
 func TestACancelEndsTheWaitForTheBuildLock(t *testing.T) {
 	environment := newTestEnvironment(t)
-	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "base")
+	releaseFirstBuild, err := environment.executor.lockBuilds(t.Context(), "base")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
@@ -97,16 +97,16 @@ func TestACancelEndsTheWaitForTheBuildLock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*buildLockPollInterval)
 	defer cancel()
 
-	if _, err := environment.controller.lockBuilds(ctx, "base"); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := environment.executor.lockBuilds(ctx, "base"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lockBuilds = %v, want the end of the context", err)
 	}
 }
 
 func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Store.LockTimeout = 2 * time.Second
+	environment.executor.Store.LockTimeout = 2 * time.Second
 	buildStarted, releaseBuild := make(chan struct{}), make(chan struct{})
-	blocked := environment.controllerOfANewCommand()
+	blocked := environment.executorOfANewCommand()
 	blocked.Output = &lockedOutput{}
 	blocked.RunBuild = func(context.Context, string, string, []string) error {
 		close(buildStarted)
@@ -119,7 +119,7 @@ func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	}()
 	<-buildStarted
 
-	other := environment.controllerOfANewCommand()
+	other := environment.executorOfANewCommand()
 	other.Supervisor = &fakeSupervisor{runningSpecs: map[string]ProcessSpec{}}
 	err := other.Start(t.Context(), environment.featureStack, []string{"standalone"}, StartOptions{})
 	close(releaseBuild)
@@ -130,7 +130,7 @@ func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	if err := <-blockedStart; err != nil {
 		t.Fatalf("the start in base after its build: %v", err)
 	}
-	current, err := environment.controller.Store.Load()
+	current, err := environment.executor.Store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}

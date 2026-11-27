@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"context"
@@ -12,7 +12,7 @@ func TestACancelAfterTheFirstAppEndsTheStart(t *testing.T) {
 	defer cancel()
 	environment.supervisor.onWaitReady = func(string) { cancel() }
 
-	err := environment.controller.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
+	err := environment.executor.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("Start = %v, want the cancel", err)
@@ -31,7 +31,7 @@ func TestACancelAfterTheFirstAppEndsStartAll(t *testing.T) {
 	defer cancel()
 	environment.supervisor.onWaitReady = func(string) { cancel() }
 
-	err := environment.controller.StartAll(ctx)
+	err := environment.executor.StartAll(ctx)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("StartAll = %v, want the cancel", err)

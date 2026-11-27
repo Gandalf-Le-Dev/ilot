@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"bytes"
@@ -192,7 +192,7 @@ type recordedBuild struct {
 }
 
 type testEnvironment struct {
-	controller    *Controller
+	executor      *Executor
 	supervisor    *fakeSupervisor
 	builds        *[]recordedBuild
 	buildEnvirons *[][]string
@@ -201,10 +201,10 @@ type testEnvironment struct {
 	featureStack  string
 }
 
-// Every ilot command builds its own controller.
-func (environment testEnvironment) controllerOfANewCommand() *Controller {
-	controller := *environment.controller
-	return &controller
+// Every ilot command builds its own executor.
+func (environment testEnvironment) executorOfANewCommand() *Executor {
+	executor := *environment.executor
+	return &executor
 }
 
 func testConfig() config.Config {
@@ -324,7 +324,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	builds := &[]recordedBuild{}
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
-	controller := &Controller{
+	executor := &Executor{
 		Source: Source{
 			Workspace:         "platform",
 			Root:              "/src/platform",
@@ -351,9 +351,9 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		ProgressInterval:    0,
 		Output:              output,
 	}
-	controller.Machine.StateDir = controller.Store.RootDir
+	executor.Machine.StateDir = executor.Store.RootDir
 	return testEnvironment{
-		controller:    controller,
+		executor:      executor,
 		supervisor:    supervisor,
 		builds:        builds,
 		buildEnvirons: buildEnvirons,
@@ -365,18 +365,18 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 
 func (environment testEnvironment) start(t *testing.T, stackName string, options StartOptions, appNames ...string) {
 	t.Helper()
-	if err := environment.controller.Start(t.Context(), stackName, appNames, options); err != nil {
+	if err := environment.executor.Start(t.Context(), stackName, appNames, options); err != nil {
 		t.Fatalf("Start(%s, %v): %v", stackName, appNames, err)
 	}
 }
 
 func (environment testEnvironment) storedApp(t *testing.T, stackName, appName string) state.App {
 	t.Helper()
-	current, err := environment.controller.Store.Load()
+	current, err := environment.executor.Store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return current.App(environment.controller.Workspace, stackName, appName)
+	return current.App(environment.executor.Workspace, stackName, appName)
 }
 
 func (environment testEnvironment) isStoredAsRunning(t *testing.T, stackName, appName string) bool {
@@ -441,7 +441,7 @@ func TestEnvironmentTemplatesUseTheGatewayOfTheStackAndThePortsOfTheBaseStack(t 
 	if worktreePublicapi.Dir != "/worktrees/proj-1234" {
 		t.Errorf("WorkingDir = %q", worktreePublicapi.Dir)
 	}
-	wantBinDir := filepath.Join(environment.controller.StackDir("proj-1234"), "bin")
+	wantBinDir := filepath.Join(environment.executor.StackDir("proj-1234"), "bin")
 	if !strings.HasPrefix(worktreePublicapi.Command, wantBinDir+"/platform api publicapi --port=") {
 		t.Errorf("Command = %q", worktreePublicapi.Command)
 	}
@@ -449,9 +449,9 @@ func TestEnvironmentTemplatesUseTheGatewayOfTheStackAndThePortsOfTheBaseStack(t 
 
 func TestStartRefusesWhenAnExternalDependencyIsDown(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsExternalServiceUp = func(int) bool { return false }
+	environment.executor.IsExternalServiceUp = func(int) bool { return false }
 
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "restart base") {
 		t.Fatalf("err = %v, want the start hint of keyring", err)
@@ -475,7 +475,7 @@ func TestStartWithoutDependenciesStartsOnlyTheRequestedApp(t *testing.T) {
 func TestStartWithoutDependenciesFailsWhenATemplateNeedsAMissingPort(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"internalapi"}, StartOptions{SkipDependencies: true})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"internalapi"}, StartOptions{SkipDependencies: true})
 
 	if err == nil || !strings.Contains(err.Error(), `"gateway"`) {
 		t.Fatalf("err = %v, want an error naming the gateway", err)
@@ -497,7 +497,7 @@ func TestStartOfARunningAppRebuildsAndRestartsIt(t *testing.T) {
 func TestStartShowsTheLogOfAnAppWhileItWaitsForIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{
-		"standalone.base.platform": {logPath: filepath.Join(environment.controller.StackDir("base"), "logs", "standalone.log"), message: "listening"},
+		"standalone.base.platform": {logPath: filepath.Join(environment.executor.StackDir("base"), "logs", "standalone.log"), message: "listening"},
 	}
 
 	environment.start(t, environment.base, StartOptions{}, "standalone")
@@ -509,8 +509,8 @@ func TestStartShowsTheLogOfAnAppWhileItWaitsForIt(t *testing.T) {
 
 func TestStartPrintsWhileABuildRuns(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ProgressInterval = 5 * time.Millisecond
-	environment.controller.RunBuild = func(context.Context, string, string, []string) error {
+	environment.executor.ProgressInterval = 5 * time.Millisecond
+	environment.executor.RunBuild = func(context.Context, string, string, []string) error {
 		time.Sleep(30 * time.Millisecond)
 		return nil
 	}
@@ -622,10 +622,10 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 func TestAFailedStartKeepsTheAppAMemberWithItsLog(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("publicapi.base.platform", processEndsAtEveryStart)
-	logFile := filepath.Join(environment.controller.StackDir("base"), "logs", "publicapi.log")
+	logFile := filepath.Join(environment.executor.StackDir("base"), "logs", "publicapi.log")
 	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{"publicapi.base.platform": {logPath: logFile, message: "pull access denied"}}
 
-	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
 
 	if _, hasEnded := errors.AsType[*daemon.ExitedError](err); !hasEnded || !strings.Contains(err.Error(), "see "+logFile) {
 		t.Fatalf("Start = %v, want the ended process and its log %s", err, logFile)
@@ -644,7 +644,7 @@ func TestAFailedStartKeepsTheAppAMemberWithItsLog(t *testing.T) {
 func TestARetryStartsTheFailedAppAgain(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("publicapi.base.platform", processEndsAtEveryStart)
-	if err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{}); err == nil {
+	if err := environment.executor.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{}); err == nil {
 		t.Fatal("Start = nil, want the failure of publicapi.base.platform")
 	}
 	environment.supervisor.setBehavior("publicapi.base.platform", processEndedAfterItWasReady)
@@ -668,7 +668,7 @@ func TestARetryStartsTheFailedAppAgain(t *testing.T) {
 func TestARetryStartsAFailedDependencyWithoutNamingIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("internalapi.base.platform", processEndsAtEveryStart)
-	if err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
+	if err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
 		t.Fatal("Start = nil, want the failure of internalapi.base.platform")
 	}
 	environment.supervisor.setBehavior("internalapi.base.platform", processEndedAfterItWasReady)
@@ -688,7 +688,7 @@ func TestARetryStartsAFailedTicketStackDependencyInItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
 	environment.supervisor.setBehavior("internalapi.proj-1234.platform", processEndsAtEveryStart)
-	if err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
+	if err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
 		t.Fatal("Start = nil, want the failure of internalapi.proj-1234.platform")
 	}
 	environment.supervisor.setBehavior("internalapi.proj-1234.platform", processEndedAfterItWasReady)
@@ -714,7 +714,7 @@ func TestAFailedNamedAppOrBaseDependencyNeedsNoCommandToStartItAgain(t *testing.
 			environment := newTestEnvironment(t)
 			environment.supervisor.setBehavior(testCase.failedProcess, processEndsAtEveryStart)
 
-			err := environment.controller.Start(t.Context(), environment.featureStack, testCase.appNames, StartOptions{})
+			err := environment.executor.Start(t.Context(), environment.featureStack, testCase.appNames, StartOptions{})
 
 			if err == nil || !strings.Contains(err.Error(), testCase.failedProcess) {
 				t.Fatalf("Start = %v, want the failure of %s", err, testCase.failedProcess)
@@ -731,7 +731,7 @@ func TestStartNeverStopsADependencyItOnlyWaitsFor(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 	environment.supervisor.setBehavior("internalapi.base.platform", processEndsWhileWaitedFor)
 
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "internalapi.base.platform") {
 		t.Fatalf("Start = %v, want the failure of internalapi.base.platform", err)
@@ -745,7 +745,7 @@ func TestStartKeepsAnAppThatTimesOut(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("publicapi.base.platform", processStaysNotReady)
 
-	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || !strings.HasSuffix(err.Error(), "it still starts: ilot keeps it") {
 		t.Fatalf("Start = %v, want it to say that the app still starts", err)
@@ -776,7 +776,7 @@ func TestStartKeepsTheAppWhenTheContextIsCancelled(t *testing.T) {
 				}
 			}
 
-			err := environment.controller.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
+			err := environment.executor.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
 
 			if err == nil {
 				t.Fatal("Start = nil, want the cancelled wait")
@@ -793,7 +793,7 @@ func TestPortsStayTheSameAcrossStopAndStart(t *testing.T) {
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 	portBefore := environment.appPort(t, "base", "standalone")
 
-	if err := environment.controller.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	environment.start(t, environment.base, StartOptions{}, "standalone")
@@ -805,7 +805,7 @@ func TestPortsStayTheSameAcrossStopAndStart(t *testing.T) {
 
 func TestAllocationSkipsPortsOfOtherStacksAndBusyPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
+	environment.executor.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -820,7 +820,7 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if err := environment.controller.Stop(t.Context(), environment.base, []string{"internalapi"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"internalapi"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 
@@ -852,7 +852,7 @@ func TestAStoppedAppKeepsItsRoute(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi", "standalone")
 
-	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"publicapi"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.featureStack, []string{"publicapi"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 
@@ -863,10 +863,10 @@ func TestAStoppedAppKeepsItsRoute(t *testing.T) {
 
 func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.ProxyPort = "18080"
+	environment.executor.Machine.ProxyPort = "18080"
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	listing, err := environment.controller.List(t.Context())
+	listing, err := environment.executor.List(t.Context())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -934,9 +934,9 @@ func TestBaseGatewayUsesItsFixedPortAndWorktreeGatewaysDoNot(t *testing.T) {
 
 func TestStartRefusesAFixedPortHeldByAnotherProcess(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != 9090 }
+	environment.executor.IsPortFreeOnHost = func(port int) bool { return port != 9090 }
 
-	err := environment.controller.Start(t.Context(), environment.base, []string{"gateway"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.base, []string{"gateway"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "9090") {
 		t.Fatalf("err = %v, want an error naming port 9090", err)
@@ -961,8 +961,8 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 
 func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe"})
-	environment.controller.Machine.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
+	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe"})
+	environment.executor.Machine.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
 
 	environment.start(t, environment.base, StartOptions{}, "restapi")
 
@@ -982,7 +982,7 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 		t.Errorf("watcher environment = %v, want %v: the shell, and what makes ilot find the same state", watcher.Env, want)
 	}
 
-	if err := environment.controller.Stop(t.Context(), environment.base, []string{"restapi"}); err != nil {
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"restapi"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 	if _, isRunning := environment.supervisor.runningSpecs["restapi-watch.base.platform"]; isRunning {
@@ -992,9 +992,9 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 
 func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	portalStandalone := environment.controller.Config.Apps["portal-standalone"]
+	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
 	portalStandalone.Watch = config.Watch{Paths: []string{"."}, Exts: []string{"go"}}
-	environment.controller.Config.Apps["portal-standalone"] = portalStandalone
+	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
 
@@ -1010,7 +1010,7 @@ func TestRestartAppsBuildsThenRestartsTheNamedApp(t *testing.T) {
 	*environment.builds = nil
 	environment.supervisor.events = nil
 
-	if err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"}); err != nil {
+	if err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"}); err != nil {
 		t.Fatalf("RestartApps: %v", err)
 	}
 
@@ -1026,9 +1026,9 @@ func TestRestartAppsKeepsTheRunningAppWhenItsBuildFails(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
 	environment.supervisor.events = nil
-	environment.controller.RunBuild = func(context.Context, string, string, []string) error { return errors.New("exit status 1") }
+	environment.executor.RunBuild = func(context.Context, string, string, []string) error { return errors.New("exit status 1") }
 
-	err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
+	err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
 
 	if err == nil || !strings.Contains(err.Error(), "build internalapi.proj-1234.platform") {
 		t.Fatalf("RestartApps = %v, want the failed build", err)
@@ -1041,7 +1041,7 @@ func TestRestartAppsKeepsTheRunningAppWhenItsBuildFails(t *testing.T) {
 func TestRestartAppsRefusesAnAppThatDoesNotRun(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
+	err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
 
 	if err == nil || !strings.Contains(err.Error(), "internalapi.proj-1234.platform does not run") || !strings.Contains(err.Error(), "ilot start internalapi") {
 		t.Fatalf("RestartApps = %v, want a refusal that names ilot start", err)
@@ -1056,7 +1056,7 @@ func TestRestartAppsStartsOneTimeAProcessThatTheDaemonLost(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controllerOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
+	if err := environment.executorOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
 		t.Fatalf("RestartApps: %v", err)
 	}
 
@@ -1079,7 +1079,7 @@ func TestBootStartsAutostartAppsAndTheAppsThatWereRunning(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
+	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
@@ -1098,7 +1098,7 @@ func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 	environment.supervisor.startedInOrder = nil
 
-	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
+	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
@@ -1109,7 +1109,7 @@ func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
 
 func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 	environment := newTestEnvironment(t)
-	masterBinDir := filepath.Join(environment.controller.StackDir("base"), "bin")
+	masterBinDir := filepath.Join(environment.executor.StackDir("base"), "bin")
 	if err := os.MkdirAll(masterBinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1117,7 +1117,7 @@ func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
+	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
@@ -1132,7 +1132,7 @@ func TestBootKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.base.platform", processEndsAtEveryStart)
 
-	err := environment.controller.Boot(t.Context(), environment.base)
+	err := environment.executor.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "internalapi.base.platform") {
 		t.Fatalf("Boot = %v, want an error naming internalapi.base.platform", err)
@@ -1163,7 +1163,7 @@ func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.proj-1234.platform", processEndsAtEveryStart)
 
-	err := environment.controller.Boot(t.Context(), environment.base)
+	err := environment.executor.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "publicapi.proj-1234.platform skipped: it depends on internalapi.proj-1234.platform") {
 		t.Fatalf("Boot = %v, want publicapi.proj-1234.platform skipped because internalapi.proj-1234.platform failed", err)
@@ -1177,9 +1177,9 @@ func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 	environment.supervisor.simulateDaemonRestart()
-	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}).ensure
+	environment.executor.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}).ensure
 
-	err := environment.controller.Boot(t.Context(), environment.base)
+	err := environment.executor.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "search.proj-1234.platform skipped: it depends on search-cache.proj-1234.platform") {
 		t.Fatalf("Boot = %v, want search.proj-1234.platform skipped because the image of search-cache.proj-1234.platform failed", err)
@@ -1191,18 +1191,18 @@ func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 
 func TestHomeURLIsTheRouteListOfTheProxy(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.ProxyPort = "18080"
+	environment.executor.Machine.ProxyPort = "18080"
 
-	if got := environment.controller.Machine.HomeURL(); got != "http://dev.example.net:18080" {
+	if got := environment.executor.Machine.HomeURL(); got != "http://dev.example.net:18080" {
 		t.Errorf("HomeURL = %q", got)
 	}
 }
 
 func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 	environment := newTestEnvironment(t)
-	publicapi := environment.controller.Config.Apps["publicapi"]
+	publicapi := environment.executor.Config.Apps["publicapi"]
 	publicapi.HomePath = "/swagger/"
-	environment.controller.Config.Apps["publicapi"] = publicapi
+	environment.executor.Config.Apps["publicapi"] = publicapi
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
@@ -1213,13 +1213,13 @@ func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 
 func TestListShowsTheHomePathInTheURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.ProxyPort = "18080"
-	publicapi := environment.controller.Config.Apps["publicapi"]
+	environment.executor.Machine.ProxyPort = "18080"
+	publicapi := environment.executor.Config.Apps["publicapi"]
 	publicapi.HomePath = "/swagger/"
-	environment.controller.Config.Apps["publicapi"] = publicapi
+	environment.executor.Config.Apps["publicapi"] = publicapi
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	listing, err := environment.controller.List(t.Context())
+	listing, err := environment.executor.List(t.Context())
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -1231,21 +1231,21 @@ func TestListShowsTheHomePathInTheURL(t *testing.T) {
 func TestLogFileOfAnAppIsInTheStackThatRunsIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	worktreeLog, err := environment.controller.LogFile(environment.featureStack, "publicapi")
+	worktreeLog, err := environment.executor.LogFile(environment.featureStack, "publicapi")
 	if err != nil {
 		t.Fatalf("LogFile(publicapi): %v", err)
 	}
-	if want := filepath.Join(environment.controller.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
+	if want := filepath.Join(environment.executor.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
 		t.Errorf("publicapi log = %q, want %q", worktreeLog, want)
 	}
-	baseLog, err := environment.controller.LogFile(environment.featureStack, "temporal")
+	baseLog, err := environment.executor.LogFile(environment.featureStack, "temporal")
 	if err != nil {
 		t.Fatalf("LogFile(temporal): %v", err)
 	}
-	if want := filepath.Join(environment.controller.StackDir("base"), "logs", "temporal.log"); baseLog != want {
+	if want := filepath.Join(environment.executor.StackDir("base"), "logs", "temporal.log"); baseLog != want {
 		t.Errorf("temporal log = %q, want %q", baseLog, want)
 	}
-	if _, err := environment.controller.LogFile(environment.featureStack, "nope"); err == nil {
+	if _, err := environment.executor.LogFile(environment.featureStack, "nope"); err == nil {
 		t.Error("want an error for an unknown app")
 	}
 }
@@ -1269,7 +1269,7 @@ func TestAppRunsFromTheCheckoutOfItsRepo(t *testing.T) {
 
 func environmentOf(t *testing.T, environment testEnvironment, appName string) map[string]plan.EnvEntry {
 	t.Helper()
-	entries, err := environment.controller.Environment(environment.featureStack, appName)
+	entries, err := environment.executor.Environment(environment.featureStack, appName)
 	if err != nil {
 		t.Fatalf("Environment(%s): %v", appName, err)
 	}
@@ -1282,12 +1282,12 @@ func environmentOf(t *testing.T, environment testEnvironment, appName string) ma
 
 func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.Login = "jdoe"
-	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"LOG_LEVEL": "info", "REGION": "DEV1"}}
-	standalone := environment.controller.Config.Apps["standalone"]
+	environment.executor.Machine.Login = "jdoe"
+	environment.executor.Config.RepoEnv = map[string]map[string]string{"platform": {"LOG_LEVEL": "info", "REGION": "DEV1"}}
+	standalone := environment.executor.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"PORT": "{{.Ports.http}}", "REGION": "EU1"}
-	environment.controller.Config.Apps["standalone"] = standalone
-	environment.controller.Settings = config.WorkspaceSettings{
+	environment.executor.Config.Apps["standalone"] = standalone
+	environment.executor.Settings = config.WorkspaceSettings{
 		Repos: nil,
 		Env:   map[string]string{"LOG_LEVEL": "debug", "PORT": "1"},
 		Apps:  map[string]map[string]string{"standalone": {"API_TOKEN": "custom"}},
@@ -1315,11 +1315,11 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 
 func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.Login = "jdoe"
-	environment.controller.Machine.ProxyPort = "18080"
-	standalone := environment.controller.Config.Apps["standalone"]
+	environment.executor.Machine.Login = "jdoe"
+	environment.executor.Machine.ProxyPort = "18080"
+	standalone := environment.executor.Config.Apps["standalone"]
 	standalone.Run = `run {{.Stack}} {{.User}} {{repo "portal"}} {{url "temporal"}} {{url "internalapi"}}`
-	environment.controller.Config.Apps["standalone"] = standalone
+	environment.executor.Config.Apps["standalone"] = standalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -1341,9 +1341,9 @@ func TestContainerCommandRemovesALeftoverContainerFirst(t *testing.T) {
 
 func TestAContainerBuildRunsBeforeItsContainerStarts(t *testing.T) {
 	environment := newTestEnvironment(t)
-	search := environment.controller.Config.Apps["search"]
+	search := environment.executor.Config.Apps["search"]
 	search.Build = "prepare-files"
-	environment.controller.Config.Apps["search"] = search
+	environment.executor.Config.Apps["search"] = search
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
@@ -1445,7 +1445,7 @@ func TestTwoStacksPublishTheSameContainerOnTwoPorts(t *testing.T) {
 
 func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
+	environment.executor.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
 
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 
@@ -1456,9 +1456,9 @@ func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 
 func TestADependencyWithoutAScopeComesFromBase(t *testing.T) {
 	environment := newTestEnvironment(t)
-	search := environment.controller.Config.Apps["search"]
+	search := environment.executor.Config.Apps["search"]
 	search.Scope = ""
-	environment.controller.Config.Apps["search"] = search
+	environment.executor.Config.Apps["search"] = search
 
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
@@ -1470,9 +1470,9 @@ func TestADependencyWithoutAScopeComesFromBase(t *testing.T) {
 
 func TestDomainTemplateGivesTheProxyDomain(t *testing.T) {
 	environment := newTestEnvironment(t)
-	standalone := environment.controller.Config.Apps["standalone"]
+	standalone := environment.executor.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"ALLOWED_HOSTS": ".{{.Domain}}"}
-	environment.controller.Config.Apps["standalone"] = standalone
+	environment.executor.Config.Apps["standalone"] = standalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -1483,10 +1483,10 @@ func TestDomainTemplateGivesTheProxyDomain(t *testing.T) {
 
 func TestProxyPortTemplateGivesTheProxyPort(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Machine.ProxyPort = "18080"
-	standalone := environment.controller.Config.Apps["standalone"]
+	environment.executor.Machine.ProxyPort = "18080"
+	standalone := environment.executor.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"EXPOSED_PORT": "{{.ProxyPort}}"}
-	environment.controller.Config.Apps["standalone"] = standalone
+	environment.executor.Config.Apps["standalone"] = standalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -1497,10 +1497,10 @@ func TestProxyPortTemplateGivesTheProxyPort(t *testing.T) {
 
 func TestAnAppWithAStopCommandStopsWithItRendered(t *testing.T) {
 	environment := newTestEnvironment(t)
-	standalone := environment.controller.Config.Apps["standalone"]
+	standalone := environment.executor.Config.Apps["standalone"]
 	standalone.Run = "docker run --rm --name standalone-{{.Stack}} -p {{.Ports.http}}:80 nginx"
 	standalone.Stop = "docker stop standalone-{{.Stack}}"
-	environment.controller.Config.Apps["standalone"] = standalone
+	environment.executor.Config.Apps["standalone"] = standalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -1524,7 +1524,7 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Config.RepoEnv = map[string]map[string]string{
+	environment.executor.Config.RepoEnv = map[string]map[string]string{
 		"platform": {"LOG_LEVEL": "info", "REGION": "DEV1", "STACK_NAME": "{{.Stack}}"},
 		"portal":   {"REGION": "EU2"},
 	}
@@ -1546,9 +1546,9 @@ func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t
 
 func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}
+	environment.executor.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}
 
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"portal-front"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"portal-front"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "workspaces.platform.repos.portal in ~/.config/ilot/config.yaml") || !strings.Contains(err.Error(), "/home/user/go/src/portal") {
 		t.Fatalf("Start = %v, want an error naming the repo that is not cloned", err)
@@ -1557,7 +1557,7 @@ func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
 
 func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Settings = config.WorkspaceSettings{
+	environment.executor.Settings = config.WorkspaceSettings{
 		Repos: nil,
 		Env:   map[string]string{"DEBUG_TOKEN": "secret"},
 		Apps:  map[string]map[string]string{"search": {"FEATURE_FLAG": "true"}},
@@ -1577,7 +1577,7 @@ func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 func TestRepoEnvWinsOverTheInheritedShellValue(t *testing.T) {
 	t.Setenv("LOGKIT_LOGJSON", "from-shell")
 	environment := newTestEnvironment(t)
-	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"LOGKIT_LOGJSON": "1"}}
+	environment.executor.Config.RepoEnv = map[string]map[string]string{"platform": {"LOGKIT_LOGJSON": "1"}}
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 	if got := environment.supervisor.runningSpecs["standalone.base.platform"].Env["LOGKIT_LOGJSON"]; got != "1" {
 		t.Errorf("LOGKIT_LOGJSON = %q, want the repo value", got)
@@ -1600,9 +1600,9 @@ func (recorder *imageRecorder) ensure(_ context.Context, image string) (string, 
 func TestStartChecksImagesBeforeAnyBuild(t *testing.T) {
 	environment := newTestEnvironment(t)
 	recorder := &imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}
-	environment.controller.EnsureImage = recorder.ensure
+	environment.executor.EnsureImage = recorder.ensure
 
-	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"search", "publicapi"}, StartOptions{})
+	err := environment.executor.Start(t.Context(), environment.featureStack, []string{"search", "publicapi"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "pull registry/search-cache:latest") || !strings.Contains(err.Error(), "docker login") {
 		t.Fatalf("Start = %v, want the image and the login hint", err)
@@ -1617,11 +1617,11 @@ func TestStartChecksImagesBeforeAnyBuild(t *testing.T) {
 
 func TestStartPullsAnImageOnceForTwoApps(t *testing.T) {
 	environment := newTestEnvironment(t)
-	search := environment.controller.Config.Apps["search"]
+	search := environment.executor.Config.Apps["search"]
 	search.Container.Image = "registry/search-cache:latest"
-	environment.controller.Config.Apps["search"] = search
+	environment.executor.Config.Apps["search"] = search
 	recorder := &imageRecorder{failing: nil}
-	environment.controller.EnsureImage = recorder.ensure
+	environment.executor.EnsureImage = recorder.ensure
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
@@ -1634,7 +1634,7 @@ func TestStartChecksNoImageForARunningContainer(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 	recorder := &imageRecorder{failing: nil}
-	environment.controller.EnsureImage = recorder.ensure
+	environment.executor.EnsureImage = recorder.ensure
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
@@ -1647,9 +1647,9 @@ func TestBootSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "front-like")
 	environment.supervisor.simulateDaemonRestart()
-	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search:latest": "unauthorized"}}).ensure
+	environment.executor.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search:latest": "unauthorized"}}).ensure
 
-	err := environment.controller.Boot(t.Context(), environment.base)
+	err := environment.executor.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "search.base.platform: pull registry/search:latest") || !strings.Contains(err.Error(), "front-like.base.platform skipped") {
 		t.Fatalf("Boot = %v, want the failed image named with its app and stack, and front-like.base.platform skipped", err)
@@ -1666,7 +1666,7 @@ func TestBootSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 func TestStartWithNoContainerChecksNoImage(t *testing.T) {
 	environment := newTestEnvironment(t)
 	recorder := &imageRecorder{failing: nil}
-	environment.controller.EnsureImage = recorder.ensure
+	environment.executor.EnsureImage = recorder.ensure
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
