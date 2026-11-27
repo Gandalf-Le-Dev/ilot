@@ -28,7 +28,7 @@ func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
 		}
 	}
-	processEnv := environment.supervisor.runningSpecs["standalone.proj-1234"].Env
+	processEnv := environment.supervisor.runningSpecs["standalone.proj-1234.platform"].Env
 	if processEnv["GOPROXY"] != "https://proxy" || processEnv["LOG_LEVEL"] != "debug" || processEnv["REGION"] != "EU1" {
 		t.Errorf("the process spec has the environment %v, want every source in it: the daemon adds nothing", processEnv)
 	}
@@ -45,7 +45,7 @@ func TestAChangeOfTheShellReachesAnAppAtItsNextStart(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Env["GOPROXY"]; got != "https://new" {
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234.platform"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY of the process = %q, want the value of the shell files now, with no restart of the daemon", got)
 	}
 }
@@ -66,11 +66,11 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"API_TOKEN": "secret"})
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
+	command := environment.supervisor.runningSpecs["search.proj-1234.platform"].Command
 	if strings.Contains(command, "API_TOKEN") {
 		t.Errorf("command %q passes a shell variable to the image", command)
 	}
-	if got := environment.supervisor.runningSpecs["search.proj-1234"].Env["API_TOKEN"]; got != "secret" {
+	if got := environment.supervisor.runningSpecs["search.proj-1234.platform"].Env["API_TOKEN"]; got != "secret" {
 		t.Errorf("API_TOKEN of the docker command = %q, want the shell value: docker itself needs PATH and HOME", got)
 	}
 	if !strings.Contains(command, "-e 'REGION'") {
@@ -94,11 +94,11 @@ func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 		t.Errorf("events = %v, want a shutdown first", events)
 	}
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	want := []string{"gateway.base", "internalapi.base", "restapi-watch.base", "restapi.base", "standalone.proj-1234", "temporal.base"}
+	want := []string{"gateway.base.platform", "internalapi.base.platform", "restapi-watch.base.platform", "restapi.base.platform", "standalone.proj-1234.platform", "temporal.base.platform"}
 	if !slices.Equal(running, want) {
 		t.Errorf("running after restart %v, want %v", running, want)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Env["GOPROXY"]; got != "https://new" {
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234.platform"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY after the restart = %q, want the shell of the restart", got)
 	}
 	if !strings.Contains(environment.output.String(), "stopping every app of every stack") {
@@ -115,8 +115,8 @@ func TestRestartOfADownDaemonBootsIt(t *testing.T) {
 		t.Fatalf("Restart: %v", err)
 	}
 
-	if _, isRunning := environment.supervisor.runningSpecs["standalone.proj-1234"]; !isRunning {
-		t.Errorf("running after restart %v, want standalone.proj-1234 back", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
+	if _, isRunning := environment.supervisor.runningSpecs["standalone.proj-1234.platform"]; !isRunning {
+		t.Errorf("running after restart %v, want standalone.proj-1234.platform back", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
 	if strings.Contains(environment.output.String(), "stopping every app") {
 		t.Errorf("output = %q, announces a stop although nothing ran", environment.output.String())

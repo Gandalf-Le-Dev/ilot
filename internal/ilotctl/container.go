@@ -13,8 +13,9 @@ import (
 const hostNameInContainer = "host.docker.internal"
 
 // The workspace is in the name, because two workspaces can have an app of one name in the base stack.
+// An underscore separates the parts, because a name of an app, a stack or a workspace can hold a dash and never an underscore.
 func (controller *Controller) containerName(appInstance instance) string {
-	return "ilot-" + appInstance.appName + "-" + appInstance.stackName + "-" + controller.Workspace
+	return "ilot_" + appInstance.appName + "_" + appInstance.stackName + "_" + controller.Workspace
 }
 
 func (controller *Controller) isContainer(appInstance instance) bool {
@@ -34,7 +35,7 @@ func (controller *Controller) containerCommand(stacks stackSet, appInstance inst
 	stackPorts := stacks.app(appInstance).Ports
 	for _, portName := range slices.Sorted(maps.Keys(container.Ports)) {
 		if stackPorts[portName] == 0 {
-			return "", fmt.Errorf("%s has no port for %q yet", appInstance.processName(), portName)
+			return "", fmt.Errorf("%s has no port for %q yet", controller.processName(appInstance), portName)
 		}
 		commandParts = append(commandParts, fmt.Sprintf("-p 127.0.0.1:%d:%d", stackPorts[portName], container.Ports[portName]))
 	}

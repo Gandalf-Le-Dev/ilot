@@ -15,11 +15,15 @@ import (
 // A supervisor that calls every process ready, for a test of what a command does before it reaches the daemon.
 type readySupervisor struct {
 	started map[string]bool
+	dirs    map[string]string
 }
 
 func (supervisor *readySupervisor) Apply(_ context.Context, specs []ilotctl.ProcessSpec) error {
 	for _, spec := range specs {
 		supervisor.started[spec.Name] = true
+		if supervisor.dirs != nil {
+			supervisor.dirs[spec.Name] = spec.Dir
+		}
 	}
 	return nil
 }
@@ -58,7 +62,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(store, currentWorkspace, worktree, true, io.Discard)
+	currentWorkspace, stackName, err := stackOfWorktree(t.Context(), store, currentWorkspace, worktree, true, io.Discard)
 	if err != nil || stackName != "proj-1" {
 		t.Fatalf("stackOfWorktree = %q, %v; want proj-1", stackName, err)
 	}

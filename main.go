@@ -329,7 +329,7 @@ func newControllerForCurrentWorktree(readyTimeout time.Duration, choice stackCho
 	}
 	stackName := workspace.BaseStackName
 	if choice != baseStack {
-		currentWorkspace, stackName, err = stackOfWorktree(store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
+		currentWorkspace, stackName, err = stackOfWorktree(context.Background(), store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
 		if err != nil {
 			return nil, "", err
 		}
@@ -378,6 +378,7 @@ func newController(currentWorkspace workspace.Workspace, store state.Store, stac
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	stateDir := store.RootDir
+	stackStore := ilotctl.StackStore{Files: store, Workspace: currentWorkspace.Name, Root: currentWorkspace.RootDir}
 	shellEnv := sync.OnceValues(func() (map[string]string, error) {
 		return shellenv.OfUser(global.ShellEnv.Args).Environment(context.Background())
 	})
@@ -397,7 +398,7 @@ func newController(currentWorkspace workspace.Workspace, store state.Store, stac
 	controller := &ilotctl.Controller{
 		Workspace:           currentWorkspace.Name,
 		Config:              stackConfig,
-		Store:               store,
+		Store:               stackStore,
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,

@@ -40,7 +40,7 @@ A workspace is the set of repos that share stacks, ports and one name.
 One repo is the root repo: the `ilot.yaml` at its root names the workspace and lists the other repos.
 Each other repo is a member: its `ilot.yaml` names the root with `member_of`.
 `ilot` finds the workspace from the repo of the folder that you are in, so it needs no registry.
-This version keeps the state of one workspace on a machine. A second workspace gets an error that names the first one.
+Several workspaces can run on one machine. Two workspaces with the same name get an error that tells you to set `name`.
 
 For each repo, a stack takes the worktree that is bound to it. If the repo has no such worktree, the stack takes the main checkout of the repo.
 A worktree of a second repo on the same branch joins the stack at the first `ilot start` in it, because the branch gives the same name. If its branch has another name, run `ilot stack bind <name>` in it.
@@ -235,7 +235,7 @@ An external service is a service that `ilot` does not start. It has a `port` and
 
 ### Container apps
 
-An app with a `container` block runs as a Docker container named `ilot-<app>-<stack>-<workspace>`.
+An app with a `container` block runs as a Docker container named `ilot_<app>_<stack>_<workspace>`.
 It needs no `run`. If the app has a `build`, it runs before the container starts.
 Docker is needed only for these apps.
 
@@ -334,7 +334,9 @@ When you add a command, add it to the skill too: a test fails otherwise.
 | Path | Content |
 |---|---|
 | `~/.config/ilot/config.yaml` | The global file. |
-| `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/` and its logs in `logs/<app>.log`. |
+| `~/.local/state/ilot/state.json`, `state.json.bak` | The state of every workspace: the stacks, their bindings, their apps and their ports. The backup is the version before the last change. |
+| `~/.local/state/ilot/state.lock` | The lock that one `ilot` at a time holds to read and change the state. A command waits 10 seconds for it at most. |
+| `~/.local/state/ilot/workspaces/<workspace>/<stack>/` | The binaries of a stack in `bin/` and its logs in `logs/<app>.log`. |
 | `~/.local/state/ilot/daemon.lock`, `daemon.sock`, `daemon.log`, `processes.json` | The lock, the socket and the log of the daemon, and the record of the processes that it runs. If the path of the socket is longer than 100 bytes, the socket is in `/tmp/ilot-<user ID>/`. |
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.

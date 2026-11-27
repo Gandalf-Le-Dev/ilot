@@ -29,6 +29,9 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
 	delete(stacks.byName, stackName)
+	if err := controller.deriveCheckouts(stacks); err != nil {
+		return err
+	}
 	if err := controller.prepareStacks(stacks); err != nil {
 		return err
 	}

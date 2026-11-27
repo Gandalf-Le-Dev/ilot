@@ -50,7 +50,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		for _, appName := range slices.Sorted(maps.Keys(stackState.Apps)) {
 			appInstance := instance{stackName: stackState.Name, appName: appName}
 			status := "stopped"
-			if process, isKnown := processByName[appInstance.processName()]; isKnown {
+			if process, isKnown := processByName[controller.processName(appInstance)]; isKnown {
 				status = statusOf(process)
 			}
 			listing.Apps = append(listing.Apps, AppRow{
@@ -122,7 +122,7 @@ func (controller *Controller) proxyURL(host string) string {
 func (controller *Controller) printURLs(stacks stackSet, requestedInstances []instance) {
 	for _, appInstance := range requestedInstances {
 		if url := controller.publicURL(appInstance); url != "" && stacks.isRunning(appInstance) {
-			fmt.Fprintf(controller.Output, "%s: %s\n", appInstance.processName(), url)
+			fmt.Fprintf(controller.Output, "%s: %s\n", controller.processName(appInstance), url)
 		}
 	}
 }

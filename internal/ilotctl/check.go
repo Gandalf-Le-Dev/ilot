@@ -38,7 +38,7 @@ func CheckRendering(workspaceName string, repoNames []string, merged config.Conf
 	controller := Controller{
 		Workspace:           workspaceName,
 		Config:              merged,
-		Store:               state.Store{RootDir: madeUpCheckoutsRoot + "state"},
+		Store:               StackStore{Files: state.Store{RootDir: madeUpCheckoutsRoot + "state"}, Workspace: workspaceName, Root: ""},
 		Supervisor:          nil,
 		RunBuild:            nil,
 		EnsureImage:         nil,
@@ -79,7 +79,7 @@ func stacksWithEveryAppRunning(repoNames []string, merged config.Config) stackSe
 			repoNames = append(repoNames, app.Repo)
 		}
 	}
-	stacks := stackSet{byName: map[string]*state.StackState{}}
+	stacks := stackSet{byName: map[string]*StackState{}}
 	for _, stackName := range []string{workspace.BaseStackName, checkStackName} {
 		stackState := stacks.ensure(stackName)
 		for _, repoName := range repoNames {
@@ -103,7 +103,7 @@ func stacksWithEveryAppRunning(repoNames []string, merged config.Config) stackSe
 				portByName[portName] = nextMadeUpPort
 				nextMadeUpPort++
 			}
-			stacks.setApp(instance{stackName: stackName, appName: appName}, state.AppState{Ports: portByName, Running: true})
+			stacks.setApp(instance{stackName: stackName, appName: appName}, AppState{Ports: portByName, Running: true})
 		}
 	}
 	return stacks

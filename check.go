@@ -34,7 +34,7 @@ func (command *checkCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	// A check must work where the state belongs to another workspace, and then the branch names the stack.
+	// A check must work where the state cannot be read, and then the branch names the stack.
 	if boundWorkspace, _, err := withBindings(currentWorkspace); err == nil {
 		currentWorkspace = boundWorkspace
 	}

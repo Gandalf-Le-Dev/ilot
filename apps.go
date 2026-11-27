@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,7 +44,7 @@ func (command *appsCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(store, currentWorkspace, worktree, false, os.Stderr)
+	currentWorkspace, stackName, err := stackOfWorktree(context.Background(), store, currentWorkspace, worktree, false, os.Stderr)
 	if err != nil {
 		return err
 	}

@@ -292,7 +292,7 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	machine.ilot(mainCheckout, "start", "hello")
 	machine.ilot(worktree, "start", "hello")
 
-	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.base"], pidsBeforeTheKill["hello.proj-1"])
+	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.base.shop"], pidsBeforeTheKill["hello.proj-1.shop"])
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")
 	machine.wantBody("hello.proj-1.shop.localhost", "hello from proj-1\n")
 	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "ready" || statusByApp["hello.proj-1"] != "ready" {
@@ -301,7 +301,7 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 
 	pidByName := machine.appPIDs()
 	machine.ilot(worktree, "stop", "hello")
-	waitUntilGone(t, "the stopped app", pidByName["hello.proj-1"])
+	waitUntilGone(t, "the stopped app", pidByName["hello.proj-1.shop"])
 	if status, body, err := machine.get("hello.proj-1.shop.localhost"); err != nil || status != http.StatusServiceUnavailable || !strings.Contains(body, "ilot start hello") {
 		t.Errorf("GET of the stopped app = %d %q, %v; want the 503 page with the command that starts it", status, body, err)
 	}
@@ -312,7 +312,7 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	machine.stopDaemon()
-	waitUntilGone(t, "the daemon and its last app", daemonStatus.PID, pidByName["hello.base"])
+	waitUntilGone(t, "the daemon and its last app", daemonStatus.PID, pidByName["hello.base.shop"])
 }
 
 // CI on Linux has Docker, so a Docker that does not work there is a failure. On another machine, the test is skipped.
@@ -335,7 +335,7 @@ func TestEndToEndAContainerAppAnswersBehindTheProxy(t *testing.T) {
 	requireDocker(t)
 	machine := newE2EMachine(t)
 	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "shop"))
-	const containerName = "ilot-web-base-shop"
+	const containerName = "ilot_web_base_shop"
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", containerName).Run() })
 
 	machine.ilot(mainCheckout, "start", "--timeout", "5m", "web")

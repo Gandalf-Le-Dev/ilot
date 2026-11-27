@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -37,7 +36,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	otherStack := "proj-5678"
 	environment.start(t, otherStack, StartOptions{}, "internalapi")
 	if port := environment.appPort(t, "proj-5678", "internalapi"); port != portOfRemovedStack {
-		t.Errorf("internalapi.proj-5678 got port %d, want the freed port %d", port, portOfRemovedStack)
+		t.Errorf("internalapi.proj-5678.platform got port %d, want the freed port %d", port, portOfRemovedStack)
 	}
 }
 
@@ -51,8 +50,8 @@ func TestRemoveRefusesTheBaseStack(t *testing.T) {
 			t.Errorf("Remove(%s) = %v, want a refusal", stackName, err)
 		}
 	}
-	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base"]; !isRunning {
-		t.Error("internalapi.base stopped after a refused remove")
+	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base.platform"]; !isRunning {
+		t.Error("internalapi.base.platform stopped after a refused remove")
 	}
 }
 
@@ -66,10 +65,10 @@ func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 	}
 }
 
-func saveEmptyStacks(t *testing.T, store state.Store, stackNames ...string) {
+func saveEmptyStacks(t *testing.T, store StackStore, stackNames ...string) {
 	t.Helper()
 	for _, stackName := range stackNames {
-		if err := store.Save(state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]state.AppState{}}); err != nil {
+		if err := store.Save(StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]AppState{}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -87,7 +86,7 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 		"moved-away":   nil,
 	}
 	for stackName, boundWorktrees := range boundWorktreesByStack {
-		stackState := state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, BoundWorktrees: boundWorktrees, Apps: map[string]state.AppState{}}
+		stackState := StackState{Name: stackName, CheckoutDirs: map[string]string{}, BoundWorktrees: boundWorktrees, Apps: map[string]AppState{}}
 		if err := environment.controller.Store.Save(stackState); err != nil {
 			t.Fatal(err)
 		}

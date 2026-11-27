@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -68,7 +69,7 @@ func printStack(output io.Writer, workspaceName, stackName string, worktree work
 	return table.Flush()
 }
 
-func (command *stackBindCommand) Run() error {
+func (command *stackBindCommand) Run(ctx context.Context) error {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return err
@@ -77,7 +78,7 @@ func (command *stackBindCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	_, previousStackName, err := bindWorktree(store, currentWorkspace, worktree, command.Name)
+	_, previousStackName, err := bindWorktree(ctx, store, currentWorkspace, worktree, command.Name)
 	if err != nil {
 		return err
 	}
@@ -85,11 +86,11 @@ func (command *stackBindCommand) Run() error {
 	if previousStackName == "" {
 		return nil
 	}
-	previousStack, err := store.Load(previousStackName)
+	current, err := store.Load()
 	if err != nil {
 		return err
 	}
-	if len(previousStack.Apps) > 0 {
+	if previousStack, isKept := current.Stacks(currentWorkspace.Name)[previousStackName]; isKept && len(previousStack.Apps) > 0 {
 		fmt.Printf("the stack %s keeps its apps and their ports: remove it with ilot rm %s\n", previousStackName, previousStackName)
 	}
 	return nil
@@ -97,35 +98,36 @@ func (command *stackBindCommand) Run() error {
 
 // withBindings gives the workspace the worktrees of each stack, which the state holds.
 func withBindings(currentWorkspace workspace.Workspace) (workspace.Workspace, state.Store, error) {
-	store := state.Store{RootDir: stateDirOf(currentWorkspace.HomeDir)}
-	if err := store.Claim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
-		return workspace.Workspace{}, state.Store{}, err
-	}
-	bindings, err := loadBindings(store)
+	store := state.Store{RootDir: stateDirOf(currentWorkspace.HomeDir), LockTimeout: 0, OnLockWait: sayWhoHoldsTheLock}
+	current, err := store.Load()
 	if err != nil {
 		return workspace.Workspace{}, state.Store{}, err
 	}
-	currentWorkspace.Bindings = bindings
+	if err := current.CheckClaim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
+		return workspace.Workspace{}, state.Store{}, err
+	}
+	currentWorkspace.Bindings = bindingsOf(current, currentWorkspace.Name)
 	return currentWorkspace, store, nil
 }
 
-func loadBindings(store state.Store) (workspace.Bindings, error) {
-	allStacks, err := store.All()
-	if err != nil {
-		return nil, err
-	}
+func sayWhoHoldsTheLock(holder string) {
+	fmt.Fprintf(os.Stderr, "waiting for another ilot: %s\n", holder)
+}
+
+// The base stack has no binding: its checkouts are the main checkouts.
+func bindingsOf(current state.State, workspaceName string) workspace.Bindings {
 	bindings := workspace.Bindings{}
-	for _, stackState := range allStacks {
-		if len(stackState.BoundWorktrees) > 0 {
-			bindings[stackState.Name] = stackState.BoundWorktrees
+	for stackName, stack := range current.Stacks(workspaceName) {
+		if stackName != workspace.BaseStackName && len(stack.Checkouts) > 0 {
+			bindings[stackName] = maps.Clone(stack.Checkouts)
 		}
 	}
-	return bindings, nil
+	return bindings
 }
 
 // stackOfWorktree gives the stack of a worktree. A worktree with no binding gets the name that its branch gives:
 // ilot start records that binding, and another command only works as if it were recorded.
-func stackOfWorktree(store state.Store, currentWorkspace workspace.Workspace, worktree workspace.Worktree, recordsBinding bool, notes io.Writer) (workspace.Workspace, string, error) {
+func stackOfWorktree(ctx context.Context, store state.Store, currentWorkspace workspace.Workspace, worktree workspace.Worktree, recordsBinding bool, notes io.Writer) (workspace.Workspace, string, error) {
 	stackName, isBound, err := currentWorkspace.StackOf(worktree)
 	if err != nil || isBound {
 		return currentWorkspace, stackName, err
@@ -134,7 +136,7 @@ func stackOfWorktree(store state.Store, currentWorkspace workspace.Workspace, wo
 		currentWorkspace.Bindings, _, err = currentWorkspace.Bindings.Bind(stackName, worktree)
 		return currentWorkspace, stackName, err
 	}
-	currentWorkspace, _, err = bindWorktree(store, currentWorkspace, worktree, stackName)
+	currentWorkspace, _, err = bindWorktree(ctx, store, currentWorkspace, worktree, stackName)
 	if err != nil {
 		return workspace.Workspace{}, "", err
 	}
@@ -143,19 +145,22 @@ func stackOfWorktree(store state.Store, currentWorkspace workspace.Workspace, wo
 }
 
 // bindWorktree records in the state that a worktree belongs to a stack. It gives the stack that the worktree leaves.
-func bindWorktree(store state.Store, currentWorkspace workspace.Workspace, worktree workspace.Worktree, stackName string) (bound workspace.Workspace, previousStackName string, err error) {
-	release, err := store.Lock()
+func bindWorktree(ctx context.Context, store state.Store, currentWorkspace workspace.Workspace, worktree workspace.Worktree, stackName string) (bound workspace.Workspace, previousStackName string, err error) {
+	release, err := store.Lock(ctx)
 	if err != nil {
 		return workspace.Workspace{}, "", err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
 	// Another command can have bound a worktree since this command read the state.
-	recordedBindings, err := loadBindings(store)
+	current, err := store.Load()
 	if err != nil {
 		return workspace.Workspace{}, "", err
 	}
-	newBindings, previousStackName, err := recordedBindings.Bind(stackName, worktree)
+	if err := current.Claim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	newBindings, previousStackName, err := bindingsOf(current, currentWorkspace.Name).Bind(stackName, worktree)
 	if err != nil {
 		return workspace.Workspace{}, "", err
 	}
@@ -163,21 +168,18 @@ func bindWorktree(store state.Store, currentWorkspace workspace.Workspace, workt
 		if changedStackName == "" {
 			continue
 		}
-		stackState, err := store.Load(changedStackName)
-		if err != nil {
-			return workspace.Workspace{}, "", err
-		}
-		stackState.BoundWorktrees = newBindings[changedStackName]
-		if len(stackState.BoundWorktrees) == 0 && len(stackState.Apps) == 0 {
+		changedStack := current.Stack(currentWorkspace.Name, changedStackName)
+		changedStack.Checkouts = maps.Clone(newBindings[changedStackName])
+		if len(changedStack.Checkouts) == 0 && len(changedStack.Apps) == 0 {
 			// A stack with no worktree and no app is only a name.
-			if err := store.Delete(changedStackName); err != nil {
+			current.RemoveStack(currentWorkspace.Name, changedStackName)
+			if err := os.RemoveAll(store.StackDir(currentWorkspace.Name, changedStackName)); err != nil {
 				return workspace.Workspace{}, "", err
 			}
-			continue
 		}
-		if err := store.Save(stackState); err != nil {
-			return workspace.Workspace{}, "", err
-		}
+	}
+	if err := store.Save(current); err != nil {
+		return workspace.Workspace{}, "", err
 	}
 	currentWorkspace.Bindings = newBindings
 	return currentWorkspace, previousStackName, nil

@@ -90,7 +90,7 @@ func (controller *Controller) prepareStacks(stacks stackSet) error {
 	for _, runningInstance := range stacks.runningInstances() {
 		if _, isDeclared := controller.lookupApp(runningInstance); !isDeclared {
 			stacks.setRunning(runningInstance, false)
-			fmt.Fprintf(controller.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", runningInstance.processName(), runningInstance.stackName)
+			fmt.Fprintf(controller.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", controller.processName(runningInstance), runningInstance.stackName)
 		}
 	}
 	return nil
