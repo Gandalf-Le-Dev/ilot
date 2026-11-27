@@ -246,8 +246,9 @@ func TestEnsureAfterAShutdownGivesANewDaemonEachTime(t *testing.T) {
 }
 
 func TestEnsureWaitsForADaemonThatShutsDown(t *testing.T) {
-	helpers := newHelperDaemons(t)
+	// Before the daemons, so that the folder is removed after the last daemon stopped the process that writes in it.
 	workingDir := t.TempDir()
+	helpers := newHelperDaemons(t)
 	client, err := helpers.starter().Ensure(t.Context())
 	if err != nil {
 		t.Fatal(err)
