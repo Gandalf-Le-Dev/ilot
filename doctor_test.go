@@ -56,6 +56,24 @@ func TestDoctorOnAHealthyMachineNeedsNoFix(t *testing.T) {
 	}
 }
 
+func TestDoctorWithABrokenGlobalFileSaysSoAndTestsNoDefaultAddress(t *testing.T) {
+	machine := healthyMachine(t)
+	machine.GlobalErr = errors.New("parse config.yaml: line 2: field lisen not found")
+	machine.ListenOn = func(string) error { return errors.New("address already in use") }
+	machine.LookupHost = func(context.Context, string) ([]string, error) { return nil, errors.New("no such host") }
+
+	checks := machine.run(t.Context())
+
+	if global := checkNamed(t, checks, "global file")[0]; global.Status != checkFix || !strings.Contains(global.Detail, "lisen") {
+		t.Errorf("global file = %+v, want a fix with the parse error", global)
+	}
+	for _, name := range []string{"proxy", "name lookup", "shell", "apps"} {
+		if check := checkNamed(t, checks, name)[0]; check.Status != checkSkip || !strings.Contains(check.Detail, "the global file is broken") {
+			t.Errorf("%s = %+v, want a skip that names the broken global file", name, check)
+		}
+	}
+}
+
 func TestDoctorReportsTheStateOfTheCompanyVersionWithTheCommandThatClearsIt(t *testing.T) {
 	machine := healthyMachine(t)
 	for _, oldDir := range []string{"stacks/master", "stacks/devbox", "process-compose"} {
