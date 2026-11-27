@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 	"github.com/Gandalf-Le-Dev/ilot/internal/proxyfiles"
 )
 
@@ -17,14 +16,14 @@ func (controller *Controller) applyAll(ctx context.Context, stacks stackSet) err
 	if err := controller.writeRoutesFiles(stacks); err != nil {
 		return err
 	}
-	var specs []processcompose.ProcessSpec
+	var specs []ProcessSpec
 	for _, runningInstance := range stacks.runningInstances() {
 		spec, err := controller.processSpec(stacks, runningInstance)
 		if err != nil {
 			return err
 		}
 		specs = append(specs, spec)
-		watcher, isWatched, err := controller.watcherSpec(stacks, runningInstance, spec.WorkingDir)
+		watcher, isWatched, err := controller.watcherSpec(stacks, runningInstance, spec.Dir)
 		if err != nil {
 			return err
 		}

@@ -25,10 +25,10 @@ import (
 	"github.com/alecthomas/kong"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
@@ -47,22 +47,33 @@ type cli struct {
 	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
 	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
-	Restart restartCommand `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
+	Restart restartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs and routes."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
 	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
+	Daemon  daemonCommand  `cmd:"" help:"Run the ilot daemon. ilot starts it when it needs it."`
+}
+
+type daemonCommand struct {
+	Run daemonRunCommand `cmd:"" help:"Run the daemon that supervises the apps, until a signal or a shutdown call stops it."`
+}
+
+type daemonRunCommand struct {
+	StateDir string `required:"" help:"State folder of ilot, which holds the lock, the socket and the log of the daemon."`
+}
+
+func (command *daemonRunCommand) Run(ctx context.Context) error {
+	return daemon.Run(ctx, daemon.Options{Paths: daemon.Paths{StateDir: command.StateDir}, Version: versionOfThisBinary()})
 }
 
 type envCommand struct {
 	App string `arg:"" help:"App declared in an ilot.yaml."`
 }
 
-const unrecordedEnvironmentNote = "note: ilot started before it fixed the environment of the apps: they have the environment of the shell that started it. Run ilot restart."
-
-func (command *envCommand) Run(ctx context.Context) error {
+func (command *envCommand) Run() error {
 	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
 	if err != nil {
 		return err
@@ -75,21 +86,14 @@ func (command *envCommand) Run(ctx context.Context) error {
 	for _, entry := range entries {
 		fmt.Fprintf(table, "%s=%s\t(%s)\n", entry.Key, entry.Value, entry.Source)
 	}
-	if err := table.Flush(); err != nil {
-		return err
-	}
-	isUnrecorded, err := controller.RunsWithoutARecordedEnvironment(ctx)
-	if isUnrecorded {
-		fmt.Fprintln(os.Stderr, unrecordedEnvironmentNote)
-	}
-	return err
+	return table.Flush()
 }
 
 type logsCommand struct {
 	App    string `arg:"" help:"App declared in devbox/ilot.yaml."`
 	Follow bool   `short:"f" help:"Keep printing new lines."`
 	Lines  int    `short:"n" default:"100" help:"How many of the last lines to print first."`
-	JSON   bool   `help:"Print the app's own log lines as they are, for tools and agents."`
+	JSON   bool   `help:"Print each line as the app wrote it. Without it, ilot turns a JSON line into one readable line."`
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
@@ -331,20 +335,25 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	if err != nil {
 		return nil, err
 	}
-	processComposeBinary, err := exec.LookPath("process-compose")
-	if err != nil {
-		return nil, errors.New("process-compose is not on PATH: install the version pinned in devbox/README.md")
-	}
 	routesDir, err := findRoutesDir()
 	if err != nil {
 		return nil, err
 	}
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
+	ilotBinary, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("find the ilot binary, to start its daemon: %w", err)
+	}
+	daemonPaths := daemon.Paths{StateDir: stateDir}
+	startDaemon := func() error {
+		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
+		return err
+	}
 	controller := &ilotctl.Controller{
 		Config:              config,
 		Store:               state.Store{RootDir: stateDir},
-		Supervisor:          processcompose.Client{Binary: processComposeBinary, StateDir: filepath.Join(stateDir, "process-compose"), Env: shellEnv},
+		Supervisor:          ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		IsPortFreeOnHost:    ports.IsFreeOnHost,

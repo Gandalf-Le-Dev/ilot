@@ -9,7 +9,7 @@ import (
 	"text/template"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
@@ -29,46 +29,53 @@ func (controller *Controller) logFile(appInstance instance) string {
 	return filepath.Join(controller.Store.StackDir(appInstance.stackName), "logs", appInstance.appName+".log")
 }
 
-func (controller *Controller) processSpec(stacks stackSet, appInstance instance) (processcompose.ProcessSpec, error) {
+func (controller *Controller) processSpec(stacks stackSet, appInstance instance) (ProcessSpec, error) {
 	envEntries, err := controller.environmentOf(stacks, appInstance)
 	if err != nil {
-		return processcompose.ProcessSpec{}, err
+		return ProcessSpec{}, err
 	}
+	// The daemon gives a process this environment and nothing else.
 	env := map[string]string{}
 	var command string
 	if controller.isContainer(appInstance) {
+		// The docker command needs the shell values, for example PATH and HOME. The image gets only the -e values.
+		for _, entry := range envEntries {
+			if entry.Source == sourceShell {
+				env[entry.Key] = entry.Value
+			}
+		}
 		envEntries = containerEnvEntries(envEntries)
 		command, err = controller.containerCommand(stacks, appInstance, envEntries)
 	} else {
 		command, err = controller.processCommand(stacks, appInstance)
 	}
-	for _, entry := range envEntries {
-		if entry.Source != sourceShell {
-			env[entry.Key] = entry.Value
-		}
-	}
 	if err != nil {
-		return processcompose.ProcessSpec{}, err
+		return ProcessSpec{}, err
+	}
+	for _, entry := range envEntries {
+		env[entry.Key] = entry.Value
 	}
 	if err := os.MkdirAll(filepath.Dir(controller.logFile(appInstance)), 0o700); err != nil {
-		return processcompose.ProcessSpec{}, err
+		return ProcessSpec{}, err
 	}
 	workingDir, err := controller.workingDir(stacks, appInstance)
 	if err != nil {
-		return processcompose.ProcessSpec{}, err
+		return ProcessSpec{}, err
 	}
 	shutdownCommand, err := controller.shutdownCommand(stacks, appInstance)
 	if err != nil {
-		return processcompose.ProcessSpec{}, err
+		return ProcessSpec{}, err
 	}
-	return processcompose.ProcessSpec{
-		Name:            appInstance.processName(),
-		Command:         command,
-		WorkingDir:      workingDir,
-		Env:             env,
-		LogFile:         controller.logFile(appInstance),
-		Ready:           controller.readyProbe(stacks, appInstance),
-		ShutdownCommand: shutdownCommand,
+	return ProcessSpec{
+		Name: appInstance.processName(),
+		Spec: daemon.Spec{
+			Command: command,
+			Dir:     workingDir,
+			Env:     env,
+			LogFile: controller.logFile(appInstance),
+			Stop:    shutdownCommand,
+			Ready:   controller.readyProbe(stacks, appInstance),
+		},
 	}, nil
 }
 
@@ -107,7 +114,7 @@ func (controller *Controller) withRepoTools(checkoutDir, shellCommand string) st
 	if !controller.UsesMise(checkoutDir) {
 		return shellCommand
 	}
-	return "mise exec -- bash -c " + processcompose.ShellQuote(shellCommand)
+	return "mise exec -- bash -c " + shellQuote(shellCommand)
 }
 
 func (controller *Controller) workingDir(stacks stackSet, appInstance instance) (string, error) {
@@ -122,33 +129,39 @@ func (controller *Controller) workingDir(stacks stackSet, appInstance instance) 
 	return filepath.Join(checkoutDir, appDir), nil
 }
 
-func (controller *Controller) watcherSpec(stacks stackSet, watchedInstance instance, workingDir string) (processcompose.ProcessSpec, bool, error) {
+func (controller *Controller) watcherSpec(stacks stackSet, watchedInstance instance, workingDir string) (ProcessSpec, bool, error) {
 	app := controller.app(watchedInstance)
 	watch := app.Watch
 	if len(watch.Paths) == 0 {
-		return processcompose.ProcessSpec{}, false, nil
+		return ProcessSpec{}, false, nil
 	}
 	onChange, err := controller.watcherCommand(stacks, watchedInstance, app)
 	if err != nil {
-		return processcompose.ProcessSpec{}, false, err
+		return ProcessSpec{}, false, err
 	}
 	commandParts := []string{"watchexec --postpone"}
 	for _, watchedPath := range watch.Paths {
-		commandParts = append(commandParts, "--watch "+processcompose.ShellQuote(filepath.Join(workingDir, watchedPath)))
+		commandParts = append(commandParts, "--watch "+shellQuote(filepath.Join(workingDir, watchedPath)))
 	}
 	if len(watch.Exts) > 0 {
 		commandParts = append(commandParts, "--exts "+strings.Join(watch.Exts, ","))
 	}
-	commandParts = append(commandParts, "--", processcompose.ShellQuote(onChange))
+	commandParts = append(commandParts, "--", shellQuote(onChange))
+	shellEnv, err := controller.shellEnvironment()
+	if err != nil {
+		return ProcessSpec{}, false, err
+	}
 	watcherInstance := instance{stackName: watchedInstance.stackName, appName: watchedInstance.appName + "-watch"}
-	return processcompose.ProcessSpec{
-		Name:            watcherInstance.processName(),
-		Command:         strings.Join(commandParts, " "),
-		WorkingDir:      workingDir,
-		Env:             nil,
-		LogFile:         controller.logFile(watcherInstance),
-		Ready:           processcompose.ReadyProbe{Host: "", Port: 0, Path: "", Command: ""},
-		ShutdownCommand: "",
+	return ProcessSpec{
+		Name: watcherInstance.processName(),
+		Spec: daemon.Spec{
+			Command: strings.Join(commandParts, " "),
+			Dir:     workingDir,
+			Env:     shellEnv,
+			LogFile: controller.logFile(watcherInstance),
+			Stop:    "",
+			Ready:   nil,
+		},
 	}, true, nil
 }
 
@@ -169,8 +182,8 @@ func (controller *Controller) watcherCommand(stacks stackSet, watchedInstance in
 		return "", err
 	}
 	lockFile := filepath.Join(controller.Store.StackDir(watchedInstance.stackName), "build.lock")
-	build := "cd " + processcompose.ShellQuote(checkoutDir) + " && " + controller.withRepoTools(checkoutDir, buildCommand)
-	return "flock " + processcompose.ShellQuote(lockFile) + " bash -c " + processcompose.ShellQuote(build) + " && " + restart, nil
+	build := "cd " + shellQuote(checkoutDir) + " && " + controller.withRepoTools(checkoutDir, buildCommand)
+	return "flock " + shellQuote(lockFile) + " bash -c " + shellQuote(build) + " && " + restart, nil
 }
 
 func (controller *Controller) binDirIsEmpty(stackName string) bool {

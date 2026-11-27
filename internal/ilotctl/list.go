@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 )
 
 type Listing struct {
@@ -40,7 +41,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 	for _, problem := range controller.loadEveryReadableStackConfig(stackNames) {
 		fmt.Fprintf(controller.Output, "warning: %v\n", problem)
 	}
-	statusByProcess, err := controller.Supervisor.Statuses(ctx)
+	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return Listing{}, err
 	}
@@ -49,8 +50,8 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		for _, appName := range slices.Sorted(maps.Keys(stackState.Apps)) {
 			appInstance := instance{stackName: stackState.Name, appName: appName}
 			status := "stopped"
-			if processStatus, isKnown := statusByProcess[appInstance.processName()]; isKnown {
-				status = processStatus.Status
+			if process, isKnown := processByName[appInstance.processName()]; isKnown {
+				status = statusOf(process)
 			}
 			listing.Apps = append(listing.Apps, AppRow{
 				Stack:  stackState.Name,
@@ -70,6 +71,13 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		listing.ExternalServices = append(listing.ExternalServices, ExternalServiceRow{Name: externalName, Status: status, Port: port})
 	}
 	return listing, nil
+}
+
+func statusOf(process daemon.Process) string {
+	if process.State == daemon.StateExited {
+		return fmt.Sprintf("%s (%d)", process.State, process.ExitCode)
+	}
+	return string(process.State)
 }
 
 // A repo with several worktrees for a stack is left out: ilot start reports it in that stack.

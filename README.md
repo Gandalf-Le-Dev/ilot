@@ -33,7 +33,7 @@ Two worktrees of one repo for the same ticket make `ilot` refuse that stack, and
 
 Each app gets its ports in the range 20000-29999 and keeps them.
 Its URL, `http://<app>.<stack>.<domain>:<proxy port>`, therefore stays the same.
-One process-compose daemon supervises the apps of every stack.
+One daemon supervises the apps of every stack. It is the `ilot` binary itself, and `ilot` starts it when a command needs it.
 A Traefik proxy sends each URL to its app.
 
 ## Requirements
@@ -43,7 +43,6 @@ A Traefik proxy sends each URL to its app.
 - Linux, and Go 1.26 to build `ilot`.
 - A development container, the devbox, that holds the file `/etc/devhost.env`. Without that file, `ilot` refuses to run, except for `ilot check` and `ilot apps`.
 - Docker, for the proxy container and for container apps. A mount of a container app names a path on this machine.
-- process-compose on `PATH`.
 - zsh. `ilot` reads the environment of the apps from a clean zsh.
 - A Traefik container named `ilotproxy_<login>` that mounts its routes folder at `/etc/traefik/routes`. To skip that lookup, set `ILOT_ROUTES_DIR` to the routes folder.
 - The port of that proxy in `ILOT_PROXY_PORT`, or else in `DEVHOST_PORT_7`.
@@ -128,7 +127,7 @@ ilot apps --json              # the same as one JSON object
 ilot start api                # build, then start the app after its dependencies
 ilot start api --no-deps      # start only this app
 ilot stop api                 # stop the app in this stack
-ilot logs api                 # the last 100 lines of the log of the app
+ilot logs api                 # the last 100 lines of the log of the app; a JSON line becomes one readable line
 ilot logs --json api          # the lines of the app as it wrote them
 ilot logs -f -n 20 api        # the last 20 lines, then the new ones
 ilot env api                  # the environment of the app, with the source of each value
@@ -136,12 +135,15 @@ ilot check                    # check the ilot.yaml of this repo with the files 
 ilot check path/to/ilot.yaml  # check that file
 ilot rm proj-1234             # stop a stack and delete its state, logs and routes
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
-ilot restart                  # stop every app, start the daemon again with a fresh environment, then start the apps that ran
+ilot restart                  # stop every app and the daemon, start a new daemon, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran: run it at login
 ilot --version
 ilot skill print              # print the skill for AI agents
 ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
+ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do not need it
 ```
+
+`ilot ls` gives each app one of these statuses: `starting`, `ready`, `stopping`, `exited (<exit code>)`, or `stopped` for an app that the daemon does not hold.
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
 `ilot start` also rebuilds an app that already runs, then restarts it.
@@ -239,7 +241,7 @@ repos:
 4. The values that `ilot.yaml` writes with a template. Your personal file cannot replace them.
 
 A container app does not get the top-level `env` of your personal file, so a third-party image does not get your tokens. It gets its entry under `apps`.
-The daemon keeps the shell values that it started with. To give the apps fresh values, run `ilot restart`.
+An app gets its whole environment from `ilot` when it starts, and nothing from the daemon. To give a running app fresh values, run `ilot start <app>` again.
 
 ## For AI agents
 
@@ -256,10 +258,11 @@ When you add a command, add it to the skill too: a test fails otherwise.
 |---|---|
 | `~/.config/ilot/env.yaml` | Your personal settings. |
 | `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/` and its logs in `logs/<app>.log`. |
-| `~/.local/state/ilot/process-compose/` | The state of the daemon, and the environment that it started with. |
+| `~/.local/state/ilot/daemon.lock`, `daemon.sock`, `daemon.log`, `processes.json` | The lock, the socket and the log of the daemon, and the record of the processes that it runs. If the path of the socket is longer than 100 bytes, the socket is in `/tmp/ilot-<user ID>/`. |
 | `<routes folder>/ilot-<stack>.yml` | The proxy routes of a stack. |
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
+After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot restart` to replace it.
 After you delete the worktrees of a ticket, run `ilot clean` to give back its ports.
 
 ## Development

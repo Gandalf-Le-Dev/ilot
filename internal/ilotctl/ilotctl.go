@@ -13,23 +13,12 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
-
-type ProcessSupervisor interface {
-	Apply(ctx context.Context, specs []processcompose.ProcessSpec) error
-	Restart(ctx context.Context, processName string) error
-	Statuses(ctx context.Context) (map[string]processcompose.ProcessStatus, error)
-	WaitReady(ctx context.Context, processName string, timeout time.Duration) error
-	IsUp(ctx context.Context) bool
-	RestartCommand(processName string) string
-	RecordedEnvironment() (environment map[string]string, isRecorded bool, err error)
-	Shutdown() error
-}
 
 type Controller struct {
 	Config              appconfig.Config
@@ -53,9 +42,7 @@ type Controller struct {
 	ProgressInterval    time.Duration
 	Output              io.Writer
 
-	configByStack      map[string]appconfig.Config
-	resolvedShellEnv   map[string]string
-	isShellEnvResolved bool
+	configByStack map[string]appconfig.Config
 }
 
 type StartOptions struct {
@@ -95,17 +82,17 @@ func (controller *Controller) Start(ctx context.Context, worktree stack.Worktree
 	for _, requestedInstance := range requestedInstances {
 		isRequested[requestedInstance] = true
 	}
-	statusByProcess, err := controller.Supervisor.Statuses(ctx)
+	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return err
 	}
 	isReallyRunning := map[instance]bool{}
 	hasEndedProcess := map[instance]bool{}
 	for _, appInstance := range startOrder {
-		status, isKnown := statusByProcess[appInstance.processName()]
+		process, isKnown := processByName[appInstance.processName()]
 		isStoredAsRunning := stacks.isRunning(appInstance)
-		isReallyRunning[appInstance] = isStoredAsRunning && isKnown && status.IsRunningOrStarting()
-		hasEndedProcess[appInstance] = isKnown && !status.IsRunningOrStarting()
+		isReallyRunning[appInstance] = isStoredAsRunning && isKnown && process.State != daemon.StateExited
+		hasEndedProcess[appInstance] = isKnown && process.State == daemon.StateExited
 	}
 	if failures := controller.ensureImages(ctx, startOrder, func(appInstance instance) bool { return !isReallyRunning[appInstance] }, true); len(failures) > 0 {
 		return failures[0].err
@@ -155,7 +142,7 @@ func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Workt
 	return controller.bootApps(ctx, mainCheckout)
 }
 
-// The daemon gives every app the environment it started with: only a new daemon reads the shell files again.
+// The only command that replaces the daemon, for example after an upgrade of ilot.
 func (controller *Controller) Restart(ctx context.Context, mainCheckout stack.Worktree) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
@@ -166,7 +153,7 @@ func (controller *Controller) Restart(ctx context.Context, mainCheckout stack.Wo
 	if controller.Supervisor.IsUp(ctx) {
 		fmt.Fprintln(controller.Output, "stopping every app of every stack")
 	}
-	if err := controller.Supervisor.Shutdown(); err != nil {
+	if err := controller.Supervisor.Shutdown(ctx); err != nil {
 		return err
 	}
 	return controller.bootApps(ctx, mainCheckout)
@@ -304,12 +291,12 @@ func (controller *Controller) startInstance(ctx context.Context, stacks stackSet
 	waitErr := controller.Supervisor.WaitReady(ctx, appInstance.processName(), controller.ReadyTimeout)
 	if err := errors.Join(waitErr, stopShowingLog()); err != nil {
 		failure := fmt.Errorf("%w, see %s", err, controller.logFile(appInstance))
-		var endedError *processcompose.ProcessEndedError
-		var notReadyInTimeError *processcompose.ProcessNotReadyInTimeError
+		_, hasEnded := errors.AsType[*daemon.ExitedError](err)
+		_, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err)
 		switch {
-		case errors.As(err, &endedError) && isStartedByThisRun && ctx.Err() == nil:
+		case hasEnded && isStartedByThisRun && ctx.Err() == nil:
 			return errors.Join(failure, controller.stopFailedInstance(ctx, stacks, appInstance))
-		case errors.As(err, &notReadyInTimeError):
+		case isNotReadyInTime:
 			return fmt.Errorf("%w; it still starts: ilot keeps it", failure)
 		}
 		return failure

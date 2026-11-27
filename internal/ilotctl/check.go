@@ -56,8 +56,6 @@ func CheckRendering(config appconfig.Config) []error {
 		ProgressInterval:    0,
 		Output:              io.Discard,
 		configByStack:       nil,
-		resolvedShellEnv:    nil,
-		isShellEnvResolved:  false,
 	}
 
 	stacks := stacksWithEveryAppRunning(config)

@@ -23,10 +23,6 @@ const (
 
 const pollInterval = 200 * time.Millisecond
 
-type processComposeLine struct {
-	Message string `json:"message"`
-}
-
 func PrintMessages(ctx context.Context, logPath string, lastLines int, follow bool, format Format, output io.Writer) error {
 	content, err := os.ReadFile(logPath)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -134,7 +130,7 @@ func readFrom(logPath string, offset int64) ([]byte, error) {
 
 func printLines(lines [][]byte, format Format, output io.Writer) error {
 	for _, line := range lines {
-		message := messageOf(line)
+		message := string(line)
 		if format == Readable {
 			message = readableMessage(message)
 		}
@@ -145,14 +141,7 @@ func printLines(lines [][]byte, format Format, output io.Writer) error {
 	return nil
 }
 
-func messageOf(line []byte) string {
-	var parsed processComposeLine
-	if err := json.Unmarshal(line, &parsed); err != nil {
-		return string(line)
-	}
-	return parsed.Message
-}
-
+// An app that logs JSON gets one readable line per record: the time, the level and the message come first.
 func readableMessage(message string) string {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(message), &fields); err != nil || fields == nil {
