@@ -21,8 +21,8 @@ func TestAStartRefusesAStoredPortThatAnotherProgramTook(t *testing.T) {
 
 	err := environment.executor.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "port "+strconv.Itoa(storedPort)) || !strings.Contains(err.Error(), "standalone.base.platform") {
-		t.Fatalf("Start = %v, want the taken port %d of standalone.base.platform", err, storedPort)
+	if err == nil || !strings.Contains(err.Error(), "port "+strconv.Itoa(storedPort)) || !strings.Contains(err.Error(), "standalone.base.shop") {
+		t.Fatalf("Start = %v, want the taken port %d of standalone.base.shop", err, storedPort)
 	}
 	if len(environment.supervisor.startedInOrder) != 0 {
 		t.Errorf("started %v before the refusal", environment.supervisor.startedInOrder)
@@ -68,11 +68,11 @@ func TestStopOfAnAppThatNoConfigDeclaresFreesItsPorts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.HasApp("platform", "proj-1234", "ticket-search") || current.PortsInUse()[searchPort] {
+	if current.HasApp("shop", "proj-1234", "ticket-search") || current.PortsInUse()[searchPort] {
 		t.Errorf("ticket-search is still in the state, or its port %d is still taken", searchPort)
 	}
-	if environment.isApplied("ticket-search.proj-1234.platform") {
-		t.Error("ticket-search.proj-1234.platform still runs")
+	if environment.isApplied("ticket-search.proj-1234.shop") {
+		t.Error("ticket-search.proj-1234.shop still runs")
 	}
 }
 
@@ -80,7 +80,7 @@ func TestStopOfAnAppThatNoConfigDeclaresFreesItsPorts(t *testing.T) {
 func TestAStartSeesTheProcessesThatAnotherCommandStartedDuringItsWaitForTheLock(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "standalone")
-	startedByTheOtherCommand := environment.supervisor.runningSpecs["standalone.base.platform"]
+	startedByTheOtherCommand := environment.supervisor.runningSpecs["standalone.base.shop"]
 	if err := environment.executor.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
 		t.Fatal(err)
 	}

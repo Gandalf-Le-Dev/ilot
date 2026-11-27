@@ -134,7 +134,7 @@ func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !current.App("platform", "base", "publicapi").Wanted || !current.App("platform", "proj-1234", "standalone").Wanted {
+	if !current.App("shop", "base", "publicapi").Wanted || !current.App("shop", "proj-1234", "standalone").Wanted {
 		t.Error("one of the two starts lost its membership to the other one")
 	}
 }
