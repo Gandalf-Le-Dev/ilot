@@ -651,7 +651,7 @@ func (executor *Executor) planStop(stackName string, appNames []string, processB
 		snapshot.SetWanted(stoppedInstance, false)
 		stopped = append(stopped, stoppedInstance)
 		if configErr == nil {
-			executor.warnAboutDependents(before, stoppedInstance)
+			executor.warnAboutDependents(before, stoppedInstance, stoppedInstances)
 		}
 	}
 	return before, stopped, executor.saveStacks(snapshot)
@@ -684,9 +684,10 @@ func (executor *Executor) deleteProcesses(ctx context.Context, snapshot plan.Sna
 	return nil
 }
 
-func (executor *Executor) warnAboutDependents(snapshotBeforeStop plan.Snapshot, stoppedInstance plan.Instance) {
+// A dependent that the same command stops gets no warning.
+func (executor *Executor) warnAboutDependents(snapshotBeforeStop plan.Snapshot, stoppedInstance plan.Instance, stoppedByThisCommand []plan.Instance) {
 	for _, runningInstance := range snapshotBeforeStop.Wanted() {
-		if runningInstance == stoppedInstance || !slices.Contains(snapshotBeforeStop.App(runningInstance).DependsOn, stoppedInstance.App) {
+		if slices.Contains(stoppedByThisCommand, runningInstance) || !slices.Contains(snapshotBeforeStop.App(runningInstance).DependsOn, stoppedInstance.App) {
 			continue
 		}
 		if snapshotBeforeStop.Serving(runningInstance.Stack, stoppedInstance.App) == stoppedInstance.Stack {
