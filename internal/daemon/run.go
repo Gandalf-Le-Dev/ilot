@@ -1,0 +1,107 @@
+package daemon
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+)
+
+const apiDrainTimeout = 5 * time.Second
+
+type Options struct {
+	Paths   Paths
+	Version string
+	// With no logger, the daemon writes JSON records to the daemon.log of the state folder.
+	Logger     *slog.Logger
+	Supervisor SupervisorOptions
+}
+
+// Run is the whole life of the daemon. It returns ErrAlreadyRunning, and touches nothing, when another daemon lives.
+func Run(ctx context.Context, options Options) error {
+	paths := options.Paths
+	if err := os.MkdirAll(paths.StateDir, 0o700); err != nil {
+		return err
+	}
+	lock, err := acquireLock(paths.LockFile())
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	logger := options.Logger
+	if logger == nil {
+		logFile, err := openRotatingFile(paths.LogFile(), defaultLogMaxBytes)
+		if err != nil {
+			return err
+		}
+		defer logFile.Close()
+		logger = slog.New(slog.NewJSONHandler(logFile, nil))
+	}
+
+	listener, err := listenOnSocket(paths.Socket())
+	if err != nil {
+		logger.Error("daemon cannot listen", "error", err)
+		return err
+	}
+
+	supervisorOptions := options.Supervisor
+	supervisorOptions.Logger = logger
+	supervisor := NewSupervisor(supervisorOptions)
+	shutdownRequested := make(chan struct{})
+	api := &Server{
+		Supervisor: supervisor,
+		Routes:     &RouteTable{},
+		Status:     Status{Version: options.Version, PID: os.Getpid(), StartedAt: time.Now()},
+		OnShutdown: sync.OnceFunc(func() { close(shutdownRequested) }),
+		Logger:     logger,
+	}
+	apiServer := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	served := make(chan error, 1)
+	go func() { served <- apiServer.Serve(listener) }()
+	logger.Info("daemon started", "version", options.Version, "pid", os.Getpid(), "socket", paths.Socket())
+
+	var failure error
+	select {
+	case <-ctx.Done():
+	case <-shutdownRequested:
+	case failure = <-served:
+		served <- failure
+	}
+
+	supervisor.Shutdown()
+	drain, cancel := context.WithTimeout(context.Background(), apiDrainTimeout)
+	defer cancel()
+	if err := apiServer.Shutdown(drain); err != nil {
+		apiServer.Close()
+	}
+	<-served
+	logger.Info("daemon stopped", "pid", os.Getpid())
+	return failure
+}
+
+// listenOnSocket replaces a socket file. Only the holder of the lock may call it: the file of a live daemon is never stale.
+func listenOnSocket(socketPath string) (net.Listener, error) {
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
+		return nil, err
+	}
+	if err := os.Remove(socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
+	}
+	if err := os.Chmod(socketPath, 0o600); err != nil {
+		listener.Close()
+		return nil, err
+	}
+	return listener, nil
+}
