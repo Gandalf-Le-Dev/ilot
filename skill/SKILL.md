@@ -97,6 +97,8 @@ When the timeout passes while the app still runs, the error ends with `it still 
 
 A port that "is taken by another process" belongs to something outside `ilot`. Find it, and ask the user before you stop it.
 
+An app that `ilot ls` marks `undeclared` is in no `ilot.yaml` of its stack any more. It keeps its ports. `ilot stop <app>` in its stack removes it.
+
 ## Traps
 
 - A stack takes one worktree of a repo. A second worktree whose branch gives the same stack name gets an error that names the first. Give it another stack with `ilot stack bind <name>`.

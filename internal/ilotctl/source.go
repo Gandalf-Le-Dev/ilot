@@ -152,22 +152,29 @@ func (source Source) LogFile(stackName, appName string) (string, error) {
 }
 
 // instancesToStop names the instances of a command that only reads or stops. With a configuration, the scope of each app decides.
-// Without one, the state decides: the own stack if it has the app, else the base stack, which holds every app with the scope base.
+// Without one, or for an app that the configuration no longer declares, the state decides:
+// the own stack if it has the app, else the base stack, which holds every app with the scope base.
 func (source Source) instancesToStop(current state.State, stackName string, appNames []string) ([]plan.Instance, error) {
-	if source.ConfigErr == nil {
-		snapshot := plan.Snapshot{Workspace: source.Workspace, Own: stackName, State: current, Configs: map[string]config.Config{stackName: source.Config}, ReposNotCloned: source.ReposNotCloned}
-		return snapshot.Instances(stackName, appNames)
-	}
+	snapshot := plan.Snapshot{Workspace: source.Workspace, Own: stackName, State: current, Configs: map[string]config.Config{stackName: source.Config}, ReposNotCloned: source.ReposNotCloned}
 	var instances []plan.Instance
 	for _, appName := range appNames {
+		if _, isDeclared := source.Config.Apps[appName]; isDeclared && source.ConfigErr == nil {
+			instances = append(instances, plan.Instance{Stack: snapshot.StackOf(stackName, appName), App: appName})
+			continue
+		}
 		stackOfApp := stackName
 		if !current.HasApp(source.Workspace, stackName, appName) {
 			stackOfApp = plan.BaseStack
 		}
-		if !current.HasApp(source.Workspace, stackOfApp, appName) {
+		if current.HasApp(source.Workspace, stackOfApp, appName) {
+			instances = append(instances, plan.Instance{Stack: stackOfApp, App: appName})
+			continue
+		}
+		if source.ConfigErr != nil {
 			return nil, fmt.Errorf("%w; and no stack has the app %q", source.ConfigErr, appName)
 		}
-		instances = append(instances, plan.Instance{Stack: stackOfApp, App: appName})
+		_, err := snapshot.Instances(stackName, []string{appName})
+		return nil, err
 	}
 	return instances, nil
 }

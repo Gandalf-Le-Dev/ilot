@@ -39,17 +39,21 @@ type StartOptions struct {
 }
 
 func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) error {
+	processByName, err := controller.processesOfALiveDaemon(ctx)
+	if err != nil {
+		return err
+	}
 	var before plan.Snapshot
 	var dropped, requestedInstances []plan.Instance
 	var start plan.Start
-	err := controller.underLock(ctx, func() (err error) {
+	err = controller.underLock(ctx, func() (err error) {
 		if before, dropped, err = controller.loadStacks(stackName); err != nil {
 			return err
 		}
 		if requestedInstances, err = before.Instances(stackName, appNames); err != nil {
 			return err
 		}
-		start, err = controller.prepareStart(before, requestedInstances, options)
+		start, err = controller.prepareStart(before, requestedInstances, options, processByName)
 		return err
 	})
 	if err != nil {
@@ -59,10 +63,6 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 		return err
 	}
 	after := start.After
-	processByName, err := controller.Supervisor.Processes(ctx)
-	if err != nil {
-		return err
-	}
 	isRequested := map[plan.Instance]bool{}
 	for _, requestedInstance := range requestedInstances {
 		isRequested[requestedInstance] = true
@@ -94,6 +94,14 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 	}
 	controller.printURLs(after, requestedInstances)
 	return nil
+}
+
+// A start tests the ports of its apps, so it needs a daemon that has killed what a dead daemon left behind.
+func (controller *Controller) processesOfALiveDaemon(ctx context.Context) (map[string]daemon.Process, error) {
+	if err := controller.Supervisor.Up(ctx); err != nil {
+		return nil, err
+	}
+	return controller.Supervisor.Processes(ctx)
 }
 
 // underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a daemon call.
@@ -199,6 +207,9 @@ func (controller *Controller) Restart(ctx context.Context, baseStackName string)
 }
 
 func (controller *Controller) bootApps(ctx context.Context, baseStackName string) error {
+	if err := controller.Supervisor.Up(ctx); err != nil {
+		return err
+	}
 	var start plan.Start
 	var problems []error
 	err := controller.underLock(ctx, func() error {
@@ -224,20 +235,20 @@ func (controller *Controller) bootApps(ctx context.Context, baseStackName string
 // StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
 // A member that runs gets no call.
 func (controller *Controller) StartAll(ctx context.Context) error {
+	processByName, err := controller.processesOfALiveDaemon(ctx)
+	if err != nil {
+		return err
+	}
 	var start plan.Start
 	var problems []error
-	err := controller.underLock(ctx, func() error {
+	err = controller.underLock(ctx, func() error {
 		snapshot, _, err := controller.loadStacks(plan.BaseStack)
 		if err != nil {
 			return err
 		}
-		start, problems, err = controller.planMembers(snapshot, nil)
+		start, problems, err = controller.planMembers(snapshot, nil, processByName)
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return err
 	}
@@ -260,12 +271,12 @@ func (controller *Controller) planBoot(snapshot plan.Snapshot) (plan.Start, []er
 			bootInstances = append(bootInstances, plan.Instance{Stack: snapshot.StackOf(plan.BaseStack, appName), App: appName})
 		}
 	}
-	return controller.planMembers(snapshot, bootInstances)
+	return controller.planMembers(snapshot, bootInstances, map[string]daemon.Process{})
 }
 
 // planMembers plans the start of every member of every stack, after the given instances.
 // It reads the file of each stack. A stack whose file is broken stays down, and the others start.
-func (controller *Controller) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance) (plan.Start, []error, error) {
+func (controller *Controller) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance, processByName map[string]daemon.Process) (plan.Start, []error, error) {
 	var problems []error
 	for _, wantedInstance := range snapshot.Wanted() {
 		if err := controller.addStack(snapshot, wantedInstance.Stack); err != nil {
@@ -276,7 +287,7 @@ func (controller *Controller) planMembers(snapshot plan.Snapshot, bootInstances 
 			bootInstances = append(bootInstances, wantedInstance)
 		}
 	}
-	start, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false})
+	start, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false}, processByName)
 	return start, problems, err
 }
 
@@ -330,12 +341,15 @@ func (controller *Controller) failedDependencyOf(snapshot plan.Snapshot, appInst
 
 // prepareStart plans a start, gives its ports, and saves the state after it: every instance of the plan is a member from now on.
 // A failed start keeps them members, so the next ilot start tries them again in the same stacks.
-func (controller *Controller) prepareStart(before plan.Snapshot, requestedInstances []plan.Instance, options StartOptions) (plan.Start, error) {
+func (controller *Controller) prepareStart(before plan.Snapshot, requestedInstances []plan.Instance, options StartOptions, processByName map[string]daemon.Process) (plan.Start, error) {
 	start := before.PlanStart(requestedInstances, options.SkipDependencies)
 	if err := controller.checkExternalServicesUp(start.Externals); err != nil {
 		return plan.Start{}, err
 	}
-	if err := controller.allocatePorts(before, start); err != nil {
+	if err := controller.checkStoredPorts(before, start, processByName); err != nil {
+		return plan.Start{}, err
+	}
+	if err := controller.allocatePorts(start); err != nil {
 		return plan.Start{}, err
 	}
 	for _, appInstance := range start.Order {
@@ -482,6 +496,8 @@ func (controller *Controller) Stop(ctx context.Context, stackName string, appNam
 	return controller.sendRoutes(ctx)
 }
 
+// planStop takes the membership away from the stopped instances. An app that no ilot.yaml declares any more leaves the state, and gives its ports back.
+// The snapshot that it gives is the state before the stop, which still names the container of each instance.
 func (controller *Controller) planStop(stackName string, appNames []string) (plan.Snapshot, []plan.Instance, error) {
 	current, err := controller.loadState()
 	if err != nil {
@@ -491,11 +507,20 @@ func (controller *Controller) planStop(stackName string, appNames []string) (pla
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
-	// The warning about dependents needs the configuration. Without it, the stop still works.
+	// The warning about dependents and the test of the declarations need the configuration. Without it, the stop still works.
 	before, configErr := controller.snapshotOf(current.Clone(), stackName)
+	if configErr != nil {
+		before = plan.Snapshot{Workspace: controller.Workspace, Own: stackName, State: current.Clone(), Machine: controller.Machine}
+	}
 	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: stackName, State: current, Machine: controller.Machine}
 	var stopped []plan.Instance
 	for _, stoppedInstance := range stoppedInstances {
+		if _, isDeclared := before.Declaration(stoppedInstance); configErr == nil && !isDeclared {
+			fmt.Fprintf(controller.Output, "%s: no ilot.yaml declares it, so it leaves the stack and gives back its ports\n", snapshot.ProcessName(stoppedInstance))
+			delete(current.Stack(controller.Workspace, stoppedInstance.Stack).Apps, stoppedInstance.App)
+			stopped = append(stopped, stoppedInstance)
+			continue
+		}
 		if !snapshot.IsWanted(stoppedInstance) {
 			fmt.Fprintf(controller.Output, "%s is not running\n", snapshot.ProcessName(stoppedInstance))
 			continue
@@ -506,7 +531,7 @@ func (controller *Controller) planStop(stackName string, appNames []string) (pla
 			controller.warnAboutDependents(before, stoppedInstance)
 		}
 	}
-	return snapshot, stopped, controller.saveStacks(snapshot)
+	return before, stopped, controller.saveStacks(snapshot)
 }
 
 // deleteProcesses stops instances and their watchers. A container that the daemon does not hold, after a crash of the daemon, is removed too.

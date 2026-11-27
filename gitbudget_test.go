@@ -28,6 +28,8 @@ func (supervisor *readySupervisor) Put(_ context.Context, spec ilotctl.ProcessSp
 
 func (supervisor *readySupervisor) Delete(context.Context, string) error { return nil }
 
+func (supervisor *readySupervisor) Up(context.Context) error { return nil }
+
 func (supervisor *readySupervisor) Restart(context.Context, string) error { return nil }
 
 func (supervisor *readySupervisor) Processes(context.Context) (map[string]daemon.Process, error) {

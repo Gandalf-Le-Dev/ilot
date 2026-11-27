@@ -75,6 +75,11 @@ func (supervisor *fakeSupervisor) Put(ctx context.Context, spec ProcessSpec) err
 	return nil
 }
 
+func (supervisor *fakeSupervisor) Up(context.Context) error {
+	supervisor.daemonIsUp = true
+	return nil
+}
+
 func (supervisor *fakeSupervisor) Delete(_ context.Context, processName string) error {
 	supervisor.calls = append(supervisor.calls, "delete "+processName)
 	if _, isKnown := supervisor.runningSpecs[processName]; isKnown {

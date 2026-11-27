@@ -162,6 +162,8 @@ ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do n
 ```
 
 `ilot ls` gives each app one of these statuses: `starting`, `ready`, `stopping`, `exited (<exit code>)`, `down` for an app that its stack owns and that the daemon does not hold, for example after a crash of the daemon, or `stopped` for an app that no stack owns.
+An app that no `ilot.yaml` of its stack declares any more is marked `undeclared`. It keeps its ports until `ilot stop <app>`, in its stack, removes it from the stack.
+Before it starts an app, `ilot start` tests the ports that the app already has. If another program took one, the error names the port.
 When an app is `down`, `ilot ls` ends with the command that starts it again: `ilot start --all`. It starts each app that a stack owns and that does not run, after its dependencies, and leaves the others as they are.
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
