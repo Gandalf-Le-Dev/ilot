@@ -21,13 +21,13 @@ Every `ilot` command is pre-approved for you. These limits still apply:
 
 ## Stacks
 
-A stack is the set of apps that run for one ticket.
+A stack is the set of apps that run for one branch of work.
 
-- `ilot` names the stack after the ticket key in the branch name: `PROJ-`, `OPS-` or `TASK-` and digits, in lowercase. The branch `dev/jdoe/task-2006-example` belongs to the stack `task-2006`. Without a ticket key in the branch, `ilot` looks in the folder name, then uses the folder name.
+- `ilot` names the stack of a linked worktree after its branch, in lowercase letters, digits and dashes: the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`. If the `ilot.yaml` of the root repo has `stack.pattern`, the name is the first match of that pattern in the branch name. A worktree with a detached HEAD takes the name of its folder. `ilot apps` prints the stack of the current folder.
 - The main checkout of every repo is the `base` stack, on any branch.
 - An app with `scope: base` in its `ilot.yaml` runs one time, in the `base` stack, for every stack.
 - A workspace is a root repo and its member repos. The `ilot.yaml` of the root lists the members under `repos`, and the `ilot.yaml` of a member names the root with `member_of`. `ilot` finds the workspace from the repo of the current folder.
-- A stack takes each repo's worktree for its ticket. If a repo has no worktree for the ticket, the stack takes that repo's main checkout.
+- A stack takes each repo's worktree whose branch gives its name. If a repo has no such worktree, the stack takes that repo's main checkout.
 - If a worktree does not start an app, the app comes from the `base` stack, and `ilot` starts it there if necessary. An app with `scope: stack` is the exception: an app that depends on it always gets the copy of its own stack.
 
 Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps` and `ilot env` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
@@ -48,7 +48,7 @@ ilot logs -f -n 20 api          # the last 20 lines, then the new ones: it never
 ilot env api                    # the environment of the app, with where each value comes from
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
-ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
+ilot rm retry-jobs              # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
 ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already
@@ -95,7 +95,7 @@ A port that "is taken by another process" belongs to something outside `ilot`. F
 
 ## Traps
 
-- Two worktrees of one repo for the same ticket make `ilot` refuse that stack. The error names both folders. Keep one.
+- Two worktrees of one repo whose branches give the same stack name make `ilot` refuse that stack. The error names both folders. Keep one.
 - A container app declares its ports in `container.ports`, with the port inside the container. `ilot` publishes each one on `127.0.0.1` on a port of the stack, which `ilot ls` and `ilot env` show. A container reaches another app with `{{host "<app>"}}`, which gives it `host.docker.internal`.
 - If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also give it a separate `HOME` whose `~/.config/ilot/config.yaml` sets `proxy.listen` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
 - If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.

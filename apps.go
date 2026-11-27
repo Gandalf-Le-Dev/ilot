@@ -11,7 +11,6 @@ import (
 	"text/tabwriter"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
-	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type appsCommand struct {
@@ -40,7 +39,7 @@ func (command *appsCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	stackName, err := workspace.StackName(worktree)
+	stackName, err := currentWorkspace.DefaultStackName(worktree)
 	if err != nil {
 		return err
 	}

@@ -12,31 +12,29 @@ const BaseStackName = "base"
 
 const dnsLabelMaxLength = 63
 
-var (
-	runsOfCharactersOutsideDNSLabels = regexp.MustCompile(`[^a-z0-9]+`)
-	ticketKeyPattern                 = regexp.MustCompile(`(?i)(?:^|[^a-z0-9])((?:proj|ops|task)-\d+)`)
-)
+var runsOfCharactersOutsideDNSLabels = regexp.MustCompile(`[^a-z0-9]+`)
 
-// StackName gives the stack that a worktree belongs to.
-func StackName(worktree Worktree) (string, error) {
+// DefaultStackName gives the stack of a worktree: base for a main checkout, and else a name from the branch.
+// The branch is the natural key across repos: one ticket usually gets the same branch name in each repo.
+// With a detached HEAD, the folder gives the name.
+func (workspace Workspace) DefaultStackName(worktree Worktree) (string, error) {
 	if worktree.IsMain {
 		return BaseStackName, nil
 	}
-	for _, candidate := range []string{worktree.Branch, filepath.Base(worktree.Dir)} {
-		if ticketKey := ticketKeyPattern.FindStringSubmatch(candidate); ticketKey != nil {
-			return strings.ToLower(ticketKey[1]), nil
+	source, sourceKind := worktree.Branch, "branch"
+	if worktree.Branch == "" {
+		source, sourceKind = filepath.Base(worktree.Dir), "folder"
+	} else if workspace.StackPattern != nil {
+		if match := workspace.StackPattern.FindString(worktree.Branch); match != "" {
+			source = match
 		}
 	}
-	return nameFromFolder(worktree.Dir)
-}
-
-func nameFromFolder(worktreeDir string) (string, error) {
-	name := slug(filepath.Base(worktreeDir))
+	name := slug(source)
 	if name == "" {
-		return "", fmt.Errorf("worktree directory %q gives no usable stack name: rename it with letters or digits", worktreeDir)
+		return "", fmt.Errorf("the %s %q of the worktree %s gives no stack name: a name needs a letter or a digit", sourceKind, source, worktree.Dir)
 	}
 	if name == BaseStackName {
-		return "", fmt.Errorf("worktree directory %q would take the reserved stack name %q: rename it", worktreeDir, name)
+		return "", fmt.Errorf("the %s %q of the worktree %s gives the stack name %s, which is the stack of the main checkouts: rename the %s", sourceKind, source, worktree.Dir, BaseStackName, sourceKind)
 	}
 	return name, nil
 }

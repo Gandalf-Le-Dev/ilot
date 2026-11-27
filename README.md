@@ -16,10 +16,11 @@ The name comes from the French word "îlot", a small island. The command and the
 
 A stack is the set of apps that run for one ticket.
 The main checkout of every repo is the `base` stack, on any branch.
-`ilot` names the stack of a linked worktree after the ticket key in its branch name: `PROJ-`, `OPS-` or `TASK-` and digits, in lowercase.
-For example, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`.
-If the branch has no ticket key, `ilot` looks for one in the folder name, and else it uses the folder name.
-The ticket keys are fixed in `internal/workspace/stackname.go`.
+`ilot` names the stack of a linked worktree after its branch: the branch name in lowercase letters, digits and dashes, 63 characters at most.
+For example, the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`.
+The branch is the name because one ticket usually gets the same branch name in each repo.
+With `stack.pattern` in the `ilot.yaml` of the root repo, the name is the first match of that regular expression in the branch name. With `pattern: '[A-Za-z]+-[0-9]+'`, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`. A branch that the pattern does not match keeps its whole name.
+A worktree with a detached HEAD takes the name of its folder.
 
 A worktree runs only the apps that you start in it.
 The other dependencies come from the `base` stack. If one of them does not run, `ilot` starts it there.
@@ -37,10 +38,10 @@ Each other repo is a member: its `ilot.yaml` names the root with `member_of`.
 `ilot` finds the workspace from the repo of the folder that you are in, so it needs no registry.
 This version keeps the state of one workspace on a machine. A second workspace gets an error that names the first one.
 
-For each repo, a stack takes the worktree for its ticket. If the repo has no such worktree, the stack takes the main checkout of the repo.
+For each repo, a stack takes the worktree whose branch gives its name. If the repo has no such worktree, the stack takes the main checkout of the repo.
 Each stack reads the `ilot.yaml` files of its own checkouts, so a change in one stack does not change the apps of another.
 A checkout with no `ilot.yaml` reads the file of the main checkout. An untracked `ilot.yaml` in the main checkout therefore works in a repo where you cannot commit one.
-Two worktrees of one repo for the same ticket make `ilot` refuse that stack, and the error names both folders.
+Two worktrees of one repo whose branches give the same stack name make `ilot` refuse that stack, and the error names both folders.
 
 Each app gets its ports in the range 20000-29999 and keeps them. The global file can set another range.
 Its URL, `http://<app>.<stack>.<workspace>.localhost:4580`, therefore stays the same.
@@ -113,13 +114,13 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
 To work on a ticket, add a worktree and start the apps that you change in it:
 
 ```bash
-git -C ~/code/shop worktree add ~/code/shop-1234 -b PROJ-1234-retry-jobs
-cd ~/code/shop-1234
+git -C ~/code/shop worktree add ~/code/shop-retry -b retry-jobs
+cd ~/code/shop-retry
 ilot start api front
 ```
 
-`api` now runs twice: in `base` from the main checkout, and in `proj-1234` from the worktree.
-`front` runs in `proj-1234` from the main checkout of the web repo, and its `API_URL` points to the `api` of `proj-1234`.
+`api` now runs twice: in `base` from the main checkout, and in `retry-jobs` from the worktree.
+`front` runs in `retry-jobs` from the main checkout of the web repo, and its `API_URL` points to the `api` of `retry-jobs`.
 
 ## Commands
 
@@ -141,7 +142,7 @@ ilot logs -f -n 20 api        # the last 20 lines, then the new ones
 ilot env api                  # the environment of the app, with the source of each value
 ilot check                    # check the ilot.yaml of this repo with the files of the other repos
 ilot check path/to/ilot.yaml  # check that file
-ilot rm proj-1234             # stop a stack and delete its state, its logs and its routes
+ilot rm retry-jobs            # stop a stack and delete its state, its logs and its routes
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
 ilot restart                  # with no app: stop every app and the daemon, start a new daemon, then start the apps that ran
@@ -164,12 +165,13 @@ When the timeout passes while the app still runs, `ilot` keeps the app and says 
 
 The file of a repo is `ilot.yaml` at the root of the repo. Its name and its place are fixed.
 
-Three keys describe the workspace. `ilot` reads them from the main checkout of a repo only:
+These keys describe the workspace. `ilot` reads them from the main checkout of a repo only:
 
 | Key | In | Meaning |
 |---|---|---|
 | `name` | the root | The name of the workspace, and of the root repo. It is in every URL. The default is the folder name of the main checkout. |
 | `repos` | the root | The member repos: a name and a path for each one. A relative path starts at the main checkout of the root repo. A path can start with `~/`. |
+| `stack.pattern` | the root | Optional. A regular expression: its first match in a branch name is the stack name. See "How it works". |
 | `member_of` | a member | The path of the root repo, relative to the main checkout of the member. |
 
 The link goes both ways. A member that the root does not list is an error, and a listed repo whose file does not name the root is an error. Each message names both files.

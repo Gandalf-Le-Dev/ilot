@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -29,6 +30,8 @@ type Workspace struct {
 	Settings config.WorkspaceSettings
 	// The path of each repo. The root repo has the name of the workspace.
 	RepoPaths map[string]string
+	// The stack.pattern of the root repo. It is nil without the key.
+	StackPattern *regexp.Regexp
 
 	git *Git
 }
@@ -50,8 +53,8 @@ func Find(dir, homeDir string, global config.Global, git *Git) (Workspace, Workt
 	}
 	rootDir, rootFile, rootConfig := current.MainDir, ownFile, ownConfig
 	if ownConfig.MemberOf != "" {
-		if ownConfig.Name != "" || len(ownConfig.Repos) > 0 {
-			return Workspace{}, Worktree{}, fmt.Errorf("%s has member_of, so it is the file of a member repo: name and repos belong to the file of the root repo", ownFile)
+		if ownConfig.Name != "" || len(ownConfig.Repos) > 0 || ownConfig.Stack.Pattern != "" {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s has member_of, so it is the file of a member repo: name, repos and stack belong to the file of the root repo", ownFile)
 		}
 		rootDir, err = git.rootDirOf(ownFile, ownConfig.MemberOf, homeDir)
 		if err != nil {
@@ -73,6 +76,13 @@ func Find(dir, homeDir string, global config.Global, git *Git) (Workspace, Workt
 	if err != nil {
 		return Workspace{}, Worktree{}, err
 	}
+	var stackPattern *regexp.Regexp
+	if rootConfig.Stack.Pattern != "" {
+		stackPattern, err = regexp.Compile(rootConfig.Stack.Pattern)
+		if err != nil {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s: stack.pattern is not a regular expression: %w", rootFile, err)
+		}
+	}
 	settings := global.Workspaces[name]
 	for repoName := range settings.Repos {
 		if _, isDeclared := rootConfig.Repos[repoName]; !isDeclared {
@@ -89,7 +99,7 @@ func Find(dir, homeDir string, global config.Global, git *Git) (Workspace, Workt
 			return Workspace{}, Worktree{}, err
 		}
 	}
-	workspace := Workspace{Name: name, RootDir: rootDir, HomeDir: homeDir, Global: global, Settings: settings, RepoPaths: repoPaths, git: git}
+	workspace := Workspace{Name: name, RootDir: rootDir, HomeDir: homeDir, Global: global, Settings: settings, RepoPaths: repoPaths, StackPattern: stackPattern, git: git}
 	current.Repo, err = workspace.repoOf(current)
 	if err != nil && ownConfig.MemberOf == "" {
 		return Workspace{}, Worktree{}, err
@@ -245,7 +255,7 @@ func (workspace Workspace) CheckoutsForStack(stackName string) (map[string]Workt
 		if err != nil {
 			return nil, err
 		}
-		checkout, err := checkoutForStack(worktrees, stackName)
+		checkout, err := workspace.checkoutForStack(worktrees, stackName)
 		if err != nil {
 			problems = append(problems, err)
 			continue
@@ -255,14 +265,14 @@ func (workspace Workspace) CheckoutsForStack(stackName string) (map[string]Workt
 	return checkoutByRepo, errors.Join(problems...)
 }
 
-func checkoutForStack(worktrees []Worktree, stackName string) (Worktree, error) {
+func (workspace Workspace) checkoutForStack(worktrees []Worktree, stackName string) (Worktree, error) {
 	mainCheckout := worktrees[0]
 	if stackName == BaseStackName {
 		return mainCheckout, nil
 	}
 	var matching []Worktree
 	for _, linkedWorktree := range worktrees[1:] {
-		name, err := StackName(linkedWorktree)
+		name, err := workspace.DefaultStackName(linkedWorktree)
 		if err == nil && name == stackName {
 			matching = append(matching, linkedWorktree)
 		}
