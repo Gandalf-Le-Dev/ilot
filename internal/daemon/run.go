@@ -57,24 +57,17 @@ func Run(ctx context.Context, options Options) error {
 	killOrphans(paths.RecordFile(), cmp.Or(options.OrphanGrace, defaultOrphanGrace), logger)
 
 	routes := &RouteTable{}
-	proxyAddress := ""
+	status := Status{Version: options.Version, PID: os.Getpid(), StartedAt: time.Now()}
 	if options.ProxyListen != "" {
-		proxyListener, err := net.Listen("tcp", options.ProxyListen)
+		address, stopProxy, err := serveProxy(options.ProxyListen, routes, logger)
 		if err != nil {
+			// Not the end of the daemon: with no API, each command would wait for its whole start timeout and could not tell why.
 			logger.Error("the proxy cannot listen", "address", options.ProxyListen, "error", err)
-			return fmt.Errorf("the proxy cannot listen on %s: %w", options.ProxyListen, err)
+			status.ProxyError = err.Error()
+		} else {
+			status.ProxyAddress = address
+			defer stopProxy()
 		}
-		proxyAddress = proxyListener.Addr().String()
-		proxyServer := &http.Server{Handler: NewProxy(routes, logger), ReadHeaderTimeout: 10 * time.Second}
-		proxyDone := make(chan struct{})
-		go func() {
-			defer close(proxyDone)
-			_ = proxyServer.Serve(proxyListener)
-		}()
-		defer func() {
-			proxyServer.Close()
-			<-proxyDone
-		}()
 	}
 
 	listener, err := listenOnSocket(paths.Socket())
@@ -91,14 +84,14 @@ func Run(ctx context.Context, options Options) error {
 	api := &Server{
 		Supervisor: supervisor,
 		Routes:     routes,
-		Status:     Status{Version: options.Version, PID: os.Getpid(), StartedAt: time.Now(), ProxyAddress: proxyAddress},
+		Status:     status,
 		OnShutdown: sync.OnceFunc(func() { close(shutdownRequested) }),
 		Logger:     logger,
 	}
 	apiServer := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- apiServer.Serve(listener) }()
-	logger.Info("daemon started", "version", options.Version, "pid", os.Getpid(), "socket", paths.Socket(), "proxy", proxyAddress)
+	logger.Info("daemon started", "version", options.Version, "pid", os.Getpid(), "socket", paths.Socket(), "proxy", status.ProxyAddress)
 
 	var failure error
 	select {
@@ -117,6 +110,23 @@ func Run(ctx context.Context, options Options) error {
 	<-served
 	logger.Info("daemon stopped", "pid", os.Getpid())
 	return failure
+}
+
+func serveProxy(listen string, routes *RouteTable, logger *slog.Logger) (address string, stop func(), err error) {
+	listener, err := net.Listen("tcp", listen)
+	if err != nil {
+		return "", nil, fmt.Errorf("the proxy cannot listen on %s: %w", listen, err)
+	}
+	server := &http.Server{Handler: NewProxy(routes, logger), ReadHeaderTimeout: 10 * time.Second}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = server.Serve(listener)
+	}()
+	return listener.Addr().String(), func() {
+		server.Close()
+		<-done
+	}, nil
 }
 
 // listenOnSocket replaces a socket file. Only the holder of the lock may call it: the file of a live daemon is never stale.

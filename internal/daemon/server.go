@@ -14,6 +14,8 @@ type Status struct {
 	PID          int       `json:"pid"`
 	StartedAt    time.Time `json:"started_at"`
 	ProxyAddress string    `json:"proxy_address"`
+	// Why the proxy does not listen. The daemon still runs the processes then.
+	ProxyError string `json:"proxy_error,omitempty"`
 	// A daemon that shuts down still answers, but it refuses every start.
 	ShuttingDown bool `json:"shutting_down,omitzero"`
 }

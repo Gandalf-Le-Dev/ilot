@@ -277,7 +277,26 @@ func TestDaemonServesTheProxyAndItsRoutes(t *testing.T) {
 	taken := options
 	taken.Paths = Paths{StateDir: shortDir(t)}
 	taken.ProxyListen = status.ProxyAddress
-	if err := Run(t.Context(), taken); err == nil || !strings.Contains(err.Error(), status.ProxyAddress) {
-		t.Fatalf("a daemon whose proxy address is taken returns %v", err)
+	secondContext, stopSecond := context.WithCancel(t.Context())
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- Run(secondContext, taken) }()
+	t.Cleanup(func() {
+		stopSecond()
+		if err := <-secondDone; err != nil {
+			t.Errorf("the daemon with no proxy returns %v", err)
+		}
+	})
+	secondClient := NewClient(taken.Paths.Socket())
+	var secondStatus Status
+	waitUntil(t, "the daemon whose proxy address is taken answers", func() bool {
+		var err error
+		secondStatus, err = secondClient.Status(t.Context())
+		return err == nil
+	})
+	if secondStatus.ProxyAddress != "" || !strings.Contains(secondStatus.ProxyError, status.ProxyAddress) {
+		t.Fatalf("a daemon whose proxy address is taken gives the status %+v", secondStatus)
+	}
+	if status.ProxyError != "" {
+		t.Fatalf("a daemon whose proxy listens gives the error %q", status.ProxyError)
 	}
 }
