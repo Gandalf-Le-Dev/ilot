@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
@@ -121,5 +122,47 @@ func TestRestartOfADownDaemonBootsIt(t *testing.T) {
 	}
 	if strings.Contains(environment.output.String(), "stopping every app") {
 		t.Errorf("output = %q, announces a stop although nothing ran", environment.output.String())
+	}
+}
+
+// A slow profile must not hold the state lock: every other ilot would wait for it, and give up after the lock timeout.
+func TestACommandReadsTheLoginShellBeforeItTakesTheStateLock(t *testing.T) {
+	commands := map[string]func(environment testEnvironment) error{
+		"start": func(environment testEnvironment) error {
+			return environment.executor.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
+		},
+		"restart": func(environment testEnvironment) error {
+			return environment.executor.RestartApps(t.Context(), environment.base, []string{"standalone"})
+		},
+		"start --all": func(environment testEnvironment) error { return environment.executor.StartAll(t.Context()) },
+		"boot": func(environment testEnvironment) error {
+			environment.supervisor.simulateDaemonRestart()
+			return environment.executor.Boot(t.Context(), environment.base)
+		},
+	}
+	for name, command := range commands {
+		t.Run(name, func(t *testing.T) {
+			environment := newTestEnvironment(t)
+			environment.start(t, environment.base, StartOptions{}, "standalone")
+			otherCommand := environment.executor.Store
+			otherCommand.LockTimeout = 50 * time.Millisecond
+			isLockHeldDuringCapture := false
+			environment.executor.ShellEnv = func() (map[string]string, map[string]string, error) {
+				release, err := otherCommand.Lock(t.Context())
+				if err != nil {
+					isLockHeldDuringCapture = true
+					return map[string]string{}, map[string]string{}, nil
+				}
+				return map[string]string{}, map[string]string{}, release()
+			}
+
+			if err := command(environment); err != nil {
+				t.Fatal(err)
+			}
+
+			if isLockHeldDuringCapture {
+				t.Errorf("ilot %s held the state lock while the login shell ran", name)
+			}
+		})
 	}
 }

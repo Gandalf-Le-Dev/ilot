@@ -148,8 +148,8 @@ func (executor *Executor) loadState() (state.State, error) {
 }
 
 // loadStacks gives the snapshot of a command of a stack, and the apps that its config no longer declares, which the command stops.
-func (executor *Executor) loadStacks(stackName string) (plan.Snapshot, []plan.Instance, error) {
-	snapshot, dropped, err := executor.Snapshot(stackName)
+func (executor *Executor) loadStacks(machine plan.Machine, stackName string) (plan.Snapshot, []plan.Instance, error) {
+	snapshot, dropped, err := executor.snapshotOn(machine, stackName)
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
