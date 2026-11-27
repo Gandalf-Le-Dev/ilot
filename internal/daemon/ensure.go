@@ -39,6 +39,9 @@ func (launch Launch) Start() (pid int, err error) {
 		return 0, err
 	}
 	defer output.Close()
+	if err := output.Chmod(daemonLogPerm); err != nil {
+		return 0, err
+	}
 	command := exec.Command(launch.Binary, launch.Args...)
 	command.Env = launch.Env
 	// A daemon in the folder of a worktree would block the removal of that folder.

@@ -30,7 +30,7 @@ type RotatingFile struct {
 	isClosed bool
 }
 
-// OpenRotating opens a log file for appends. perm is the mode of each new file, the ones that a rotation makes included.
+// OpenRotating opens a log file for appends. perm is the mode of each new file, the ones that a rotation makes included. A file that already exists loses the bits that perm does not give.
 func OpenRotating(path string, maxBytes int64, perm os.FileMode) (*RotatingFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -52,8 +52,20 @@ func (rotating *RotatingFile) open() error {
 		file.Close()
 		return err
 	}
+	if err := narrowMode(file, info.Mode().Perm(), rotating.perm); err != nil {
+		file.Close()
+		return err
+	}
 	rotating.file, rotating.size = file, info.Size()
 	return nil
+}
+
+// narrowMode takes the bits away that an older version of ilot gave: the mode of a new file does not reach an existing one.
+func narrowMode(file *os.File, current, wanted os.FileMode) error {
+	if current&^wanted == 0 {
+		return nil
+	}
+	return file.Chmod(current & wanted)
 }
 
 func (rotating *RotatingFile) Write(data []byte) (int, error) {
