@@ -1,0 +1,12 @@
+# A member repo of the sample workspace "shop": it names the root repo.
+member_of: ../shop
+apps:
+  front:
+    build: go build -o {{.BinDir}}/front .
+    run: exec {{.BinDir}}/front --port={{.Ports.http}}
+    env:
+      API_URL: http://localhost:{{port "api" "http"}}
+    ports: [http]
+    route: http
+    ready: {path: /health}
+    depends_on: [api]

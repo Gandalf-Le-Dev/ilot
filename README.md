@@ -7,18 +7,18 @@
 Every git worktree gets its own island of apps.
 
 `ilot` builds and starts the apps of each git worktree, gives each app its own ports, and puts it behind one local proxy.
-You can work on two tickets at the same time, and each ticket runs its own copy of the apps that it changes.
-The apps that a ticket does not change come from the `base` stack, which runs from the main checkout.
+You can work on two branches at the same time, and each one runs its own copy of the apps that it changes.
+The apps that a branch does not change come from the `base` stack, which runs from the main checkout.
 
 The name comes from the French word "îlot", a small island. The command and the repo spell it `ilot`.
 
 ## How it works
 
-A stack is the set of apps that run for one ticket.
+A stack is the set of apps that run for one line of work.
 The main checkout of every repo is the `base` stack, on any branch.
 `ilot` names the stack of a linked worktree after its branch: the branch name in lowercase letters, digits and dashes, 63 characters at most.
 For example, the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`.
-The branch is the name because one ticket usually gets the same branch name in each repo.
+The branch is the name because one line of work usually gets the same branch name in each repo.
 With `stack.pattern` in the `ilot.yaml` of the root repo, the name is the first match of that regular expression in the branch name. With `pattern: '[A-Za-z]+-[0-9]+'`, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`. A branch that the pattern does not match keeps its whole name.
 A worktree with a detached HEAD takes the name of its folder.
 
@@ -57,19 +57,44 @@ A URL of an app that does not run answers with the command that starts the app. 
 
 ## Requirements
 
-- macOS or Linux, and Go 1.26 to build `ilot`.
+- macOS or Linux, on amd64 or arm64.
 - git.
+- Go 1.26, only to install `ilot` with `go install`.
 - Docker, for container apps only. A mount of a container app names a path on this machine.
+- watchexec, for an app with `watch` only.
+
+`ilot doctor` tests each of them on your machine.
 
 ## Install
 
-From a clone of this repo:
+With Go:
 
 ```bash
-go install .
+go install github.com/Gandalf-Le-Dev/ilot@latest
 ```
 
 The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your `PATH`.
+
+Without Go, download the archive of your system from the [releases page](https://github.com/Gandalf-Le-Dev/ilot/releases), and put the `ilot` binary of the archive in a folder of your `PATH`.
+With Homebrew, once the tap has a formula:
+
+```bash
+brew install Gandalf-Le-Dev/tap/ilot
+```
+
+After an upgrade, run `ilot daemon restart` to replace the daemon of the old version, and `ilot skill install` to replace the skill.
+
+## Try the sample workspace
+
+`examples/` holds a workspace of two repos: `shop`, the root repo, with an `api`, and `web`, a member repo, with a `front` that calls the `api`. Both apps are small Go servers.
+
+```bash
+cp -R examples/shop examples/web ~/code/
+for repo in shop web; do (cd ~/code/$repo && git init -q && git add -A && git commit -qm sample); done
+cd ~/code/web
+ilot start front              # builds and starts api in base, then front
+curl http://front.base.shop.localhost:4580
+```
 
 ## Quick start
 
@@ -116,7 +141,7 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
 5. Run `ilot start api` in `~/code/shop`. `ilot` builds `api`, starts it, and waits until `/health` answers.
 6. Run `ilot ls` to see the status and the URL of each app.
 
-To work on a ticket, add a worktree and start the apps that you change in it:
+To work on a branch, add a worktree and start the apps that you change in it:
 
 ```bash
 git -C ~/code/shop worktree add ~/code/shop-retry -b retry-jobs
@@ -135,7 +160,7 @@ Every command finds the workspace from the repo of the folder that you are in, s
 `--workspace <name>` selects a workspace from any folder, and `--stack <name>` selects a stack of it. `ilot ls`, `rm` and `clean` take `--workspace`. `ilot start`, `stop`, `restart`, `logs`, `apps` and `env` take both; with `--workspace` and no `--stack`, they act on `base`. The workspace must have had one `ilot start`, which records its root repo, and the stack must exist.
 
 ```bash
-ilot ls                       # every app of every stack: status, ports, URL; then the worktrees of each ticket stack
+ilot ls                       # every app of every stack: status, ports, URL; then the worktree of each stack other than base
 ilot ls --json                # the same as one JSON object
 ilot apps                     # every app and external service that the ilot.yaml files of this stack declare, with the dependencies of each app
 ilot apps --json              # the same as one JSON object
@@ -183,6 +208,14 @@ Only one build runs in a stack at a time. A second build, from another `ilot` co
 The stack owns every app of a start from the first line: an app that ends, or that fails to start, stays in the stack. `ilot ls` shows it `exited`, its log stays, and the next `ilot start` starts it again in the same stack.
 When the timeout passes while the app still runs, `ilot` keeps the app and says so.
 `ilot stop`, `ilot rm`, `ilot ls` and `ilot logs` need the state only, so they work when an `ilot.yaml` is broken. A start reads the files of its own stack and of `base` only.
+
+### How an app runs and stops
+
+The daemon runs the `run` command of an app in `/bin/sh -c`, in a process group of its own.
+The command must stay in the foreground. When its shell exits, the daemon kills what is left in its process group, so a `run` that starts a server with `&` and exits, or a tool that forks to the background, ends at once. `ilot ls` then shows the app `exited`. Write `exec <server>`, or use the flag of the tool that keeps it in the foreground.
+
+A stop runs the `stop` command of the app, if it has one, for 20 seconds at most. If the app has no `stop` command, or if that command fails, the app gets SIGTERM. 20 seconds after that, whatever is left of its process group gets SIGKILL.
+A stop can therefore take up to 40 seconds, twice the stop timeout.
 
 ## The ilot.yaml files
 
@@ -342,7 +375,7 @@ An app gets its whole environment from `ilot` when it starts, and nothing from t
 It tells an agent that `ilot` is its own tool, and it describes every command, the stacks and the traps.
 `ilot skill install` copies it to `~/.claude/skills/ilot/SKILL.md`, and `ilot skill print` prints it.
 Run `ilot skill install` again after you upgrade `ilot`.
-The skill pre-approves every `ilot` command.
+The skill pre-approves `ilot ls`, `apps`, `logs`, `env`, `check`, `start`, `restart` and `stop`. Every other command, for example `ilot rm`, `clean` or `daemon restart`, asks you for permission first.
 When you add a command, add it to the skill too: a test fails otherwise.
 
 ## Files and folders
@@ -362,6 +395,10 @@ If another program has port 4580, each command prints a warning, the apps run, a
 Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot daemon restart`.
 After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot daemon restart` to replace it.
 After you delete the worktrees of a stack, run `ilot clean` to give back its ports. `ilot clean` also removes a stack that lost its last worktree to `ilot stack bind`. It names each app that it stops. A worktree that you moved with `git worktree move` keeps its stack: `ilot clean` binds the stack to the new folder when one unbound worktree of the repo has a branch that gives the name of the stack.
+
+## License
+
+MIT. See `LICENSE`.
 
 ## Development
 

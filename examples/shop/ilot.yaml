@@ -1,0 +1,17 @@
+# The root repo of the sample workspace "shop": it names the workspace and lists the other repo.
+name: shop
+repos:
+  web: ../web
+stack:
+  pattern: '[A-Za-z]+-[0-9]+'   # the branch feature/SHOP-12-cart belongs to the stack shop-12
+env:
+  LOG_LEVEL: info
+apps:
+  api:
+    build: go build -o {{.BinDir}}/api .
+    run: exec {{.BinDir}}/api --port={{.Ports.http}}
+    env:
+      GREETING: hello from the api of the stack {{.Stack}}
+    ports: [http]
+    route: http
+    ready: {path: /health}

@@ -1,7 +1,7 @@
 ---
 name: ilot
 description: "Run, stop, inspect and debug the apps of a workspace with the ilot CLI. Use it for any task about an app, a port, a log, a proxy URL, a stack, an ilot.yaml or ilot itself. Examples: start an API to test a change, read its logs, find its URL, check an ilot.yaml."
-allowed-tools: Bash(ilot:*)
+allowed-tools: "Bash(ilot ls:*), Bash(ilot apps:*), Bash(ilot logs:*), Bash(ilot env:*), Bash(ilot check:*), Bash(ilot start:*), Bash(ilot restart:*), Bash(ilot stop:*)"
 ---
 
 # ilot
@@ -10,14 +10,14 @@ allowed-tools: Bash(ilot:*)
 
 ## The rule
 
-`ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env`, `ilot stack show` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
+`ilot` is yours to run. Run `ilot start`, `ilot restart`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env`, `ilot stack show`, `ilot doctor` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
 
-Every `ilot` command is pre-approved for you. These limits still apply:
+This skill pre-approves `ilot ls`, `ilot apps`, `ilot logs`, `ilot env`, `ilot check`, `ilot start`, `ilot restart` and `ilot stop`. Every other `ilot` command asks the user for permission first. These limits still apply:
 
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop an app of the `base` stack that you did not start, ask the user. Other stacks and the user's other sessions use them.
 - Before you run `ilot daemon stop` or `ilot daemon restart`, ask the user. Both stop every app of every stack, the user's other sessions included.
-- Never run `ilot daemon run`. `ilot` starts its daemon by itself.
+- Never run `ilot daemon run`. `ilot` starts its daemon by itself, and the command is hidden from the help.
 
 ## Stacks
 
@@ -36,7 +36,7 @@ Run every `ilot` command inside a repo of the workspace: outside one, `ilot` doe
 ## Commands
 
 ```bash
-ilot ls                         # every app of every stack: status, ports, proxy URL; then the worktrees of each ticket stack
+ilot ls                         # every app of every stack: status, ports, proxy URL; then the worktree of each stack other than base
 ilot ls --json                  # the same as one JSON object, with the checkout of each repo per stack: use it to read the list from a script
 ilot apps                       # every app and external service that the ilot.yaml files declare for this folder's stack, with the dependencies of each app
 ilot apps --json                # the same as one JSON object
@@ -110,4 +110,8 @@ An app that `ilot ls` marks `undeclared` is in no `ilot.yaml` of its stack any m
 - A container app declares its ports in `container.ports`, with the port inside the container. `ilot` publishes each one on `127.0.0.1` on a port of the stack, which `ilot ls` and `ilot env` show. A container reaches another app with `{{host "<app>"}}`, which gives it `host.docker.internal`.
 - If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also give it a separate `HOME` whose `~/.config/ilot/config.yaml` sets `proxy.listen` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
 - If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.
+- The `run` command of an app must stay in the foreground. When its shell exits, the daemon kills what is left in its process group: a `run` that starts a server with `&`, or a tool that forks to the background, ends at once, and `ilot ls` shows it `exited`. Use `exec`, or the flag of the tool that keeps it in the foreground.
+- A stop can take up to twice the stop timeout of 20 seconds: a `stop` command gets 20 seconds, then the app gets SIGTERM and 20 more seconds before SIGKILL. A slow `ilot stop` is not stuck.
+- On Linux, a container app reaches only the apps that listen on every interface: `host.docker.internal` is the address of the Docker bridge there, not `127.0.0.1`. Docker Desktop on macOS has no such limit.
+- A container app is ready at once with a bare `ready: {port: ...}`: Docker accepts the connection before the server inside listens. Give it `ready.path` or `ready.command`. `ilot check` warns about it.
 - In zsh, a shell variable named `path` overwrites `PATH`. Name loop variables something else.
