@@ -262,10 +262,10 @@ The CLI computes each process specification and sends it. This keeps the daemon 
 |---|---|
 | Proof of life | The daemon holds `flock` on `daemon.lock` for its whole life. A socket file alone proves nothing. This removes D1 by construction. |
 | Start | The CLI starts the daemon on demand, detached, with its output in `daemon.log`. Two concurrent starts race on the lock, and one wins. |
-| Processes | Each runs as `sh -c <command>` in its own process group, with exactly the environment that the CLI sent. |
+| Processes | Each runs as `sh -c <command>` in its own process group, with exactly the environment that the CLI sent. When the shell exits, the daemon kills what is left in the group, so a command that backgrounds itself and exits ends with it. |
 | Logs | The daemon appends the raw output to `logs/<app>.log` and rotates at 10 MB, with 2 old files. `ilot logs` no longer unwraps JSON. |
 | Readiness | A TCP connect, an HTTP GET or a command, one time per second. A probe never kills a process. |
-| Stop | The optional `stop` command, or SIGTERM to the group. SIGKILL to the group after 20 seconds. |
+| Stop | The optional `stop` command, for 20 seconds at most. Without it, or when it fails, SIGTERM to the group. SIGKILL to the group 20 seconds after that. A stop with a `stop` command can therefore take 40 seconds, twice the stop timeout. |
 | Crash of the daemon | The daemon records each process ID with its start time. A new daemon kills the survivors before it listens. |
 | Upgrade | `GET /v1/status` gives the version. On a mismatch, the CLI prints `ilot daemon restart` and does not restart anything by itself. |
 | Socket path | `<state>/daemon.sock`. If that path is longer than 100 bytes, the daemon uses `/tmp/ilot-<uid>/<hash>.sock`. |
@@ -274,10 +274,10 @@ The API, as HTTP over the unix socket:
 
 | Call | Effect |
 |---|---|
-| `GET /v1/status` | Version, process ID, start time, proxy address. |
+| `GET /v1/status` | Version, process ID, start time, proxy address. `proxy_error` says why the proxy does not listen: the daemon then still runs the processes. `shutting_down` is true while the daemon stops, and every start gets 503 then. |
 | `GET /v1/processes` | Name, state (`starting`, `ready`, `exited`, `stopping`), process ID, exit code and specification hash of each process. |
 | `PUT /v1/processes/{name}` | Start the process. Same hash and alive: no change. Different hash or exited: replace. |
-| `POST /v1/processes/{name}/restart` | Stop, then start with the stored specification. |
+| `POST /v1/processes/{name}/restart` | Stop, then start with the specification in the body. It replaces the stored one even with the same hash, so the process gets the session variables of the terminal, for example a new `SSH_AUTH_SOCK`. |
 | `DELETE /v1/processes/{name}` | Stop and forget. |
 | `PUT /v1/routes` | Replace the route table of the proxy. |
 | `POST /v1/shutdown` | Stop every process, then exit. |

@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"gopkg.in/yaml.v3"
 )
 
 func installedSkillPath(homeDir string) string {
@@ -67,15 +69,21 @@ func TestInstallAgentSkillKeepsOtherFiles(t *testing.T) {
 	}
 }
 
-func TestAgentSkillPreApprovesEveryDevCommand(t *testing.T) {
+func TestAgentSkillPreApprovesOnlyTheCommandsOfDailyWork(t *testing.T) {
 	frontmatter, _, isFound := strings.Cut(strings.TrimPrefix(agentSkill, "---\n"), "\n---\n")
 	if !strings.HasPrefix(agentSkill, "---\n") || !isFound {
 		t.Fatalf("skill has no frontmatter:\n%s", agentSkill)
 	}
-	for _, wantLine := range []string{"name: ilot", "allowed-tools: Bash(ilot:*)"} {
-		if !strings.Contains(frontmatter, wantLine) {
-			t.Errorf("frontmatter lacks %q:\n%s", wantLine, frontmatter)
-		}
+	var fields struct {
+		Name         string `yaml:"name"`
+		AllowedTools string `yaml:"allowed-tools"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &fields); err != nil {
+		t.Fatalf("frontmatter is not YAML: %v\n%s", err, frontmatter)
+	}
+	want := []string{"Bash(ilot ls:*)", "Bash(ilot apps:*)", "Bash(ilot logs:*)", "Bash(ilot env:*)", "Bash(ilot check:*)", "Bash(ilot start:*)", "Bash(ilot restart:*)", "Bash(ilot stop:*)"}
+	if fields.Name != "ilot" || !slices.Equal(strings.Split(fields.AllowedTools, ", "), want) {
+		t.Errorf("name = %q, allowed-tools = %q; want ilot and %v", fields.Name, fields.AllowedTools, want)
 	}
 }
 
@@ -113,5 +121,32 @@ func TestSkillHasAPrintAndAnInstallCommand(t *testing.T) {
 		if err != nil || parsed.Command() != "skill "+subcommand {
 			t.Errorf("parse skill %s = %v, %v", subcommand, parsed, err)
 		}
+	}
+}
+
+func runCommandLine(t *testing.T, arguments ...string) error {
+	t.Helper()
+	parsed, err := parse(t, arguments...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Run()
+}
+
+func TestSkillPrintAndSkillInstallRunAgainstTheHomeFolder(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	printed, _, err := captureOutput(t, func() error { return runCommandLine(t, "skill", "print") })
+	if err != nil || printed != agentSkill {
+		t.Fatalf("ilot skill print = %d bytes, %v; want the embedded skill", len(printed), err)
+	}
+
+	said, _, err := captureOutput(t, func() error { return runCommandLine(t, "skill", "install") })
+	if err != nil || !strings.Contains(said, installedSkillPath(homeDir)) {
+		t.Fatalf("ilot skill install said %q, %v; want the path of the skill", said, err)
+	}
+	if installed, err := os.ReadFile(installedSkillPath(homeDir)); err != nil || string(installed) != agentSkill {
+		t.Errorf("installed skill = %d bytes, %v; want the embedded skill", len(installed), err)
 	}
 }
