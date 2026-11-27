@@ -226,8 +226,8 @@ func (executor *Executor) bootApps(ctx context.Context, baseStackName string) er
 	if err := executor.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
 		return err
 	}
-	err = executor.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures, map[string]daemon.Process{})
-	return errors.Join(append(problems, err, executor.sendRoutes(ctx))...)
+	err = executor.startEachUnlessADependencyFailed(ctx, start.After, start.Order, problems, imageFailures, map[string]daemon.Process{})
+	return errors.Join(err, executor.sendRoutes(ctx))
 }
 
 // StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
@@ -261,8 +261,8 @@ func (executor *Executor) StartAll(ctx context.Context) error {
 	if err := executor.buildApps(ctx, start.After, start.Order, isDown); err != nil {
 		return err
 	}
-	err = executor.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures, processByName)
-	return errors.Join(append(problems, err, executor.sendRoutes(ctx))...)
+	err = executor.startEachUnlessADependencyFailed(ctx, start.After, start.Order, problems, imageFailures, processByName)
+	return errors.Join(err, executor.sendRoutes(ctx))
 }
 
 func (executor *Executor) planBoot(snapshot plan.Snapshot) (plan.Start, []error, error) {
@@ -276,7 +276,7 @@ func (executor *Executor) planBoot(snapshot plan.Snapshot) (plan.Start, []error,
 }
 
 // planMembers plans the start of every member of every stack, after the given instances.
-// It reads the file of each stack. A stack whose file is broken stays down, and the others start.
+// It reads the file of each stack. A stack whose file is broken stays down, and so does an instance whose templates do not render, with its dependents. The others start.
 func (executor *Executor) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance, processByName map[string]daemon.Process) (plan.Start, []error, error) {
 	var problems []error
 	for _, wantedInstance := range snapshot.Wanted() {
@@ -288,13 +288,54 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, bootInstances []pl
 			bootInstances = append(bootInstances, wantedInstance)
 		}
 	}
-	start, err := executor.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false}, processByName)
-	return start, problems, err
+	start, err := executor.planWithPorts(snapshot, bootInstances, StartOptions{SkipDependencies: false}, processByName)
+	if err != nil {
+		return plan.Start{}, nil, err
+	}
+	if err := executor.saveStart(start); err != nil {
+		return plan.Start{}, nil, err
+	}
+	var renderProblems []error
+	start.Order, renderProblems = executor.withoutUnrenderable(start.After, start.Order)
+	return start, append(problems, renderProblems...), nil
+}
+
+// withoutUnrenderable leaves out each instance whose specification or build does not render, and each instance that depends on one.
+func (executor *Executor) withoutUnrenderable(snapshot plan.Snapshot, startOrder []plan.Instance) ([]plan.Instance, []error) {
+	var renderable []plan.Instance
+	var problems []error
+	isLeftOut := map[plan.Instance]bool{}
+	for _, appInstance := range startOrder {
+		if leftOutDependency, hasLeftOutDependency := executor.failedDependencyOf(snapshot, appInstance, isLeftOut); hasLeftOutDependency {
+			isLeftOut[appInstance] = true
+			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(leftOutDependency)))
+			continue
+		}
+		if err := renderErrorOf(snapshot, appInstance); err != nil {
+			isLeftOut[appInstance] = true
+			problems = append(problems, fmt.Errorf("%s does not start: %w", snapshot.ProcessName(appInstance), err))
+			continue
+		}
+		renderable = append(renderable, appInstance)
+	}
+	return renderable, problems
+}
+
+func renderErrorOf(snapshot plan.Snapshot, appInstance plan.Instance) error {
+	if _, err := snapshot.Spec(appInstance); err != nil {
+		return err
+	}
+	if build := snapshot.App(appInstance).Build; build != "" {
+		_, err := snapshot.Render(appInstance, build)
+		return err
+	}
+	return nil
 }
 
 // One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
-func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, imageFailures []imageFailure, processByName map[string]daemon.Process) error {
-	var problems []error
+// The problems of the plan come first, so that the hint at the end covers them too.
+func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, planProblems []error, imageFailures []imageFailure, processByName map[string]daemon.Process) error {
+	problems := slices.Clone(planProblems)
 	isFailed := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
 		isFailed[failure.appInstance] = true
@@ -343,6 +384,19 @@ func (executor *Executor) failedDependencyOf(snapshot plan.Snapshot, appInstance
 // prepareStart plans a start, gives its ports, and saves the state after it: every instance of the plan is a member from now on.
 // A failed start keeps them members, so the next ilot start tries them again in the same stacks.
 func (executor *Executor) prepareStart(before plan.Snapshot, requestedInstances []plan.Instance, options StartOptions, processByName map[string]daemon.Process) (plan.Start, error) {
+	start, err := executor.planWithPorts(before, requestedInstances, options, processByName)
+	if err != nil {
+		return plan.Start{}, err
+	}
+	for _, appInstance := range start.Order {
+		if _, err := start.After.Spec(appInstance); err != nil {
+			return plan.Start{}, err
+		}
+	}
+	return start, executor.saveStart(start)
+}
+
+func (executor *Executor) planWithPorts(before plan.Snapshot, requestedInstances []plan.Instance, options StartOptions, processByName map[string]daemon.Process) (plan.Start, error) {
 	start := before.PlanStart(requestedInstances, options.SkipDependencies)
 	if err := executor.checkExternalServicesUp(start.Externals); err != nil {
 		return plan.Start{}, err
@@ -353,13 +407,12 @@ func (executor *Executor) prepareStart(before plan.Snapshot, requestedInstances 
 	if err := executor.allocatePorts(start); err != nil {
 		return plan.Start{}, err
 	}
-	for _, appInstance := range start.Order {
-		if _, err := start.After.Spec(appInstance); err != nil {
-			return plan.Start{}, err
-		}
-	}
+	return start, nil
+}
+
+func (executor *Executor) saveStart(start plan.Start) error {
 	start.After.RecordRoutes(start.Order)
-	return start, executor.saveStacks(start.After)
+	return executor.saveStacks(start.After)
 }
 
 // startInstance sends one instance to the daemon and waits until it is ready.
