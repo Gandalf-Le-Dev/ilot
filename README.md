@@ -76,10 +76,10 @@ go install github.com/Gandalf-Le-Dev/ilot@latest
 The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your `PATH`.
 
 Without Go, download the archive of your system from the [releases page](https://github.com/Gandalf-Le-Dev/ilot/releases), and put the `ilot` binary of the archive in a folder of your `PATH`.
-With Homebrew, once the tap has a formula:
+With Homebrew, once the tap `Gandalf-Le-Dev/homebrew-tap` exists:
 
 ```bash
-brew install Gandalf-Le-Dev/tap/ilot
+brew install --cask Gandalf-Le-Dev/tap/ilot
 ```
 
 After an upgrade, run `ilot daemon restart` to replace the daemon of the old version, and `ilot skill install` to replace the skill.
@@ -410,3 +410,15 @@ go test -tags e2e ./...
 
 The `e2e` tag adds the end-to-end test. It builds `ilot`, makes a home folder under `/tmp` with the workspace of `testdata/e2e`, and runs the real commands: a start in the main checkout and in a worktree, requests through the proxy, a kill of the daemon, and a restore.
 It needs git and the Go toolchain. Its home folder has its own state folder and its own global file, which gives the proxy a free port.
+
+### Release
+
+A tag `v*` runs `.github/workflows/release.yml`, which runs the tests, then GoReleaser with `.goreleaser.yaml`.
+GoReleaser builds `ilot` for macOS and Linux on amd64 and arm64, stamps the version of the tag into `ilot --version`, puts the archives and their checksums on the release page, and pushes a Homebrew cask to the tap repo `Gandalf-Le-Dev/homebrew-tap`.
+The workflow needs the repository secret `HOMEBREW_TAP_GITHUB_TOKEN`, a token that can push to the tap repo.
+
+```bash
+goreleaser check                       # test the configuration
+goreleaser release --snapshot --clean  # build every archive in dist/, and publish nothing
+git tag v0.1.0 && git push origin v0.1.0
+```

@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# A tag v* runs this file in .github/workflows/release.yml. Try it with: goreleaser release --snapshot --clean
+version: 2
+
+project_name: ilot
+
+builds:
+  - id: ilot
+    main: .
+    binary: ilot
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.stampedVersion={{ .Version }}
+
+archives:
+  - id: ilot
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]
+
+# The tap repo Gandalf-Le-Dev/homebrew-tap must exist, and HOMEBREW_TAP_GITHUB_TOKEN must be allowed to push to it.
+# A cask and not a formula: GoReleaser 2.10 deprecated brews, and goreleaser check fails on it.
+homebrew_casks:
+  - name: ilot
+    ids: [ilot]
+    binaries: [ilot]
+    repository:
+      owner: Gandalf-Le-Dev
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/Gandalf-Le-Dev/ilot
+    description: Run the apps of each git worktree behind one local proxy
+    license: MIT
+    dependencies:
+      - formula: git
+    # The binaries are not signed, so macOS would refuse to run a download that keeps its quarantine flag.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ilot"]
+          end
