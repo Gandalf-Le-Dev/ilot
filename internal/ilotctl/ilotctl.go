@@ -38,23 +38,24 @@ type StartOptions struct {
 	SkipDependencies bool
 }
 
-func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) (err error) {
-	release, err := controller.Store.Lock(ctx)
+func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) error {
+	var before plan.Snapshot
+	var dropped, requestedInstances []plan.Instance
+	var start plan.Start
+	err := controller.underLock(ctx, func() (err error) {
+		if before, dropped, err = controller.loadStacks(stackName); err != nil {
+			return err
+		}
+		if requestedInstances, err = before.Instances(stackName, appNames); err != nil {
+			return err
+		}
+		start, err = controller.prepareStart(before, requestedInstances, options)
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, release()) }()
-
-	before, err := controller.loadStacks(ctx, stackName)
-	if err != nil {
-		return err
-	}
-	requestedInstances, err := before.Instances(stackName, appNames)
-	if err != nil {
-		return err
-	}
-	start, err := controller.prepareStart(before, requestedInstances, options)
-	if err != nil {
+	if err := controller.deleteProcesses(ctx, before, dropped); err != nil {
 		return err
 	}
 	after := start.After
@@ -85,11 +86,30 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 	if err := controller.replaceChangedDependents(ctx, before, after, stackName, start.Order, processByName); err != nil {
 		return err
 	}
-	if err := controller.Supervisor.SetRoutes(ctx, after.Routes()); err != nil {
+	if err := controller.sendRoutes(ctx); err != nil {
 		return err
 	}
 	controller.printURLs(after, requestedInstances)
 	return nil
+}
+
+// underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a daemon call.
+func (controller *Controller) underLock(ctx context.Context, step func() error) (err error) {
+	release, err := controller.Store.Lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, release()) }()
+	return step()
+}
+
+// sendRoutes reads the state again, because another command can have changed it since this one planned.
+func (controller *Controller) sendRoutes(ctx context.Context) error {
+	current, err := controller.loadState()
+	if err != nil {
+		return err
+	}
+	return controller.Supervisor.SetRoutes(ctx, plan.Snapshot{Workspace: controller.Workspace, State: current, Machine: controller.Machine}.Routes())
 }
 
 // replaceChangedDependents replaces each running app of the stack whose specification this start changed, for example a template that now names an app of the stack.
@@ -116,13 +136,7 @@ func (controller *Controller) replaceChangedDependents(ctx context.Context, befo
 	return nil
 }
 
-func (controller *Controller) Boot(ctx context.Context, baseStackName string) (err error) {
-	release, err := controller.Store.Lock(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, release()) }()
-
+func (controller *Controller) Boot(ctx context.Context, baseStackName string) error {
 	if controller.Supervisor.IsUp(ctx) {
 		fmt.Fprintln(controller.Output, "ilot already runs, nothing to boot")
 		return nil
@@ -132,15 +146,17 @@ func (controller *Controller) Boot(ctx context.Context, baseStackName string) (e
 
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
-func (controller *Controller) RestartApps(ctx context.Context, stackName string, appNames []string) (err error) {
-	release, err := controller.Store.Lock(ctx)
+func (controller *Controller) RestartApps(ctx context.Context, stackName string, appNames []string) error {
+	var snapshot plan.Snapshot
+	var dropped []plan.Instance
+	err := controller.underLock(ctx, func() (err error) {
+		snapshot, dropped, err = controller.loadStacks(stackName)
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, release()) }()
-
-	snapshot, err := controller.loadStacks(ctx, stackName)
-	if err != nil {
+	if err := controller.deleteProcesses(ctx, snapshot, dropped); err != nil {
 		return err
 	}
 	restartedInstances, err := snapshot.Instances(stackName, appNames)
@@ -169,13 +185,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 }
 
 // The only command that replaces the daemon, for example after an upgrade of ilot.
-func (controller *Controller) Restart(ctx context.Context, baseStackName string) (err error) {
-	release, err := controller.Store.Lock(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { err = errors.Join(err, release()) }()
-
+func (controller *Controller) Restart(ctx context.Context, baseStackName string) error {
 	if controller.Supervisor.IsUp(ctx) {
 		fmt.Fprintln(controller.Output, "stopping every app of every stack")
 	}
@@ -186,10 +196,29 @@ func (controller *Controller) Restart(ctx context.Context, baseStackName string)
 }
 
 func (controller *Controller) bootApps(ctx context.Context, baseStackName string) error {
-	snapshot, err := controller.loadStacks(ctx, baseStackName)
+	var start plan.Start
+	var problems []error
+	err := controller.underLock(ctx, func() error {
+		snapshot, _, err := controller.loadStacks(baseStackName)
+		if err != nil {
+			return err
+		}
+		start, problems, err = controller.planBoot(snapshot)
+		return err
+	})
 	if err != nil {
 		return err
 	}
+	imageFailures := controller.ensureImages(start.After, ctx, start.Order, func(plan.Instance) bool { return true }, false)
+	needsBuild := func(appInstance plan.Instance) bool { return controller.binDirIsEmpty(appInstance.Stack) }
+	if err := controller.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
+		return err
+	}
+	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures)
+	return errors.Join(append(problems, err, controller.sendRoutes(ctx))...)
+}
+
+func (controller *Controller) planBoot(snapshot plan.Snapshot) (plan.Start, []error, error) {
 	var bootInstances []plan.Instance
 	for _, appName := range slices.Sorted(maps.Keys(controller.Config.Apps)) {
 		if controller.Config.Apps[appName].Autostart {
@@ -208,16 +237,7 @@ func (controller *Controller) bootApps(ctx context.Context, baseStackName string
 		}
 	}
 	start, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false})
-	if err != nil {
-		return err
-	}
-	imageFailures := controller.ensureImages(start.After, ctx, start.Order, func(plan.Instance) bool { return true }, false)
-	needsBuild := func(appInstance plan.Instance) bool { return controller.binDirIsEmpty(appInstance.Stack) }
-	if err := controller.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
-		return err
-	}
-	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures)
-	return errors.Join(append(problems, err, controller.Supervisor.SetRoutes(ctx, start.After.Routes()))...)
+	return start, problems, err
 }
 
 // One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
@@ -403,20 +423,30 @@ func (writer *linePrefixWriter) Write(content []byte) (int, error) {
 	return len(content), nil
 }
 
-func (controller *Controller) Stop(ctx context.Context, stackName string, appNames []string) (err error) {
-	release, err := controller.Store.Lock(ctx)
+func (controller *Controller) Stop(ctx context.Context, stackName string, appNames []string) error {
+	var snapshot plan.Snapshot
+	var stopped []plan.Instance
+	err := controller.underLock(ctx, func() (err error) {
+		snapshot, stopped, err = controller.planStop(stackName, appNames)
+		return err
+	})
 	if err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, release()) }()
+	if err := controller.deleteProcesses(ctx, snapshot, stopped); err != nil {
+		return err
+	}
+	return controller.sendRoutes(ctx)
+}
 
+func (controller *Controller) planStop(stackName string, appNames []string) (plan.Snapshot, []plan.Instance, error) {
 	current, err := controller.loadState()
 	if err != nil {
-		return err
+		return plan.Snapshot{}, nil, err
 	}
 	stoppedInstances, err := controller.instancesToStop(current, stackName, appNames)
 	if err != nil {
-		return err
+		return plan.Snapshot{}, nil, err
 	}
 	// The warning about dependents needs the configuration. Without it, the stop still works.
 	before, configErr := controller.snapshotOf(current.Clone(), stackName)
@@ -433,13 +463,7 @@ func (controller *Controller) Stop(ctx context.Context, stackName string, appNam
 			controller.warnAboutDependents(before, stoppedInstance)
 		}
 	}
-	if err := controller.saveStacks(snapshot); err != nil {
-		return err
-	}
-	if err := controller.deleteProcesses(ctx, snapshot, stopped); err != nil {
-		return err
-	}
-	return controller.Supervisor.SetRoutes(ctx, snapshot.Routes())
+	return snapshot, stopped, controller.saveStacks(snapshot)
 }
 
 // deleteProcesses stops instances and their watchers. A container that the daemon does not hold, after a crash of the daemon, is removed too.
