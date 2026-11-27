@@ -43,6 +43,7 @@ func (command *checkCommand) Run() error {
 		return err
 	}
 	problems, warnings := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), currentWorkspace.Global.Ports, checkout.Repo, checkedFile, otherFileByRepo)
+	warnings = append(warnings, unknownAppsOfTheGlobalFile(currentWorkspace.Name, currentWorkspace.Settings, checkedFile, otherFileByRepo)...)
 	for _, warning := range warnings {
 		fmt.Fprintln(os.Stderr, "warning: "+warning)
 	}
@@ -90,6 +91,27 @@ func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts co
 		problems = append(problems, problem)
 	}
 	return problems, plan.CheckWarnings(workspaceName, merged)
+}
+
+// The global file can name an app that only another stack declares, so an unknown app is a warning and not a problem.
+func unknownAppsOfTheGlobalFile(workspaceName string, settings config.WorkspaceSettings, checkedFile string, otherFileByRepo map[string]string) []string {
+	isDeclared := map[string]bool{}
+	for _, configFile := range append(slices.Collect(maps.Values(otherFileByRepo)), checkedFile) {
+		repoConfig, err := config.Parse(configFile)
+		if err != nil {
+			return nil
+		}
+		for appName := range repoConfig.Apps {
+			isDeclared[appName] = true
+		}
+	}
+	var warnings []string
+	for _, appName := range slices.Sorted(maps.Keys(settings.Apps)) {
+		if !isDeclared[appName] {
+			warnings = append(warnings, fmt.Sprintf("~/%s: workspaces.%s.apps.%s gives env to an app that no %s of this stack declares", config.GlobalFilePath, workspaceName, appName, config.FileName))
+		}
+	}
+	return warnings
 }
 
 // configFilesToCheck gives the file to check and the files that the stack of its checkout merges it with.

@@ -112,7 +112,7 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
        depends_on: [api]
    ```
 
-4. Run `ilot check` in each repo. It merges the file with the files of the other repos and renders every template.
+4. Run `ilot check` in each repo. It merges the file with the files of the other repos and renders every template. It warns about an entry under `workspaces.<name>.apps` of the global file that names an app that no `ilot.yaml` of the stack declares.
 5. Run `ilot start api` in `~/code/shop`. `ilot` builds `api`, starts it, and waits until `/health` answers.
 6. Run `ilot ls` to see the status and the URL of each app.
 
