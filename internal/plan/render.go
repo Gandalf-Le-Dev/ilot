@@ -99,6 +99,10 @@ func (snapshot Snapshot) Spec(appInstance Instance) (ProcessSpec, error) {
 	if err != nil {
 		return ProcessSpec{}, err
 	}
+	readyProbe, err := snapshot.readyProbe(appInstance)
+	if err != nil {
+		return ProcessSpec{}, err
+	}
 	return ProcessSpec{
 		Name: snapshot.ProcessName(appInstance),
 		Spec: daemon.Spec{
@@ -107,7 +111,7 @@ func (snapshot Snapshot) Spec(appInstance Instance) (ProcessSpec, error) {
 			Env:     env,
 			LogFile: snapshot.LogFile(appInstance),
 			Stop:    shutdownCommand,
-			Ready:   snapshot.readyProbe(appInstance),
+			Ready:   readyProbe,
 		},
 	}, nil
 }
@@ -177,7 +181,7 @@ func (snapshot Snapshot) Watcher(watchedInstance Instance) (ProcessSpec, bool, e
 		commandParts = append(commandParts, "--watch "+ShellQuote(filepath.Join(workingDir, watchedPath)))
 	}
 	if len(watch.Exts) > 0 {
-		commandParts = append(commandParts, "--exts "+strings.Join(watch.Exts, ","))
+		commandParts = append(commandParts, "--exts "+ShellQuote(strings.Join(watch.Exts, ",")))
 	}
 	// ilot finds the workspace from the repo of its folder, and the working folder of an app can be outside every repo.
 	onChange := "cd " + ShellQuote(checkoutDir) + " && " + ShellQuote(snapshot.Machine.IlotBinary) + " restart --stack " + ShellQuote(watchedInstance.Stack) + " " + ShellQuote(watchedInstance.App)
@@ -330,6 +334,14 @@ func (snapshot Snapshot) containerCommand(appInstance Instance, envEntries []Env
 		if err != nil {
 			return "", err
 		}
+		// Docker reads a source with no slash as the name of a volume, and the file means a folder of the repo.
+		if !filepath.IsAbs(source) {
+			checkoutDir, err := snapshot.CheckoutDir(appInstance)
+			if err != nil {
+				return "", err
+			}
+			source = filepath.Join(checkoutDir, source)
+		}
 		commandParts = append(commandParts, "-v "+ShellQuote(source+":"+container.Mounts[sourceTemplate]))
 	}
 	for _, argumentTemplate := range container.Args {
@@ -345,7 +357,7 @@ func (snapshot Snapshot) containerCommand(appInstance Instance, envEntries []Env
 
 // docker run only forwards SIGTERM, and Postgres answers it by waiting for its clients: docker stop kills after 10 s.
 func (snapshot Snapshot) containerStopCommand(appInstance Instance) string {
-	return "docker stop --time 10 " + ShellQuote(snapshot.ContainerName(appInstance))
+	return "docker stop -t 10 " + ShellQuote(snapshot.ContainerName(appInstance))
 }
 
 // The env of the workspace in the global file is for processes: it can hold tokens that third-party images have no business reading. The shell is for the docker command, not for the image.
@@ -356,16 +368,30 @@ func containerEnvEntries(envEntries []EnvEntry) []EnvEntry {
 }
 
 // With no probe, the daemon calls a process ready when it stays alive.
-func (snapshot Snapshot) readyProbe(appInstance Instance) *daemon.Probe {
+// A ready command is a template, as the run command. It runs inside a container, and behind the wrap of the repo for a process.
+func (snapshot Snapshot) readyProbe(appInstance Instance) (*daemon.Probe, error) {
 	app := snapshot.App(appInstance)
-	probe := daemon.Probe{Host: "", Port: snapshot.Ports(appInstance)[readyPortName(app)], Path: app.Ready.Path, Command: app.Ready.Command}
-	if snapshot.IsContainer(appInstance) && app.Ready.Command != "" {
-		probe.Command = "docker exec " + ShellQuote(snapshot.ContainerName(appInstance)) + " sh -c " + ShellQuote(app.Ready.Command)
+	probe := daemon.Probe{Host: "", Port: snapshot.Ports(appInstance)[readyPortName(app)], Path: app.Ready.Path, Command: ""}
+	if app.Ready.Command != "" {
+		command, err := snapshot.Render(appInstance, app.Ready.Command)
+		if err != nil {
+			return nil, err
+		}
+		probe.Command = snapshot.Wrapped(appInstance, command)
+		if snapshot.IsContainer(appInstance) {
+			probe.Command = "docker exec " + ShellQuote(snapshot.ContainerName(appInstance)) + " sh -c " + ShellQuote(command)
+		}
 	}
 	if probe.Validate() != nil {
-		return nil
+		return nil, nil
 	}
-	return &probe
+	return &probe, nil
+}
+
+// IsReadyAtOnce tells if the probe of a container app connects to a published port only: Docker accepts that connection before the server inside listens.
+func (snapshot Snapshot) IsReadyAtOnce(appInstance Instance) bool {
+	app := snapshot.App(appInstance)
+	return snapshot.IsContainer(appInstance) && app.Ready.Command == "" && app.Ready.Path == "" && readyPortName(app) != ""
 }
 
 // Every app listens on a loopback port of this machine. A process reaches it on localhost, and a container through the name of the machine.

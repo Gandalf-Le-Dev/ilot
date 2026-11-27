@@ -2,6 +2,7 @@ package plan
 
 import (
 	"cmp"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -111,6 +112,9 @@ func (snapshot Snapshot) renderEveryTemplateOf(appInstance Instance) []error {
 			}
 		}
 	}
+	if app.Ready.Command != "" {
+		templates = append(templates, app.Ready.Command)
+	}
 	templates = append(templates, slices.Sorted(maps.Keys(app.Container.Mounts))...)
 	templates = append(templates, app.Container.Args...)
 	var problems []error
@@ -120,4 +124,16 @@ func (snapshot Snapshot) renderEveryTemplateOf(appInstance Instance) []error {
 		}
 	}
 	return problems
+}
+
+// CheckWarnings gives what works but does not do what the file says: a container app whose probe is a bare port is ready before its server listens.
+func CheckWarnings(workspaceName string, merged config.Config) []string {
+	snapshot := snapshotWithEveryAppRunning(workspaceName, []string{workspaceName}, merged)
+	var warnings []string
+	for _, appName := range slices.Sorted(maps.Keys(merged.Apps)) {
+		if snapshot.IsReadyAtOnce(Instance{Stack: snapshot.StackOf(checkStackName, appName), App: appName}) {
+			warnings = append(warnings, fmt.Sprintf("app %q: Docker accepts a connection on a published port before the server in the container listens, so a ready check on a port alone passes at once: give ready a path or a command", appName))
+		}
+	}
+	return warnings
 }
