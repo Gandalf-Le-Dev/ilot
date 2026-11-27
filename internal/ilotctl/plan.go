@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -37,7 +38,7 @@ func (controller *Controller) planStart(stacks stackSet, requestedInstances []in
 					continue
 				}
 				dependencyStack := controller.stackServing(stacks, appInstance.stackName, dependency)
-				if isRequested[instance{stackName: appInstance.stackName, appName: dependency}] || controller.Config.Apps[dependency].PerStack {
+				if isRequested[instance{stackName: appInstance.stackName, appName: dependency}] || controller.Config.Apps[dependency].Scope == config.ScopeStack {
 					dependencyStack = appInstance.stackName
 				}
 				plan(instance{stackName: dependencyStack, appName: dependency})
@@ -51,16 +52,17 @@ func (controller *Controller) planStart(stacks stackSet, requestedInstances []in
 	return startOrder, slices.Sorted(maps.Keys(isExternalDependency))
 }
 
-// The apps of a stack use its own instance of an app when it runs one (per_stack apps always), master's otherwise.
+// The apps of a stack use its own copy of an app when it runs one, and the copy of the base stack otherwise.
+// The scope of the app can fix the answer: always the own stack, or always the base stack.
 func (controller *Controller) stackServing(stacks stackSet, stackName, appName string) string {
 	app, _ := controller.anyDeclaration(stackName, appName)
 	switch {
-	case app.Shared:
-		return workspace.SharedStackName
-	case app.PerStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
+	case app.Scope == config.ScopeBase:
+		return workspace.BaseStackName
+	case app.Scope == config.ScopeStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
 		return stackName
 	}
-	return workspace.MasterStackName
+	return workspace.BaseStackName
 }
 
 func (controller *Controller) checkExternalServicesUp(externalNames []string) error {
@@ -104,9 +106,8 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 }
 
 func (controller *Controller) fixedPortsOf(appInstance instance) map[string]int {
-	app := controller.app(appInstance)
-	if app.Shared || appInstance.stackName == workspace.MasterStackName {
-		return app.FixedPorts
+	if appInstance.stackName == workspace.BaseStackName {
+		return controller.app(appInstance).FixedPorts
 	}
 	return nil
 }
@@ -221,7 +222,7 @@ func (controller *Controller) loadStacks(stackName string) (stackSet, error) {
 	if err != nil {
 		return stackSet{}, err
 	}
-	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName, stackName} {
+	for _, stackName := range []string{workspace.BaseStackName, stackName} {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
 		if err != nil {
 			return stackSet{}, err

@@ -12,12 +12,12 @@ func TestCommandsOfARepoWithAWrapRunBehindItsPrefix(t *testing.T) {
 	portalStandalone.Stop = "api stop --port={{.Ports.http}}"
 	environment.controller.Config.Apps["portal-standalone"] = portalStandalone
 
-	environment.start(t, environment.master, StartOptions{}, "portal-standalone")
+	environment.start(t, environment.base, StartOptions{}, "portal-standalone")
 
 	if want := (recordedBuild{workingDir: "/src/portal", command: "mise exec -- sh -c 'go build ./cmd/api'"}); len(*environment.builds) != 1 || (*environment.builds)[0] != want {
 		t.Errorf("builds = %+v, want %+v", *environment.builds, want)
 	}
-	spec := environment.supervisor.runningSpecs["portal-standalone.master"]
+	spec := environment.supervisor.runningSpecs["portal-standalone.base"]
 	if !strings.HasPrefix(spec.Command, "mise exec -- sh -c 'api --port=") || !strings.HasSuffix(spec.Command, " --from=/src/portal'") {
 		t.Errorf("run command = %q, want the run command behind the prefix", spec.Command)
 	}
@@ -30,9 +30,9 @@ func TestCommandsOfARepoWithoutAWrapRunAsTheyAre(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.Config.RepoWrap = map[string]string{"portal": "mise exec --"}
 
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if runCommand := environment.supervisor.runningSpecs["standalone.master"].Command; !strings.HasPrefix(runCommand, "standalone --port=") {
+	if runCommand := environment.supervisor.runningSpecs["standalone.base"].Command; !strings.HasPrefix(runCommand, "standalone --port=") {
 		t.Errorf("run command = %q, want it unchanged: the wrap belongs to another repo", runCommand)
 	}
 }

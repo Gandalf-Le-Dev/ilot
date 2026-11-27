@@ -8,23 +8,28 @@ Every git worktree gets its own island of apps.
 
 `ilot` builds and starts the apps of each git worktree, gives each app its own ports, and puts it behind one local proxy.
 You can work on two tickets at the same time, and each ticket runs its own copy of the apps that it changes.
-The apps that a ticket does not change come from the `master` stack, which runs from the main checkout.
+The apps that a ticket does not change come from the `base` stack, which runs from the main checkout.
 
 The name comes from the French word "îlot", a small island. The command and the repo spell it `ilot`.
 
 ## How it works
 
 A stack is the set of apps that run for one ticket.
-The main checkout of a repo is the `master` stack.
+The main checkout of every repo is the `base` stack, on any branch.
 `ilot` names the stack of a linked worktree after the ticket key in its branch name: `PROJ-`, `OPS-` or `TASK-` and digits, in lowercase.
 For example, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`.
 If the branch has no ticket key, `ilot` looks for one in the folder name, and else it uses the folder name.
 The ticket keys are fixed in `internal/workspace/stackname.go`.
 
 A worktree runs only the apps that you start in it.
-The other dependencies come from the `master` stack. If one of them does not run, `ilot` starts it there.
-An app marked `per_stack` is the exception: an app that depends on it always gets the copy of its own stack.
-A shared app runs once, in the `devbox` stack, for every worktree.
+The other dependencies come from the `base` stack. If one of them does not run, `ilot` starts it there.
+The `scope` of an app can fix that choice:
+
+| `scope` | Meaning |
+|---|---|
+| absent | If the stack runs its own copy of the app, an app that depends on it gets that copy. If not, it gets the copy of the `base` stack. |
+| `stack` | An app that depends on it always gets the copy of its own stack. |
+| `base` | The app runs one time, in the `base` stack, for every stack. |
 
 A workspace is the set of repos that share stacks, ports and one name.
 One repo is the root repo: the `ilot.yaml` at its root names the workspace and lists the other repos.
@@ -113,7 +118,7 @@ cd ~/code/shop-1234
 ilot start api front
 ```
 
-`api` now runs twice: in `master` from the main checkout, and in `proj-1234` from the worktree.
+`api` now runs twice: in `base` from the main checkout, and in `proj-1234` from the worktree.
 `front` runs in `proj-1234` from the main checkout of the web repo, and its `API_URL` points to the `api` of `proj-1234`.
 
 ## Commands
@@ -186,14 +191,13 @@ The fields of an app:
 | `env` | Environment variables of the process. |
 | `dir` | Working folder of the process. A relative path is relative to the checkout. The default is the checkout. |
 | `ports` | Names of the ports of the app. `ilot` gives each name a free port of its range and keeps it. A container app declares its ports in the `container` block. |
-| `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. On an app that is not `shared`, they apply to the `master` stack only. |
+| `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. They apply to the `base` stack only. In another stack, `ilot` gives the port a number of its range. |
 | `route` | Port that the proxy URL sends requests to. |
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
 | `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. |
 | `depends_on` | Apps and external services that the app needs at startup. |
-| `autostart` | `ilot boot` starts the app in the `master` stack. |
-| `shared` | The app runs once, in the `devbox` stack, for every worktree. Each of its ports needs a number in `fixed_ports`. |
-| `per_stack` | An app that depends on this app gets the copy of its own stack, not the `master` copy. |
+| `autostart` | `ilot boot` starts the app in the `base` stack. |
+| `scope` | `base` or `stack`: which stack serves the app to the apps that depend on it. See "How it works". The old keys `shared: true` and `per_stack: true` are now `scope: base` and `scope: stack`. |
 | `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. It needs `watchexec` on the `PATH` of the app. A watcher process runs `ilot restart <app>` at each change, so an app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
 
@@ -202,7 +206,7 @@ The `build`, `run`, `stop` and `env` values can use these templates:
 | Template | Value |
 |---|---|
 | `{{.Ports.<name>}}` | The port of this app with that name. |
-| `{{port "<app>" "<name>"}}` | The port of another app or of an external service. If the stack runs its own copy of the app, it gets the port of that copy. Else it gets the port of the `master` copy. |
+| `{{port "<app>" "<name>"}}` | The port of another app or of an external service. If the stack runs its own copy of the app, it gets the port of that copy. Else it gets the port of the `base` copy. The `scope` of the app can fix that choice. |
 | `{{url "<app>"}}` | The proxy URL of an app, with the same rule. |
 | `{{host "<app>"}}` | The host name that this app uses to reach another app: `localhost` for a process, and `host.docker.internal` for a container. |
 | `{{repo "<name>"}}` | The checkout of another repo for this stack. |

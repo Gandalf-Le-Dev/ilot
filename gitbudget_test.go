@@ -71,7 +71,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	}
 
 	if len(supervisor.started) != 3 {
-		t.Fatalf("the start reached %v, want front in proj-1, with api and worker in master", supervisor.started)
+		t.Fatalf("the start reached %v, want front in proj-1, with api and worker in base", supervisor.started)
 	}
 	if *gitProcessCount > 5 {
 		t.Errorf("ilot start ran %d git processes in a workspace of 3 repos, want 5 at most", *gitProcessCount)

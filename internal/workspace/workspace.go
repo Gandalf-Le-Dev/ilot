@@ -257,7 +257,7 @@ func (workspace Workspace) CheckoutsForStack(stackName string) (map[string]Workt
 
 func checkoutForStack(worktrees []Worktree, stackName string) (Worktree, error) {
 	mainCheckout := worktrees[0]
-	if stackName == MasterStackName || stackName == SharedStackName {
+	if stackName == BaseStackName {
 		return mainCheckout, nil
 	}
 	var matching []Worktree

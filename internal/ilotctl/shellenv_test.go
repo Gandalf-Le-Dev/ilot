@@ -54,7 +54,7 @@ func TestBuildsRunWithTheShellEnvironment(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "PATH": "/usr/bin"})
 
-	environment.start(t, environment.master, StartOptions{SkipDependencies: true}, "publicapi")
+	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "publicapi")
 
 	if want := []string{"GOPROXY=https://proxy", "PATH=/usr/bin"}; len(*environment.buildEnvirons) != 1 || !slices.Equal((*environment.buildEnvirons)[0], want) {
 		t.Errorf("build environments = %v, want one build with %v", *environment.buildEnvirons, want)
@@ -86,7 +86,7 @@ func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 	restart.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
 	environment.supervisor.events = nil
 
-	if err := restart.Restart(t.Context(), environment.master); err != nil {
+	if err := restart.Restart(t.Context(), environment.base); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 
@@ -94,7 +94,7 @@ func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 		t.Errorf("events = %v, want a shutdown first", events)
 	}
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	want := []string{"gateway.master", "internalapi.master", "restapi-watch.devbox", "restapi.devbox", "standalone.proj-1234", "temporal.devbox"}
+	want := []string{"gateway.base", "internalapi.base", "restapi-watch.base", "restapi.base", "standalone.proj-1234", "temporal.base"}
 	if !slices.Equal(running, want) {
 		t.Errorf("running after restart %v, want %v", running, want)
 	}
@@ -111,7 +111,7 @@ func TestRestartOfADownDaemonBootsIt(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controllerOfANewCommand().Restart(t.Context(), environment.master); err != nil {
+	if err := environment.controllerOfANewCommand().Restart(t.Context(), environment.base); err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
 

@@ -33,7 +33,7 @@ func TestDeclaredServicesListEveryAppWithItsRepoAndDependenciesThenTheExternalSe
 
 func TestDeclaredServicesTableShowsTheAppsThenTheExternalServices(t *testing.T) {
 	services := declaredServices{
-		Stack:            "master",
+		Stack:            "base",
 		Apps:             []declaredApp{{Name: "gateway", Repo: "platform", DependsOn: []string{}}, {Name: "publicapi", Repo: "platform", DependsOn: []string{"gateway", "keyring"}}},
 		ExternalServices: []declaredExternalService{{Name: "keyring", Port: 8200}},
 	}
@@ -43,7 +43,7 @@ func TestDeclaredServicesTableShowsTheAppsThenTheExternalServices(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	want := "stack: master\n\n" +
+	want := "stack: base\n\n" +
 		"APP        REPO      DEPENDS ON\n" +
 		"gateway    platform  \n" +
 		"publicapi  platform  gateway, keyring\n" +
@@ -56,14 +56,14 @@ func TestDeclaredServicesTableShowsTheAppsThenTheExternalServices(t *testing.T) 
 }
 
 func TestDeclaredServicesTableLeavesOutTheExternalTableWhenNoneIsDeclared(t *testing.T) {
-	services := declaredServices{Stack: "master", Apps: []declaredApp{{Name: "gateway", Repo: "platform", DependsOn: []string{}}}, ExternalServices: []declaredExternalService{}}
+	services := declaredServices{Stack: "base", Apps: []declaredApp{{Name: "gateway", Repo: "platform", DependsOn: []string{}}}, ExternalServices: []declaredExternalService{}}
 	var output bytes.Buffer
 
 	if err := printDeclaredServices(&output, services); err != nil {
 		t.Fatal(err)
 	}
 
-	want := "stack: master\n\n" +
+	want := "stack: base\n\n" +
 		"APP      REPO      DEPENDS ON\n" +
 		"gateway  platform  \n"
 	if output.String() != want {

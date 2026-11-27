@@ -7,10 +7,8 @@ import (
 	"strings"
 )
 
-const (
-	MasterStackName = "master"
-	SharedStackName = "devbox"
-)
+// The stack of the main checkout of every repo, on any branch.
+const BaseStackName = "base"
 
 const dnsLabelMaxLength = 63
 
@@ -22,7 +20,7 @@ var (
 // StackName gives the stack that a worktree belongs to.
 func StackName(worktree Worktree) (string, error) {
 	if worktree.IsMain {
-		return MasterStackName, nil
+		return BaseStackName, nil
 	}
 	for _, candidate := range []string{worktree.Branch, filepath.Base(worktree.Dir)} {
 		if ticketKey := ticketKeyPattern.FindStringSubmatch(candidate); ticketKey != nil {
@@ -37,7 +35,7 @@ func nameFromFolder(worktreeDir string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("worktree directory %q gives no usable stack name: rename it with letters or digits", worktreeDir)
 	}
-	if name == MasterStackName || name == SharedStackName {
+	if name == BaseStackName {
 		return "", fmt.Errorf("worktree directory %q would take the reserved stack name %q: rename it", worktreeDir, name)
 	}
 	return name, nil

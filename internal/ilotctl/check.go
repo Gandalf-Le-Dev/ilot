@@ -73,25 +73,25 @@ func CheckRendering(workspaceName string, repoNames []string, merged config.Conf
 	return problems
 }
 
-func stacksWithEveryAppRunning(repoNames []string, config config.Config) stackSet {
-	for _, app := range config.Apps {
+func stacksWithEveryAppRunning(repoNames []string, merged config.Config) stackSet {
+	for _, app := range merged.Apps {
 		if app.Repo != "" {
 			repoNames = append(repoNames, app.Repo)
 		}
 	}
 	stacks := stackSet{byName: map[string]*state.StackState{}}
-	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName, checkStackName} {
+	for _, stackName := range []string{workspace.BaseStackName, checkStackName} {
 		stackState := stacks.ensure(stackName)
 		for _, repoName := range repoNames {
 			stackState.CheckoutDirs[repoName] = madeUpCheckoutsRoot + repoName
 		}
 	}
 	nextMadeUpPort := firstMadeUpPort
-	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
-		app := config.Apps[appName]
-		stackNames := []string{checkStackName, workspace.MasterStackName}
-		if app.Shared {
-			stackNames = []string{workspace.SharedStackName}
+	for _, appName := range slices.Sorted(maps.Keys(merged.Apps)) {
+		app := merged.Apps[appName]
+		stackNames := []string{checkStackName, workspace.BaseStackName}
+		if app.Scope == config.ScopeBase {
+			stackNames = []string{workspace.BaseStackName}
 		}
 		for _, stackName := range stackNames {
 			portByName := map[string]int{}

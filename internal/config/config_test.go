@@ -10,10 +10,10 @@ import (
 
 const validConfigYAML = `
 external:
-  keyring: {port: 8200, start_hint: restart devbox}
+  keyring: {port: 8200, start_hint: start it by hand}
 apps:
   temporal:
-    shared: true
+    scope: base
     autostart: true
     run: temporal server start-dev --ui-port {{.Ports.ui}}
     ports: [grpc, ui]
@@ -21,7 +21,7 @@ apps:
     route: ui
     ready: {port: grpc}
   restapi:
-    shared: true
+    scope: base
     dir: /home/user/legacy/restapi
     run: perl main.pl prefork
     stop: perl main.pl stop
@@ -72,7 +72,7 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 		t.Errorf("keyring port = %d", config.External["keyring"].Port)
 	}
 	temporal := config.Apps["temporal"]
-	if !temporal.Shared || !temporal.Autostart || temporal.FixedPorts["ui"] != 10012 {
+	if temporal.Scope != ScopeBase || !temporal.Autostart || temporal.FixedPorts["ui"] != 10012 {
 		t.Errorf("temporal = %+v", temporal)
 	}
 	restapi := config.Apps["restapi"]
@@ -112,6 +112,8 @@ func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
 		{yaml: "gateway_base_file: gw.json\n", wantErrorSubstr: "gateway_base_file: it is gone"},
 		{yaml: "apps:\n  db:\n    container: {image: x, links: {a: b}}\n", wantErrorSubstr: "links: it is gone: use the host and port templates"},
 		{yaml: "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\n", wantErrorSubstr: "portal: ../portal"},
+		{yaml: "apps:\n  web: {run: x, shared: true}\n", wantErrorSubstr: "shared: write scope: base"},
+		{yaml: "apps:\n  web: {run: x, per_stack: true}\n", wantErrorSubstr: "per_stack: write scope: stack"},
 		{yaml: "domain: dev.example.net\n", wantErrorSubstr: "domain: it moved to proxy.domain in ~/.config/ilot/config.yaml"},
 	}
 	for _, testCase := range testCases {
@@ -167,9 +169,9 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 			wantErrorSubstr: `fixed port "web"`,
 		},
 		{
-			name:            "shared app with a port that is not fixed",
-			config:          Config{Apps: map[string]App{"temporal": {Run: "temporal", Shared: true, Ports: []string{"grpc", "ui"}, FixedPorts: map[string]int{"grpc": 7233}}}},
-			wantErrorSubstr: `shared app "temporal" needs a fixed number for port "ui"`,
+			name:            "a scope that does not exist",
+			config:          Config{Apps: map[string]App{"temporal": {Run: "temporal", Scope: "shared"}}},
+			wantErrorSubstr: `app "temporal": scope "shared" is not base or stack`,
 		},
 		{
 			name:            "stop command on a container app",
@@ -247,6 +249,16 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 func TestValidateAcceptsValidConfig(t *testing.T) {
 	if _, err := Load(writeConfigFile(t, validConfigYAML)); err != nil {
 		t.Fatalf("Load: %v", err)
+	}
+}
+
+func TestAnAppWithTheScopeBaseNeedsNoFixedPort(t *testing.T) {
+	merged := Config{Apps: map[string]App{
+		"mailpit": {Run: "mailpit", Scope: ScopeBase, Ports: []string{"smtp", "http"}, Route: "http"},
+		"cache":   {Run: "cache", Scope: ScopeStack, Ports: []string{"tcp"}},
+	}}
+	if err := merged.Validate(defaultPorts); err != nil {
+		t.Fatalf("Validate() = %v, want no error: ilot gives a port to an app of any scope", err)
 	}
 }
 
