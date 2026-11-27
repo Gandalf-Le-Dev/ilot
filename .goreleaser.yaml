@@ -14,7 +14,8 @@ builds:
     goarch: [amd64, arm64]
     flags: [-trimpath]
     ldflags:
-      - -s -w -X main.stampedVersion={{ .Version }}
+      # The tag, with its v, so that a release binary reports the same version as go install @v0.1.0.
+      - -s -w -X main.stampedVersion={{ .Tag }}
 
 archives:
   - id: ilot
@@ -43,8 +44,6 @@ homebrew_casks:
     homepage: https://github.com/Gandalf-Le-Dev/ilot
     description: Run the apps of each git worktree behind one local proxy
     license: MIT
-    dependencies:
-      - formula: git
     # The binaries are not signed, so macOS would refuse to run a download that keeps its quarantine flag.
     hooks:
       post:
