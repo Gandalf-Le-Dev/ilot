@@ -193,17 +193,36 @@ func TestStopSaysWhichAppsItStopped(t *testing.T) {
 func (environment testEnvironment) startExpectingNoneStarted(t *testing.T, stackName string, options StartOptions, appNames ...string) {
 	t.Helper()
 	err := environment.executor.Start(t.Context(), stackName, appNames, options)
-	if err == nil || !strings.Contains(err.Error(), "no requested app started") {
-		t.Errorf("Start(%s, %v) = %v, want the error that no requested app started", stackName, appNames, err)
+	if err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Errorf("Start(%s, %v) = %v, want the error that the requested app did not start", stackName, appNames, err)
 	}
 }
 
-func TestAStartWhereAnotherCommandStoppedOneOfTwoRequestedAppsSucceeds(t *testing.T) {
+func TestAStartWhereAnotherCommandStoppedOneOfTwoRequestedAppsFailsAfterStartingTheOther(t *testing.T) {
 	environment := newTestEnvironment(t)
 	stopWhenWaitedFor(environment, "doc.base.shop", "doc")
 
-	environment.start(t, environment.base, StartOptions{}, "doc", "standalone")
+	err := environment.executor.Start(t.Context(), environment.base, []string{"doc", "standalone"}, StartOptions{})
 
+	want := "a requested app did not start (doc.base.shop: another ilot command stopped it)"
+	if err == nil || err.Error() != want {
+		t.Errorf("Start = %v, want %q", err, want)
+	}
+	if !environment.isApplied("standalone.base.shop") {
+		t.Error("standalone.base.shop does not run, want it started")
+	}
+}
+
+func TestAStartNamesEveryRequestedAppThatDidNotStartWithItsCause(t *testing.T) {
+	environment := newTestEnvironment(t)
+	stopWhenWaitedFor(environment, "router.base.shop", "router")
+
+	err := environment.executor.Start(t.Context(), environment.base, []string{"router", "internalapi", "standalone"}, StartOptions{})
+
+	want := "2 requested apps did not start (router.base.shop: another ilot command stopped it; internalapi.base.shop: its dependency router.base.shop was stopped by another ilot command)"
+	if err == nil || err.Error() != want {
+		t.Errorf("Start = %v, want %q", err, want)
+	}
 	if !environment.isApplied("standalone.base.shop") {
 		t.Error("standalone.base.shop does not run, want it started")
 	}
