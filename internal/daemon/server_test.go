@@ -293,3 +293,34 @@ func TestShutdownTellsTheStoppedDaemonFromTheNextOneOnTheSameSocket(t *testing.T
 		t.Fatalf("Shutdown took %s although the stopped daemon is gone", took)
 	}
 }
+
+func TestAConnectionThatTheDaemonClosesAtOnceIsABrokenConnection(t *testing.T) {
+	socketPath := filepath.Join(shortDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepting := make(chan struct{})
+	go func() {
+		defer close(accepting)
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			connection.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		listener.Close()
+		<-accepting
+	})
+
+	// Many times, because the error of net/http depends on which side is first.
+	client := NewClient(socketPath)
+	for range 300 {
+		if _, err := client.Status(t.Context()); !errors.Is(err, errConnectionBroken) {
+			t.Fatalf("got %v, want a broken connection", err)
+		}
+	}
+}
