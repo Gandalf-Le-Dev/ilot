@@ -70,6 +70,9 @@ type Client struct {
 func NewClient(socketPath string) *Client {
 	transport := &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			if err := checkSocketFolder(socketPath); err != nil {
+				return nil, err
+			}
 			var dialer net.Dialer
 			return dialer.DialContext(ctx, "unix", socketPath)
 		},

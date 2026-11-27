@@ -124,6 +124,9 @@ func listenOnSocket(socketPath string) (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return nil, err
 	}
+	if err := checkSocketFolder(socketPath); err != nil {
+		return nil, err
+	}
 	if err := os.Remove(socketPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
