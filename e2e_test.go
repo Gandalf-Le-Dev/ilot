@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -198,6 +199,10 @@ func isAlive(pid int) bool {
 
 func waitUntilGone(t *testing.T, what string, pids ...int) {
 	t.Helper()
+	// kill(0) reaches the process group of the test, which is always alive.
+	if slices.Contains(pids, 0) {
+		t.Fatalf("%s: no process ID in %v", what, pids)
+	}
 	deadline := time.Now().Add(e2eWait)
 	for {
 		var alive []int
@@ -276,6 +281,12 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	pidsBeforeTheKill := machine.appPIDs()
+	// No daemon stops these apps if the test fails before the next daemon kills them.
+	t.Cleanup(func() {
+		for _, pid := range pidsBeforeTheKill {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}
+	})
 	if err := syscall.Kill(killedDaemon.PID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
