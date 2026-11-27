@@ -34,7 +34,6 @@ type Controller struct {
 	Personal            personal.Settings
 	ShellEnv            func() (map[string]string, error)
 	Login               string
-	BackendHost         string
 	ProxyPort           string
 	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
 	IlotBinary       string

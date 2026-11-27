@@ -176,8 +176,8 @@ func readyPortName(app appconfig.App) string {
 		return app.Ready.Port
 	case app.Route != "":
 		return app.Route
-	case len(app.Ports) > 0:
-		return app.Ports[0]
+	case len(app.PortNames()) > 0:
+		return app.PortNames()[0]
 	}
 	return ""
 }
@@ -230,11 +230,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		if _, isApp := controller.anyDeclaration(appInstance.stackName, name); !isApp {
 			return "", fmt.Errorf("host %q: no such app", name)
 		}
-		targetInstance := instance{stackName: controller.stackServing(stacks, appInstance.stackName, name), appName: name}
-		if controller.isLinkedContainer(appInstance, name) {
-			targetInstance.stackName = appInstance.stackName
-		}
-		return controller.hostFor(appInstance, targetInstance), nil
+		return controller.hostFor(appInstance), nil
 	}
 	templateFunctions := template.FuncMap{"port": portOf, "repo": repoCheckoutDir, "url": urlOf, "host": hostOf}
 	parsed, err := template.New(appInstance.processName()).Funcs(templateFunctions).Option("missingkey=error").Parse(templateText)

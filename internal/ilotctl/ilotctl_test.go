@@ -258,25 +258,26 @@ func testConfig() appconfig.Config {
 				Ports: []string{"http"},
 			},
 			"search": {
-				PerStack:   true,
-				Ports:      []string{"http"},
-				FixedPorts: map[string]int{"http": 16271},
-				Route:      "http",
-				Env:        map[string]string{"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`, "REGION": "DEV1"},
-				DependsOn:  []string{"search-cache", "gateway"},
+				PerStack: true,
+				Route:    "http",
+				Env: map[string]string{
+					"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`,
+					"CACHE_URL":   `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
+					"REGION":      "DEV1",
+				},
+				DependsOn: []string{"search-cache", "gateway"},
 				Container: appconfig.Container{
-					Image:         "registry/search:latest",
-					Mounts:        map[string]string{"/src/schemas": `{{repo "portal"}}/schemas`},
-					EnvFiles:      []string{"/etc/acme.conf.d/devhost.conf"},
-					Links:         map[string]string{"postgres-cache": "search-cache"},
-					ExternalLinks: map[string]string{"legacy-db": "devhost_legacy_{{.User}}"},
+					Image:    "registry/search:latest",
+					Ports:    map[string]int{"http": 16271},
+					Mounts:   map[string]string{`{{repo "portal"}}/schemas`: "/src/schemas"},
+					EnvFiles: []string{"/etc/acme.conf.d/search.conf"},
+					Args:     []string{"--shm-size=1g", "--label=stack={{.Stack}}"},
 				},
 			},
 			"search-cache": {
-				Ports:      []string{"postgres"},
-				FixedPorts: map[string]int{"postgres": 5432},
-				Ready:      appconfig.ReadyCheck{Port: "", Path: "", Command: "pg_isready -U postgres"},
-				Container:  appconfig.Container{Image: "registry/search-cache:latest"},
+				PerStack:  true,
+				Ready:     appconfig.ReadyCheck{Port: "", Path: "", Command: "pg_isready -U postgres"},
+				Container: appconfig.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
 			},
 			"front-like": {
 				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"gateway\"}}",
@@ -323,7 +324,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsPortFreeOnHost:    func(int) bool { return true },
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
-		BackendHost:         "devbox",
 		IlotBinary:          "/opt/ilot/bin/ilot",
 		ReadyTimeout:        time.Second,
 		ProgressInterval:    0,
@@ -1231,7 +1231,7 @@ func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 	}
 }
 
-func TestBootSkipsAContainerWhoseLinkedContainerImageFailed(t *testing.T) {
+func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 	environment.supervisor.simulateDaemonRestart()
@@ -1392,7 +1392,7 @@ func TestContainerCommandRemovesALeftoverContainerFirst(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
-	if !strings.HasPrefix(command, "docker rm -f 'ilot-proj-1234-search' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot-proj-1234-search'") {
+	if !strings.HasPrefix(command, "docker rm -f 'ilot-search-proj-1234' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot-search-proj-1234' ") {
 		t.Errorf("command = %q", command)
 	}
 }
@@ -1414,22 +1414,20 @@ func TestAContainerBuildRunsBeforeItsContainerStarts(t *testing.T) {
 	}
 }
 
-func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
+func TestContainerCommandPublishesItsPortsOnTheLoopbackAddress(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Login = "jdoe"
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
-	gatewayPort := environment.appPort(t, "proj-1234", "gateway")
+	searchPort := environment.appPort(t, "proj-1234", "search")
 	for _, wantPart := range []string{
-		"--network ilotproxy",
-		"--env-file '/etc/acme.conf.d/devhost.conf'",
+		"--add-host 'host.docker.internal:host-gateway'",
+		"-p 127.0.0.1:" + strconv.Itoa(searchPort) + ":16271",
+		"--env-file '/etc/acme.conf.d/search.conf'",
 		"-e 'REGION'",
 		"-e 'GATEWAY_URL'",
 		"-v '/src/portal/schemas:/src/schemas'",
-		"--link 'ilot-proj-1234-search-cache:postgres-cache'",
-		"--link 'devhost_legacy_jdoe:legacy-db'",
-		" 'registry/search:latest'",
+		"'--shm-size=1g' '--label=stack=proj-1234' 'registry/search:latest'",
 	} {
 		if !strings.Contains(command, wantPart) {
 			t.Errorf("command %q lacks %q", command, wantPart)
@@ -1438,49 +1436,87 @@ func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
 	if !strings.HasSuffix(command, "'registry/search:latest'") {
 		t.Errorf("command %q does not end with the image", command)
 	}
+	for _, removedPart := range []string{"--network", "--link"} {
+		if strings.Contains(command, removedPart) {
+			t.Errorf("command %q still has %s: the loopback ports replace the container network", command, removedPart)
+		}
+	}
 	if strings.Contains(command, "DEV1") {
 		t.Errorf("command %q shows an env value, which ps would show to every user", command)
 	}
-	searchEnv := environment.supervisor.runningSpecs["search.proj-1234"].Env
-	if searchEnv["REGION"] != "DEV1" || searchEnv["GATEWAY_URL"] != "http://devbox:"+strconv.Itoa(gatewayPort) {
-		t.Errorf("search env = %v, want the values for docker run -e to read", searchEnv)
+	if searchPort < appconfig.ReservedPortFirst || searchPort > appconfig.ReservedPortLast {
+		t.Errorf("search is published on port %d, want a port of the range of ilot", searchPort)
 	}
 	if order := environment.supervisor.startedInOrder; slices.Index(order, "search-cache.proj-1234") > slices.Index(order, "search.proj-1234") {
 		t.Errorf("started %v: want the cache before search", order)
 	}
 }
 
-func TestContainerProbeUsesTheContainerName(t *testing.T) {
+func TestAContainerReachesTheOtherAppsThroughTheNameOfTheMachine(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe.Host != "ilot-proj-1234-search" || probe.Port != 16271 {
-		t.Errorf("search probe = %+v", probe)
+	searchEnv := environment.supervisor.runningSpecs["search.proj-1234"].Env
+	wantGateway := "http://host.docker.internal:" + strconv.Itoa(environment.appPort(t, "proj-1234", "gateway"))
+	cacheState, err := environment.controller.Store.Load("proj-1234")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe.Command != "docker exec 'ilot-proj-1234-search-cache' sh -c 'pg_isready -U postgres'" {
-		t.Errorf("cache probe = %+v", probe)
+	wantCache := "postgres://host.docker.internal:" + strconv.Itoa(cacheState.Apps["search-cache"].Ports["postgres"]) + "/cache"
+	if searchEnv["REGION"] != "DEV1" || searchEnv["GATEWAY_URL"] != wantGateway || searchEnv["CACHE_URL"] != wantCache {
+		t.Errorf("search env = %v, want %s for a process and %s for another container", searchEnv, wantGateway, wantCache)
 	}
 }
 
-func TestHostTemplateDependsOnTheCaller(t *testing.T) {
+func TestAContainerIsProbedAndRoutedOnItsLoopbackPort(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "search")
+
+	searchPort := environment.appPort(t, "proj-1234", "search")
+	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe == nil || probe.Host != "" || probe.Port != searchPort {
+		t.Errorf("search probe = %+v, want the published port %d on the loopback address", probe, searchPort)
+	}
+	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe == nil || probe.Command != "docker exec 'ilot-search-cache-proj-1234' sh -c 'pg_isready -U postgres'" {
+		t.Errorf("cache probe = %+v", probe)
+	}
+	if route, isRouted := environment.supervisor.routeOf("search.proj-1234.dev.example.net"); !isRouted || route.Port != searchPort {
+		t.Errorf("route of search = %+v, routed %t; want the published port %d", route, isRouted, searchPort)
+	}
+}
+
+func TestAProcessReachesAContainerOnLocalhost(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
-	searchPort := 16271
-	want := "front --api=http://ilot-proj-1234-search:" + strconv.Itoa(searchPort) + " --gw=localhost"
+	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "search")) + " --gw=localhost"
 	if got := environment.supervisor.runningSpecs["front-like.proj-1234"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
 }
 
-func TestContainerFixedPortsAreNotCheckedOnTheHost(t *testing.T) {
+func TestTwoStacksPublishTheSameContainerOnTwoPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != 5432 && port != 16271 }
-
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
+	environment.start(t, environment.master, StartOptions{}, "search")
 
-	if port := environment.appPort(t, "proj-1234", "search"); port != 16271 {
-		t.Errorf("search port = %d, want its fixed 16271 in a worktree stack", port)
+	ticketPort, masterPort := environment.appPort(t, "proj-1234", "search"), environment.appPort(t, "master", "search")
+	if ticketPort == masterPort {
+		t.Errorf("both stacks publish search on port %d: the second container could not start", ticketPort)
+	}
+}
+
+func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != appconfig.ReservedPortFirst }
+
+	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
+
+	cacheState, err := environment.controller.Store.Load("proj-1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port := cacheState.Apps["search-cache"].Ports["postgres"]; port == appconfig.ReservedPortFirst || port == 0 {
+		t.Errorf("search-cache is published on port %d, want a free port", port)
 	}
 }
 
@@ -1492,7 +1528,8 @@ func TestDependencyWithoutPerStackComesFromMaster(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
-	if want := "front --api=http://ilot-master-search:16271 --gw=localhost"; environment.supervisor.runningSpecs["front-like.proj-1234"].Command != want {
+	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "master", "search")) + " --gw=localhost"
+	if environment.supervisor.runningSpecs["front-like.proj-1234"].Command != want {
 		t.Errorf("Command = %q, want %q", environment.supervisor.runningSpecs["front-like.proj-1234"].Command, want)
 	}
 }
@@ -1543,7 +1580,7 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].Stop; got != "docker stop --time 10 'ilot-proj-1234-search-cache'" {
+	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].Stop; got != "docker stop --time 10 'ilot-search-cache-proj-1234'" {
 		t.Errorf("search-cache Stop = %q", got)
 	}
 	if got := environment.supervisor.runningSpecs["gateway.proj-1234"].Stop; got != "" {

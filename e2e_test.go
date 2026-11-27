@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -294,4 +295,51 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	}
 	machine.stopDaemon()
 	waitUntilGone(t, "the daemon and its last app", daemonStatus.PID, pidByName["hello.master"])
+}
+
+// CI on Linux has Docker, so a Docker that does not work there is a failure. On another machine, the test is skipped.
+func requireDocker(t *testing.T) {
+	t.Helper()
+	mustHaveDocker := os.Getenv("CI") != "" && runtime.GOOS == "linux"
+	skipOrFail := t.Skipf
+	if mustHaveDocker {
+		skipOrFail = t.Fatalf
+	}
+	if _, err := exec.LookPath("docker"); err != nil {
+		skipOrFail("docker is not on PATH: %v", err)
+	}
+	if output, err := exec.Command("docker", "info").CombinedOutput(); err != nil {
+		skipOrFail("docker does not answer: %v\n%s", err, output)
+	}
+}
+
+func TestEndToEndAContainerAppAnswersBehindTheProxy(t *testing.T) {
+	requireDocker(t)
+	machine := newE2EMachine(t)
+	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "platform"))
+	const containerName = "ilot-web-master"
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", containerName).Run() })
+
+	machine.ilot(mainCheckout, "start", "--timeout", "5m", "web")
+
+	if status, body, err := machine.get("web.master.localhost"); err != nil || status != http.StatusOK || !strings.Contains(body, "nginx") {
+		t.Fatalf("GET of the container through the proxy = %d %q, %v; want the page of nginx\n%s", status, body, err, machine.daemonLog())
+	}
+	published, err := exec.Command("docker", "port", containerName, "80/tcp").Output()
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(published)), "127.0.0.1:") {
+		t.Errorf("docker port = %q, %v; want the port published on the loopback address only", published, err)
+	}
+
+	machine.ilot(mainCheckout, "stop", "web")
+	deadline := time.Now().Add(e2eWait)
+	for {
+		remaining, err := exec.Command("docker", "ps", "--all", "--quiet", "--filter", "name=^"+containerName+"$").Output()
+		if err == nil && strings.TrimSpace(string(remaining)) == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the container %s is still there after ilot stop: %q, %v", containerName, remaining, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

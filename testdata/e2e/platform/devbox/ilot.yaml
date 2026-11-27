@@ -7,3 +7,9 @@ apps:
     ports: [http]
     route: http
     ready: {path: /health}
+  web:
+    container:
+      image: nginx:alpine
+      ports: {http: 80}
+    route: http
+    ready: {path: /}

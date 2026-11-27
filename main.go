@@ -398,7 +398,6 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		Personal:            currentWorkspace.settings,
 		ShellEnv:            shellEnv,
 		Login:               currentUser.Username,
-		BackendHost:         "devbox",
 		ProxyPort:           proxyPort,
 		IlotBinary:          ilotBinary,
 		IlotEnv:             ilotEnv,

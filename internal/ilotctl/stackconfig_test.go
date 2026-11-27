@@ -20,17 +20,14 @@ func configWithApps(base appconfig.Config, extraApps map[string]appconfig.App) a
 
 var ticketOnlyApps = map[string]appconfig.App{
 	"ticket-search": {
-		Ports:      []string{"http"},
-		FixedPorts: map[string]int{"http": 16271},
-		Route:      "http",
-		Container:  appconfig.Container{Image: "registry/ticket-search:latest"},
+		Route:     "http",
+		Container: appconfig.Container{Image: "registry/ticket-search:latest", Ports: map[string]int{"http": 16271}},
 	},
 	"ticket-iam": {
 		Shared:     true,
-		Ports:      []string{"http"},
 		FixedPorts: map[string]int{"http": 8080},
 		Route:      "http",
-		Container:  appconfig.Container{Image: "registry/iam:latest"},
+		Container:  appconfig.Container{Image: "registry/iam:latest", Ports: map[string]int{"http": 8080}},
 	},
 }
 

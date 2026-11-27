@@ -65,15 +65,26 @@ type App struct {
 }
 
 type Container struct {
-	Image         string            `yaml:"image"`
-	Mounts        map[string]string `yaml:"mounts"`
-	EnvFiles      []string          `yaml:"env_files"`
-	Links         map[string]string `yaml:"links"`
-	ExternalLinks map[string]string `yaml:"external_links"`
+	Image string `yaml:"image"`
+	// From the name of a port to its number inside the container. ilot publishes each one on a port of the stack.
+	Ports map[string]int `yaml:"ports"`
+	// From a path on this machine to a path in the container.
+	Mounts   map[string]string `yaml:"mounts"`
+	EnvFiles []string          `yaml:"env_files"`
+	// More flags for docker run.
+	Args []string `yaml:"args"`
 }
 
 func (container Container) IsZero() bool {
 	return container.Image == ""
+}
+
+// PortNames gives the ports that ilot allocates for the app. A container declares them with their number inside the container.
+func (app App) PortNames() []string {
+	if app.Container.IsZero() {
+		return app.Ports
+	}
+	return slices.Sorted(maps.Keys(app.Container.Ports))
 }
 
 type Watch struct {
@@ -207,20 +218,16 @@ func (config Config) validateFixedPorts() error {
 	}
 	for _, name := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[name]
-		if !app.Container.IsZero() {
-			problems = append(problems, config.validateContainer(name, app)...)
-			continue
-		}
 		for _, portName := range slices.Sorted(maps.Keys(app.FixedPorts)) {
 			claimFixedPort(fmt.Sprintf("app %q", name), app.FixedPorts[portName])
-			if !slices.Contains(app.Ports, portName) {
-				problems = append(problems, fmt.Errorf("app %q: fixed port %q is not one of its ports %v", name, portName, app.Ports))
+			if !slices.Contains(app.PortNames(), portName) {
+				problems = append(problems, fmt.Errorf("app %q: fixed port %q is not one of its ports %v", name, portName, app.PortNames()))
 			}
 		}
 		if !app.Shared {
 			continue
 		}
-		for _, portName := range app.Ports {
+		for _, portName := range app.PortNames() {
 			if _, isFixed := app.FixedPorts[portName]; !isFixed {
 				problems = append(problems, fmt.Errorf("shared app %q needs a fixed number for port %q", name, portName))
 			}
@@ -229,17 +236,14 @@ func (config Config) validateFixedPorts() error {
 	return errors.Join(problems...)
 }
 
-// A container has its own network namespace: its ports are inside it, so they never clash with the host's.
-func (config Config) validateContainer(name string, app App) []error {
+func validateContainer(name string, app App) []error {
 	var problems []error
-	for _, portName := range app.Ports {
-		if _, isFixed := app.FixedPorts[portName]; !isFixed {
-			problems = append(problems, fmt.Errorf("container app %q needs a fixed number for port %q", name, portName))
-		}
+	if len(app.Ports) > 0 {
+		problems = append(problems, fmt.Errorf("app %q: a container app declares its ports in container.ports, with the port inside the container, for example {http: 8080}", name))
 	}
-	for _, linkedApp := range slices.Sorted(maps.Values(app.Container.Links)) {
-		if _, isApp := config.Apps[linkedApp]; !isApp {
-			problems = append(problems, fmt.Errorf("container app %q links to unknown app %q", name, linkedApp))
+	for _, portName := range slices.Sorted(maps.Keys(app.Container.Ports)) {
+		if portInContainer := app.Container.Ports[portName]; portInContainer < 1 || portInContainer > 65535 {
+			problems = append(problems, fmt.Errorf("app %q: container port %q has the number %d", name, portName, portInContainer))
 		}
 	}
 	return problems
@@ -252,14 +256,17 @@ func (config Config) validateApps() error {
 		if app.Run == "" && app.Container.IsZero() {
 			problems = append(problems, fmt.Errorf("app %q: missing run command", name))
 		}
+		if !app.Container.IsZero() {
+			problems = append(problems, validateContainer(name, app)...)
+		}
 		if app.Stop != "" && !app.Container.IsZero() {
 			problems = append(problems, fmt.Errorf("app %q: stop is for an app with a run command: ilot stops a container app itself", name))
 		}
-		if app.Route != "" && !slices.Contains(app.Ports, app.Route) {
-			problems = append(problems, fmt.Errorf("app %q: route %q is not one of its ports %v", name, app.Route, app.Ports))
+		if app.Route != "" && !slices.Contains(app.PortNames(), app.Route) {
+			problems = append(problems, fmt.Errorf("app %q: route %q is not one of its ports %v", name, app.Route, app.PortNames()))
 		}
-		if app.Ready.Port != "" && !slices.Contains(app.Ports, app.Ready.Port) {
-			problems = append(problems, fmt.Errorf("app %q: ready port %q is not one of its ports %v", name, app.Ready.Port, app.Ports))
+		if app.Ready.Port != "" && !slices.Contains(app.PortNames(), app.Ready.Port) {
+			problems = append(problems, fmt.Errorf("app %q: ready port %q is not one of its ports %v", name, app.Ready.Port, app.PortNames()))
 		}
 		if app.HomePath != "" && app.Route == "" {
 			problems = append(problems, fmt.Errorf("app %q: home_path needs a route", name))

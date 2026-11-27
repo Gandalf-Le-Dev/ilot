@@ -3,6 +3,7 @@ package appconfig
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -259,36 +260,69 @@ func TestMergeRefusesAnAppDeclaredByTwoRepos(t *testing.T) {
 	}
 }
 
-func TestValidateRefusesAContainerPortThatIsNotFixed(t *testing.T) {
-	config := Config{Apps: map[string]App{"search": {Run: "", Ports: []string{"http"}, Container: Container{Image: "search:latest"}}}}
+func TestValidateRefusesTopLevelPortsOnAContainer(t *testing.T) {
+	config := Config{Apps: map[string]App{"search": {Ports: []string{"http"}, Container: Container{Image: "search:latest"}}}}
 	err := config.Validate()
-	if err == nil || !strings.Contains(err.Error(), `container app "search" needs a fixed number for port "http"`) {
+	if err == nil || !strings.Contains(err.Error(), `app "search": a container app declares its ports in container.ports`) {
 		t.Fatalf("Validate() = %v", err)
 	}
 }
 
-func TestValidateAcceptsABuildForAContainer(t *testing.T) {
-	config := Config{Apps: map[string]App{"search": {Build: "make", Ports: []string{"http"}, FixedPorts: map[string]int{"http": 16271}, Container: Container{Image: "search:latest"}}}}
+func TestAContainerTakesItsPortNamesFromItsOwnBlock(t *testing.T) {
+	config := Config{Apps: map[string]App{"search": {
+		Build:     "make",
+		Route:     "http",
+		Ready:     ReadyCheck{Port: "admin"},
+		Container: Container{Image: "search:latest", Ports: map[string]int{"http": 8080, "admin": 9000}},
+	}}}
 	if err := config.Validate(); err != nil {
-		t.Fatalf("Validate() = %v", err)
+		t.Fatalf("Validate() = %v, want the route and the ready port found in container.ports", err)
+	}
+	if got := config.Apps["search"].PortNames(); !slices.Equal(got, []string{"admin", "http"}) {
+		t.Errorf("PortNames = %v, want the sorted names of container.ports", got)
 	}
 }
 
-func TestContainersMayShareAFixedPort(t *testing.T) {
+func TestContainersMayUseTheSamePortInside(t *testing.T) {
 	config := Config{Apps: map[string]App{
-		"mock":   {Ports: []string{"http"}, FixedPorts: map[string]int{"http": 8080}, Container: Container{Image: "mock:latest"}},
-		"search": {Ports: []string{"http"}, FixedPorts: map[string]int{"http": 8080}, Container: Container{Image: "search:latest"}},
+		"mock":   {Container: Container{Image: "mock:latest", Ports: map[string]int{"http": 8080}}},
+		"search": {Container: Container{Image: "search:latest", Ports: map[string]int{"http": 8080}}},
 	}}
 	if err := config.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want containers to keep their own ports", err)
+		t.Fatalf("Validate() = %v, want two containers with the same port inside: each one is published on its own port", err)
 	}
 }
 
-func TestValidateRefusesALinkToAnUnknownApp(t *testing.T) {
-	config := Config{Apps: map[string]App{"search": {Ports: []string{"http"}, FixedPorts: map[string]int{"http": 16271}, Container: Container{Image: "search:latest", Links: map[string]string{"postgres-cache": "cache"}}}}}
+func TestValidateRefusesAContainerPortOutOfRange(t *testing.T) {
+	config := Config{Apps: map[string]App{"search": {Container: Container{Image: "search:latest", Ports: map[string]int{"http": 0}}}}}
 	err := config.Validate()
-	if err == nil || !strings.Contains(err.Error(), `links to unknown app "cache"`) {
+	if err == nil || !strings.Contains(err.Error(), `container port "http" has the number 0`) {
 		t.Fatalf("Validate() = %v", err)
+	}
+}
+
+func TestParseReadsTheContainerBlockAndRefusesTheOldLinks(t *testing.T) {
+	config, err := Parse(writeConfigFile(t, `apps:
+  db:
+    container:
+      image: postgres:17
+      ports: {pg: 5432}
+      mounts: {"{{.StackDir}}/pg": /var/lib/postgresql/data}
+      env_files: [.env.db]
+      args: [--shm-size=1g]
+    ready: {port: pg}
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	container := config.Apps["db"].Container
+	if container.Ports["pg"] != 5432 || container.Mounts["{{.StackDir}}/pg"] != "/var/lib/postgresql/data" || !slices.Equal(container.Args, []string{"--shm-size=1g"}) {
+		t.Errorf("container = %+v", container)
+	}
+
+	_, err = Parse(writeConfigFile(t, "apps:\n  db:\n    container:\n      image: postgres:17\n      links: {cache: redis}\n"))
+	if err == nil || !strings.Contains(err.Error(), "links") {
+		t.Errorf("Parse of a file with links = %v, want an error that names the removed key", err)
 	}
 }
 

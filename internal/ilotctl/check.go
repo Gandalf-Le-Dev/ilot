@@ -48,7 +48,6 @@ func CheckRendering(config appconfig.Config) []error {
 		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
 		ShellEnv:            nil,
 		Login:               checkStackName,
-		BackendHost:         "",
 		ProxyPort:           "",
 		IlotBinary:          "ilot",
 		IlotEnv:             nil,
@@ -96,7 +95,7 @@ func stacksWithEveryAppRunning(config appconfig.Config) stackSet {
 		}
 		for _, stackName := range stackNames {
 			portByName := map[string]int{}
-			for _, portName := range app.Ports {
+			for _, portName := range app.PortNames() {
 				if fixedPort, isFixed := app.FixedPorts[portName]; isFixed {
 					portByName[portName] = fixedPort
 					continue
@@ -131,9 +130,8 @@ func (controller *Controller) renderEveryTemplateOf(stacks stackSet, appInstance
 			}
 		}
 	}
-	for _, containerPath := range slices.Sorted(maps.Keys(app.Container.Mounts)) {
-		templates = append(templates, app.Container.Mounts[containerPath])
-	}
+	templates = append(templates, slices.Sorted(maps.Keys(app.Container.Mounts))...)
+	templates = append(templates, app.Container.Args...)
 	var problems []error
 	for _, templateText := range templates {
 		if _, err := controller.renderTemplate(stacks, appInstance, templateText); err != nil {
