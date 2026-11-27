@@ -31,8 +31,8 @@ func TestGitAsksTheSameQuestionOneTime(t *testing.T) {
 		}
 	}
 
-	if *processCount != 2 {
-		t.Errorf("git ran %d times, want 1 for the worktree list and 1 for the location", *processCount)
+	if *processCount != 1 {
+		t.Errorf("git ran %d times, want 1: the location reads the same worktree list", *processCount)
 	}
 }
 
