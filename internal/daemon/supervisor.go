@@ -34,6 +34,8 @@ type SupervisorOptions struct {
 	// The time between two readiness probes, and the longest time of one probe.
 	ProbeInterval time.Duration
 	ProbeTimeout  time.Duration
+	// Where the supervisor records its live processes, for the daemon that comes after a crash. Empty: no record.
+	RecordFile string
 }
 
 type Supervisor struct {
@@ -42,6 +44,8 @@ type Supervisor struct {
 	logMaxBytes   int64
 	probeInterval time.Duration
 	probeTimeout  time.Duration
+	recordFile    string
+	recordMu      sync.Mutex
 
 	mu         sync.Mutex
 	entries    map[string]*entry
@@ -61,8 +65,10 @@ type entry struct {
 }
 
 type run struct {
-	pid    int
-	output *rotatingFile
+	pid int
+	// Tells this process from a later one with the same ID.
+	startedAt string
+	output    *rotatingFile
 	// Cancelled when the process has exited and its output is in the log file.
 	exited context.Context
 	// Closed at the first probe that passes, or at the start when the specification has no probe.
@@ -80,6 +86,7 @@ func NewSupervisor(options SupervisorOptions) *Supervisor {
 		logMaxBytes:   cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
 		probeInterval: cmp.Or(options.ProbeInterval, defaultProbeInterval),
 		probeTimeout:  cmp.Or(options.ProbeTimeout, defaultProbeTimeout),
+		recordFile:    options.RecordFile,
 		entries:       map[string]*entry{},
 	}
 }
@@ -245,36 +252,39 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 	// The pipe is ours and not the one of os/exec, so that Wait returns when the shell exits, even if a grandchild keeps the pipe open.
 	command.Stdout, command.Stderr = pipeWriter, pipeWriter
 
-	// The closed test and the start share one critical section: a start after Shutdown would leave a process behind.
+	// Shutdown may have passed this entry already. After this test it must wait for the operation lock that the caller holds.
 	supervisor.mu.Lock()
-	if supervisor.isClosed {
-		supervisor.mu.Unlock()
-		pipeReader.Close()
-		pipeWriter.Close()
-		output.Close()
-		return ErrShuttingDown
+	isClosed := supervisor.isClosed
+	supervisor.mu.Unlock()
+	if !isClosed {
+		err = command.Start()
 	}
-	err = command.Start()
 	pipeWriter.Close()
-	if err != nil {
-		supervisor.mu.Unlock()
+	if isClosed || err != nil {
 		pipeReader.Close()
 		output.Close()
+		if isClosed {
+			return ErrShuttingDown
+		}
 		return fmt.Errorf("start %s: %w", name, err)
 	}
 	exited, markExited := context.WithCancel(context.Background())
 	started := &run{pid: command.Process.Pid, output: output, exited: exited, ready: make(chan struct{}), state: StateStarting}
+	started.startedAt, _ = processStartTime(started.pid)
 	if spec.Ready == nil {
 		started.state = StateReady
 		close(started.ready)
-	} else {
+	}
+	supervisor.mu.Lock()
+	target.run = started
+	supervisor.mu.Unlock()
+	supervisor.saveRecord()
+	if spec.Ready != nil {
 		supervisor.background.Go(func() { supervisor.probeUntilReady(name, spec, started) })
 	}
-	target.run = started
 	supervisor.background.Go(func() {
 		supervisor.watch(name, started, command, pipeReader, markExited)
 	})
-	supervisor.mu.Unlock()
 
 	supervisor.logger.Info("process started", "process", name, "pid", started.pid)
 	return nil
@@ -306,6 +316,7 @@ func (supervisor *Supervisor) watch(name string, watched *run, command *exec.Cmd
 	supervisor.mu.Lock()
 	watched.state, watched.exitCode = StateExited, exitCode
 	supervisor.mu.Unlock()
+	supervisor.saveRecord()
 	markExited()
 	supervisor.logger.Info("process exited", "process", name, "pid", watched.pid, "exit_code", exitCode)
 }
