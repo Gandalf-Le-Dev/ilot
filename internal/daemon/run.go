@@ -20,6 +20,8 @@ const apiDrainTimeout = 5 * time.Second
 type Options struct {
 	Paths   Paths
 	Version string
+	// The address of the reverse proxy, for example 127.0.0.1:4580. Empty: no proxy.
+	ProxyListen string
 	// With no logger, the daemon writes JSON records to the daemon.log of the state folder.
 	Logger     *slog.Logger
 	Supervisor SupervisorOptions
@@ -52,6 +54,27 @@ func Run(ctx context.Context, options Options) error {
 	// Before the socket: a caller must not start an app while the old copy still holds its port.
 	killOrphans(paths.RecordFile(), cmp.Or(options.OrphanGrace, defaultOrphanGrace), logger)
 
+	routes := &RouteTable{}
+	proxyAddress := ""
+	if options.ProxyListen != "" {
+		proxyListener, err := net.Listen("tcp", options.ProxyListen)
+		if err != nil {
+			logger.Error("the proxy cannot listen", "address", options.ProxyListen, "error", err)
+			return fmt.Errorf("the proxy cannot listen on %s: %w", options.ProxyListen, err)
+		}
+		proxyAddress = proxyListener.Addr().String()
+		proxyServer := &http.Server{Handler: NewProxy(routes, logger), ReadHeaderTimeout: 10 * time.Second}
+		proxyDone := make(chan struct{})
+		go func() {
+			defer close(proxyDone)
+			_ = proxyServer.Serve(proxyListener)
+		}()
+		defer func() {
+			proxyServer.Close()
+			<-proxyDone
+		}()
+	}
+
 	listener, err := listenOnSocket(paths.Socket())
 	if err != nil {
 		logger.Error("daemon cannot listen", "error", err)
@@ -65,15 +88,15 @@ func Run(ctx context.Context, options Options) error {
 	shutdownRequested := make(chan struct{})
 	api := &Server{
 		Supervisor: supervisor,
-		Routes:     &RouteTable{},
-		Status:     Status{Version: options.Version, PID: os.Getpid(), StartedAt: time.Now()},
+		Routes:     routes,
+		Status:     Status{Version: options.Version, PID: os.Getpid(), StartedAt: time.Now(), ProxyAddress: proxyAddress},
 		OnShutdown: sync.OnceFunc(func() { close(shutdownRequested) }),
 		Logger:     logger,
 	}
 	apiServer := &http.Server{Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	served := make(chan error, 1)
 	go func() { served <- apiServer.Serve(listener) }()
-	logger.Info("daemon started", "version", options.Version, "pid", os.Getpid(), "socket", paths.Socket())
+	logger.Info("daemon started", "version", options.Version, "pid", os.Getpid(), "socket", paths.Socket(), "proxy", proxyAddress)
 
 	var failure error
 	select {
