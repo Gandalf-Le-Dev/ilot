@@ -58,7 +58,7 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	environment.controller.Config = masterConfig
 	environment.start(t, environment.master, StartOptions{}, "standalone")
 
-	if got := environment.supervisor.runningSpecs["ticket-search.proj-1234"]; got.Command != searchSpecBefore.Command || got.ShutdownCommand == "" {
+	if got := environment.supervisor.runningSpecs["ticket-search.proj-1234"]; got.Command != searchSpecBefore.Command || got.Stop == "" {
 		t.Errorf("ticket-search spec after a master command = %+v, want %+v", got, searchSpecBefore)
 	}
 	if got := environment.supervisor.runningSpecs["ticket-iam.devbox"]; got.Command != iamSpecBefore.Command {

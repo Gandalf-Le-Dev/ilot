@@ -28,48 +28,29 @@ func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
 		}
 	}
-	if processEnv := environment.supervisor.runningSpecs["standalone.proj-1234"].Env; processEnv["GOPROXY"] != "" {
-		t.Errorf("the process spec repeats the shell, which the daemon already gives it: %v", processEnv)
+	processEnv := environment.supervisor.runningSpecs["standalone.proj-1234"].Env
+	if processEnv["GOPROXY"] != "https://proxy" || processEnv["LOG_LEVEL"] != "debug" || processEnv["REGION"] != "EU1" {
+		t.Errorf("the process spec has the environment %v, want every source in it: the daemon adds nothing", processEnv)
 	}
 }
 
-func TestEnvironmentShowsTheShellTheDaemonStartedWith(t *testing.T) {
+func TestAChangeOfTheShellReachesAnAppAtItsNextStart(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://login-shell"})
+	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	laterCommand := environment.controllerOfANewCommand()
-	laterCommand.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://envrc-of-another-shell"})
+	laterCommand.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
 
-	entries, err := laterCommand.Environment(environment.featureStack, "standalone")
-	if err != nil {
-		t.Fatalf("Environment: %v", err)
+	if err := laterCommand.Start(t.Context(), environment.featureStack, []string{"standalone"}, StartOptions{}); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
 
-	goproxyIndex := slices.IndexFunc(entries, func(entry EnvEntry) bool { return entry.Key == "GOPROXY" })
-	if goproxyIndex < 0 || entries[goproxyIndex].Value != "https://login-shell" {
-		t.Errorf("GOPROXY = %+v, want the value the daemon started with", entries)
-	}
-	if isUnrecorded, err := laterCommand.RunsWithoutARecordedEnvironment(t.Context()); isUnrecorded || err != nil {
-		t.Errorf("RunsWithoutARecordedEnvironment = %t, %v; want false for a daemon ilot started", isUnrecorded, err)
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Env["GOPROXY"]; got != "https://new" {
+		t.Errorf("GOPROXY of the process = %q, want the value of the shell files now, with no restart of the daemon", got)
 	}
 }
 
-func TestADaemonStartedByAnOlderDevHasNoRecordedEnvironment(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.supervisor.envAtStart = nil
-	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://this-shell"})
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-
-	isUnrecorded, err := environment.controller.RunsWithoutARecordedEnvironment(t.Context())
-	if !isUnrecorded || err != nil {
-		t.Errorf("RunsWithoutARecordedEnvironment = %t, %v; want true", isUnrecorded, err)
-	}
-	if entry := environmentOf(t, environment, "standalone")["GOPROXY"]; entry.Value != "https://this-shell" || entry.Source != "shell" {
-		t.Errorf("GOPROXY = %+v, want this shell for lack of a record", entry)
-	}
-}
-
-func TestBuildsRunWithTheShellOfTheDaemon(t *testing.T) {
+func TestBuildsRunWithTheShellEnvironment(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "PATH": "/usr/bin"})
 
@@ -89,12 +70,15 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 	if strings.Contains(command, "API_TOKEN") {
 		t.Errorf("command %q passes a shell variable to the image", command)
 	}
+	if got := environment.supervisor.runningSpecs["search.proj-1234"].Env["API_TOKEN"]; got != "secret" {
+		t.Errorf("API_TOKEN of the docker command = %q, want the shell value: docker itself needs PATH and HOME", got)
+	}
 	if !strings.Contains(command, "-e 'REGION'") {
 		t.Errorf("command %q lost the app env", command)
 	}
 }
 
-func TestRestartStartsTheDaemonAgainWithThisShellAndTheAppsThatRan(t *testing.T) {
+func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
@@ -114,9 +98,8 @@ func TestRestartStartsTheDaemonAgainWithThisShellAndTheAppsThatRan(t *testing.T)
 	if !slices.Equal(running, want) {
 		t.Errorf("running after restart %v, want %v", running, want)
 	}
-	recorded, isRecorded, err := environment.supervisor.RecordedEnvironment()
-	if err != nil || !isRecorded || recorded["GOPROXY"] != "https://new" {
-		t.Errorf("the daemon started with %v, recorded %t, %v; want the shell of the restart", recorded, isRecorded, err)
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Env["GOPROXY"]; got != "https://new" {
+		t.Errorf("GOPROXY after the restart = %q, want the shell of the restart", got)
 	}
 	if !strings.Contains(environment.output.String(), "stopping every app of every stack") {
 		t.Errorf("output = %q, want a line about the stop", environment.output.String())
@@ -126,7 +109,7 @@ func TestRestartStartsTheDaemonAgainWithThisShellAndTheAppsThatRan(t *testing.T)
 func TestRestartOfADownDaemonBootsIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 
 	if err := environment.controllerOfANewCommand().Restart(t.Context(), environment.master); err != nil {
 		t.Fatalf("Restart: %v", err)

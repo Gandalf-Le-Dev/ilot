@@ -17,7 +17,8 @@ Every `ilot` command is pre-approved for you. Two limits still apply:
 - Never run `make up` or `make down`, never recreate or restart the devbox container, and never edit `devbox/.env`. Recreating devbox ends every session inside it, yours included. If one of these is necessary, ask the user.
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop a shared app (for example Temporal, auth-mock, restapi) or a `master` app that you did not start, ask the user. Other stacks and the user's other sessions use them.
-- Before you run `ilot restart`, ask the user. It stops every app of every stack, the user's other sessions included, then starts again the apps that ran.
+- Before you run `ilot restart`, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
+- Never run `ilot daemon run`. `ilot` starts its daemon by itself.
 
 ## Stacks
 
@@ -42,7 +43,7 @@ ilot apps --json                # the same as one JSON object
 ilot start portal-front         # build, then start the app after its dependencies, in this folder's stack
 ilot start publicapi --no-deps  # start only this app
 ilot stop publicapi             # stop the app in this folder's stack
-ilot logs publicapi             # the last 100 lines of the app's log in this stack
+ilot logs publicapi             # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line
 ilot logs --json publicapi      # the app's own lines, as they are: use this to read logs
 ilot logs -f -n 20 publicapi    # the last 20 lines, then the new ones: it never ends, so run it in the background, never in a foreground command
 ilot env portal-api             # the environment of the app, with where each value comes from
@@ -51,7 +52,8 @@ ilot check path/to/ilot.yaml     # check that file
 ilot rm task-2006               # stop a stack and delete its state, logs and routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout>  # runs at login; you do not need it
-ilot restart                    # stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran (ask first)
+ilot restart                    # stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
+ilot daemon run                 # the daemon itself: ilot starts it, never run it
 ilot --version                  # the version of ilot
 ilot skill print                # print this skill
 ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md
@@ -65,7 +67,7 @@ ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL
 - State and logs: `~/.local/state/ilot/stacks/<stack>/`, logs in `logs/<app>.log`.
 - Apps: the `ilot.yaml` of each repo. `ilot apps` lists their names, their repo and their dependencies. In platform, `devbox/ilot.yaml`, which also holds the `repos:` list. In portal, `ilot.yaml` at the root.
 - The personal file: `~/.config/ilot/env.yaml`. It holds repo paths for clones in other places, and personal values (`env`, and `apps.<app>` for one app). A `repos` entry with a `path` and a `config` adds a personal repo: its `ilot.yaml` adds apps on this machine only. Do not put secrets in a repo file: put them there.
-- An app gets a fixed environment. The values of the shell files come first: `PATH`, `HOME`, the DEVHOST ports and the Go variables, read by a clean shell and marked `(shell)` by `ilot env`. The `ilot.yaml` and personal values come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the personal file. If `ilot env` prints `note: ilot started before it fixed the environment of the apps`, the apps run with the values of an old shell. Ask the user before you run `ilot restart`.
+- An app gets a fixed environment. The values of the shell files come first: `PATH`, `HOME`, the DEVHOST ports and the Go variables, read by a clean shell and marked `(shell)` by `ilot env`. The `ilot.yaml` and personal values come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the personal file. An app gets its environment when it starts: after a change, run `ilot start <app>` again. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot restart`.
 - The README of the platform repo describes every field and template of `ilot.yaml`.
 
 ## When you edit an ilot.yaml

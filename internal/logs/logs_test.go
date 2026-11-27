@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-func processComposeLogLine(message string) string {
-	return `{"level":"info","process":"publicapi.master","replica":0,"message":"` + message + `"}` + "\n"
+func logLine(text string) string {
+	return text + "\n"
 }
 
 func writeLog(t *testing.T, content string) string {
@@ -25,7 +25,7 @@ func writeLog(t *testing.T, content string) string {
 }
 
 func TestPrintMessagesPrintsTheMessageOfTheLastLines(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine("first")+processComposeLogLine("second")+processComposeLogLine("third"))
+	logPath := writeLog(t, logLine("first")+logLine("second")+logLine("third"))
 	var output bytes.Buffer
 
 	if err := PrintMessages(t.Context(), logPath, 2, false, Readable, &output); err != nil {
@@ -37,21 +37,21 @@ func TestPrintMessagesPrintsTheMessageOfTheLastLines(t *testing.T) {
 	}
 }
 
-func TestPrintMessagesKeepsALineThatIsNotJSON(t *testing.T) {
-	logPath := writeLog(t, "plain text\n"+processComposeLogLine("wrapped"))
+func TestPrintMessagesPrintsPlainAndStructuredLines(t *testing.T) {
+	logPath := writeLog(t, logLine("plain text")+logLine(`{"msg":"structured"}`))
 	var output bytes.Buffer
 
 	if err := PrintMessages(t.Context(), logPath, 10, false, Readable, &output); err != nil {
 		t.Fatalf("PrintMessages: %v", err)
 	}
 
-	if output.String() != "plain text\nwrapped\n" {
+	if output.String() != "plain text\nstructured\n" {
 		t.Errorf("output = %q", output.String())
 	}
 }
 
 func TestPrintMessagesWaitsForALineToBeComplete(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine("done")+`{"level":"info","message":"half`)
+	logPath := writeLog(t, logLine("done")+"half")
 	var output bytes.Buffer
 
 	if err := PrintMessages(t.Context(), logPath, 10, false, Readable, &output); err != nil {
@@ -89,7 +89,7 @@ func (locked *lockedBuffer) String() string {
 }
 
 func TestPrintMessagesFollowsLinesAppendedLater(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine("before"))
+	logPath := writeLog(t, logLine("before"))
 	output := &lockedBuffer{}
 	ctx, cancel := context.WithCancel(t.Context())
 	followDone := make(chan error, 1)
@@ -99,11 +99,11 @@ func TestPrintMessagesFollowsLinesAppendedLater(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := logFile.WriteString(`{"message":"aft`); err != nil {
+	if _, err := logFile.WriteString("aft"); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(3 * pollInterval)
-	if _, err := logFile.WriteString(`er"}` + "\n"); err != nil {
+	if _, err := logFile.WriteString("er\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err := logFile.Close(); err != nil {
@@ -136,11 +136,11 @@ func appendLog(t *testing.T, logPath, content string) {
 }
 
 func TestFollowNewMessagesPrintsOnlyTheLinesWrittenAfterItStarts(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine("before"))
+	logPath := writeLog(t, logLine("before"))
 	var output bytes.Buffer
 
 	stop := FollowNewMessages(logPath, &output)
-	appendLog(t, logPath, processComposeLogLine("after"))
+	appendLog(t, logPath, logLine("after"))
 	if err := stop(); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestFollowNewMessagesWaitsForALogThatDoesNotExistYet(t *testing.T) {
 	var output bytes.Buffer
 
 	stop := FollowNewMessages(logPath, &output)
-	appendLog(t, logPath, processComposeLogLine("first"))
+	appendLog(t, logPath, logLine("first"))
 	if err := stop(); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestFollowNewMessagesWaitsForALogThatDoesNotExistYet(t *testing.T) {
 }
 
 func TestReadableTurnsAnAppJSONLineIntoOneLine(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine(`{\"level\":\"info\",\"msg\":\"listening\",\"time\":\"2026-10-28T10:00:00Z\",\"port\":8080}`))
+	logPath := writeLog(t, logLine(`{"level":"info","msg":"listening","time":"2026-10-28T10:00:00Z","port":8080}`))
 	var output bytes.Buffer
 	if err := PrintMessages(t.Context(), logPath, 10, false, Readable, &output); err != nil {
 		t.Fatal(err)
@@ -177,8 +177,8 @@ func TestReadableTurnsAnAppJSONLineIntoOneLine(t *testing.T) {
 }
 
 func TestRawPrintsTheAppLineAsIs(t *testing.T) {
-	appLine := `{\"level\":\"info\",\"msg\":\"listening\"}`
-	logPath := writeLog(t, processComposeLogLine(appLine))
+	appLine := `{"level":"info","msg":"listening"}`
+	logPath := writeLog(t, logLine(appLine))
 	var output bytes.Buffer
 	if err := PrintMessages(t.Context(), logPath, 10, false, Raw, &output); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestRawPrintsTheAppLineAsIs(t *testing.T) {
 }
 
 func TestReadableKeepsAMessageThatIsNotJSON(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine("plain text {not json"))
+	logPath := writeLog(t, logLine("plain text {not json"))
 	var output bytes.Buffer
 	if err := PrintMessages(t.Context(), logPath, 10, false, Readable, &output); err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestReadableKeepsAMessageThatIsNotJSON(t *testing.T) {
 }
 
 func TestReadableSortsTheOtherKeysAndPrintsNestedValuesAsJSON(t *testing.T) {
-	logPath := writeLog(t, processComposeLogLine(`{\"message\":\"done\",\"zeta\":1,\"alpha\":{\"b\":2},\"level\":\"warn\"}`))
+	logPath := writeLog(t, logLine(`{"message":"done","zeta":1,"alpha":{"b":2},"level":"warn"}`))
 	var output bytes.Buffer
 	if err := PrintMessages(t.Context(), logPath, 10, false, Readable, &output); err != nil {
 		t.Fatal(err)

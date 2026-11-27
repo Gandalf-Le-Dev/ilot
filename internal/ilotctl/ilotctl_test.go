@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,8 +16,8 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
@@ -36,13 +37,11 @@ type fakeSupervisor struct {
 	onWaitReady       func(processName string)
 	applyError        error
 	events            []string
-	runningSpecs      map[string]processcompose.ProcessSpec
+	runningSpecs      map[string]ProcessSpec
 	startedInOrder    []string
 	restarted         []string
 	waitedReady       []string
 	logBeforeReady    map[string]logLineBeforeReady
-	envAtStart        func() map[string]string
-	recordedEnv       map[string]string
 }
 
 type logLineBeforeReady struct {
@@ -50,18 +49,18 @@ type logLineBeforeReady struct {
 	message string
 }
 
-func (supervisor *fakeSupervisor) Apply(ctx context.Context, specs []processcompose.ProcessSpec) error {
+func (supervisor *fakeSupervisor) Apply(ctx context.Context, specs []ProcessSpec) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if supervisor.applyError != nil {
 		return supervisor.applyError
 	}
-	if !supervisor.daemonIsUp && supervisor.envAtStart != nil {
-		supervisor.recordedEnv = maps.Clone(supervisor.envAtStart())
+	if len(specs) == 0 && !supervisor.daemonIsUp {
+		return nil
 	}
 	supervisor.daemonIsUp = true
-	nextRunningSpecs := map[string]processcompose.ProcessSpec{}
+	nextRunningSpecs := map[string]ProcessSpec{}
 	for _, spec := range specs {
 		if _, wasRunning := supervisor.runningSpecs[spec.Name]; !wasRunning {
 			supervisor.startedInOrder = append(supervisor.startedInOrder, spec.Name)
@@ -80,17 +79,9 @@ func (supervisor *fakeSupervisor) IsUp(context.Context) bool {
 	return supervisor.daemonIsUp
 }
 
-func (supervisor *fakeSupervisor) RecordedEnvironment() (map[string]string, bool, error) {
-	if !supervisor.daemonIsUp || supervisor.recordedEnv == nil {
-		return nil, false, nil
-	}
-	return supervisor.recordedEnv, true, nil
-}
-
-func (supervisor *fakeSupervisor) Shutdown() error {
-	supervisor.simulateDevboxRestart()
+func (supervisor *fakeSupervisor) Shutdown(context.Context) error {
+	supervisor.simulateDaemonRestart()
 	supervisor.events = append(supervisor.events, "shutdown")
-	supervisor.recordedEnv = nil
 	return nil
 }
 
@@ -98,9 +89,9 @@ func (supervisor *fakeSupervisor) RestartCommand(processName string) string {
 	return "restart " + processName
 }
 
-func (supervisor *fakeSupervisor) simulateDevboxRestart() {
+func (supervisor *fakeSupervisor) simulateDaemonRestart() {
 	supervisor.daemonIsUp = false
-	supervisor.runningSpecs = map[string]processcompose.ProcessSpec{}
+	supervisor.runningSpecs = map[string]ProcessSpec{}
 	supervisor.startedInOrder = nil
 	supervisor.events = nil
 }
@@ -117,6 +108,9 @@ func (supervisor *fakeSupervisor) forgetProcess(processName string) {
 }
 
 func (supervisor *fakeSupervisor) Restart(_ context.Context, processName string) error {
+	if _, isKnown := supervisor.runningSpecs[processName]; !isKnown {
+		return fmt.Errorf("%s: %w", processName, daemon.ErrUnknownProcess)
+	}
 	supervisor.restarted = append(supervisor.restarted, processName)
 	supervisor.events = append(supervisor.events, "restart "+processName)
 	if supervisor.behaviorByProcess[processName] == processEndedAfterItWasReady {
@@ -125,23 +119,20 @@ func (supervisor *fakeSupervisor) Restart(_ context.Context, processName string)
 	return nil
 }
 
-func (supervisor *fakeSupervisor) Statuses(context.Context) (map[string]processcompose.ProcessStatus, error) {
-	statusByName := map[string]processcompose.ProcessStatus{}
-	for name := range supervisor.runningSpecs {
-		statusByName[name] = processcompose.ProcessStatus{Name: name, Status: "Running", ReadyState: "Ready", HasReadyProbe: true, IsRunning: true, PID: 1, ExitCode: 0}
-		behavior, hasBehavior := supervisor.behaviorByProcess[name]
-		if !hasBehavior {
-			continue
-		}
-		switch behavior {
+func (supervisor *fakeSupervisor) Processes(context.Context) (map[string]daemon.Process, error) {
+	processByName := map[string]daemon.Process{}
+	for name, spec := range supervisor.runningSpecs {
+		process := daemon.Process{Name: name, State: daemon.StateReady, PID: 1, ExitCode: 0, Hash: spec.Hash()}
+		switch supervisor.behaviorByProcess[name] {
 		case processEndedAfterItWasReady, processEndsAtEveryStart:
-			statusByName[name] = processcompose.ProcessStatus{Name: name, Status: "Completed", ReadyState: "", HasReadyProbe: true, IsRunning: false, PID: 0, ExitCode: 1}
+			process.State, process.PID, process.ExitCode = daemon.StateExited, 0, 1
 		case processStaysNotReady:
-			statusByName[name] = processcompose.ProcessStatus{Name: name, Status: "Running", ReadyState: "Not Ready", HasReadyProbe: true, IsRunning: true, PID: 1, ExitCode: 0}
+			process.State = daemon.StateStarting
 		case processEndsWhileWaitedFor:
 		}
+		processByName[name] = process
 	}
-	return statusByName, nil
+	return processByName, nil
 }
 
 func (supervisor *fakeSupervisor) WaitReady(ctx context.Context, processName string, timeout time.Duration) error {
@@ -151,19 +142,19 @@ func (supervisor *fakeSupervisor) WaitReady(ctx context.Context, processName str
 		if err := os.MkdirAll(filepath.Dir(line.logPath), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(line.logPath, []byte(`{"message":"`+line.message+`"}`+"\n"), 0o600); err != nil {
+		if err := os.WriteFile(line.logPath, []byte(line.message+"\n"), 0o600); err != nil {
 			return err
 		}
 	}
 	if supervisor.onWaitReady != nil {
 		supervisor.onWaitReady(processName)
 	}
-	if behavior, hasBehavior := supervisor.behaviorByProcess[processName]; hasBehavior {
+	if behavior, hasBehavior := supervisor.behaviorByProcess[processName]; hasBehavior && ctx.Err() == nil {
 		switch behavior {
 		case processEndedAfterItWasReady, processEndsAtEveryStart, processEndsWhileWaitedFor:
-			return &processcompose.ProcessEndedError{ProcessName: processName, Status: "Completed", ExitCode: 1}
+			return &daemon.ExitedError{Name: processName, ExitCode: 1}
 		case processStaysNotReady:
-			return &processcompose.ProcessNotReadyInTimeError{ProcessName: processName, Timeout: timeout, Status: "Running"}
+			return fmt.Errorf("%w after %s", &daemon.NotReadyError{Name: processName, State: daemon.StateStarting}, timeout)
 		}
 	}
 	return ctx.Err()
@@ -185,12 +176,9 @@ type testEnvironment struct {
 	routesDir     string
 }
 
-// Every ilot command builds its own controller, and gives its shell to the daemon client too: this one sees the daemon as it is now.
+// Every ilot command builds its own controller.
 func (environment testEnvironment) controllerOfANewCommand() *Controller {
 	controller := *environment.controller
-	controller.resolvedShellEnv = nil
-	controller.isShellEnvResolved = false
-	environment.supervisor.envAtStart = shellEnvOf(&controller)
 	return &controller
 }
 
@@ -307,7 +295,7 @@ func fakeCheckoutsForStack(stackName string) (map[string]checkouts.Checkout, err
 
 func newTestEnvironment(t *testing.T) testEnvironment {
 	t.Helper()
-	supervisor := &fakeSupervisor{runningSpecs: map[string]processcompose.ProcessSpec{}}
+	supervisor := &fakeSupervisor{runningSpecs: map[string]ProcessSpec{}}
 	builds := &[]recordedBuild{}
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
@@ -332,7 +320,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		ProgressInterval:    0,
 		Output:              output,
 	}
-	supervisor.envAtStart = shellEnvOf(controller)
 	return testEnvironment{
 		controller:    controller,
 		supervisor:    supervisor,
@@ -389,7 +376,7 @@ func TestStartInAWorktreeTakesMissingDependenciesFromMaster(t *testing.T) {
 		t.Errorf("waited ready in order %v, want %v", firstWaits, wantOrder)
 	}
 	if !slices.Equal(environment.supervisor.startedInOrder, wantOrder) {
-		t.Errorf("added to process-compose in order %v, want %v", environment.supervisor.startedInOrder, wantOrder)
+		t.Errorf("started by the supervisor in order %v, want %v", environment.supervisor.startedInOrder, wantOrder)
 	}
 }
 
@@ -419,8 +406,8 @@ func TestEnvironmentTemplatesUseTheStackOwnGatewayAndSharedPorts(t *testing.T) {
 	if got := environment.supervisor.runningSpecs["internalapi.master"].Env["TEMPORAL_ADDRESS"]; got != "localhost:7233" {
 		t.Errorf("TEMPORAL_ADDRESS = %q", got)
 	}
-	if worktreePublicapi.WorkingDir != "/worktrees/proj-1234" {
-		t.Errorf("WorkingDir = %q", worktreePublicapi.WorkingDir)
+	if worktreePublicapi.Dir != "/worktrees/proj-1234" {
+		t.Errorf("WorkingDir = %q", worktreePublicapi.Dir)
 	}
 	wantBinDir := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "bin")
 	if !strings.HasPrefix(worktreePublicapi.Command, wantBinDir+"/platform api publicapi --port=") {
@@ -608,8 +595,7 @@ func TestStartStopsTheAppItStartedWhenItsProcessEnds(t *testing.T) {
 
 	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
 
-	var endedError *processcompose.ProcessEndedError
-	if !errors.As(err, &endedError) || !strings.Contains(err.Error(), "see "+logFile) {
+	if _, hasEnded := errors.AsType[*daemon.ExitedError](err); !hasEnded || !strings.Contains(err.Error(), "see "+logFile) {
 		t.Fatalf("Start = %v, want the ended process and its log %s", err, logFile)
 	}
 	if environment.isStoredAsRunning(t, "master", "publicapi") || environment.isApplied("publicapi.master") {
@@ -630,7 +616,7 @@ func TestStartStopsANamedRunningAppWhoseRestartEnds(t *testing.T) {
 
 	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "publicapi.master is Completed") {
+	if err == nil || !strings.Contains(err.Error(), "publicapi.master exited with code 1") {
 		t.Fatalf("Start = %v, want the failure of publicapi.master", err)
 	}
 	if environment.isStoredAsRunning(t, "master", "publicapi") || environment.isApplied("publicapi.master") {
@@ -668,7 +654,7 @@ func TestAFailedCleanupSaysSoAndARetryStillRestartsTheApp(t *testing.T) {
 	environment.supervisor.setBehavior("standalone.master", processEndsAtEveryStart)
 	environment.supervisor.onWaitReady = func(processName string) {
 		if processName == "standalone.master" {
-			environment.supervisor.applyError = errors.New("process-compose project update: daemon gone")
+			environment.supervisor.applyError = errors.New("the ilot daemon does not answer")
 		}
 	}
 
@@ -677,8 +663,8 @@ func TestAFailedCleanupSaysSoAndARetryStillRestartsTheApp(t *testing.T) {
 	if err == nil {
 		t.Fatal("Start = nil, want the failure of standalone.master")
 	}
-	failureIndex := strings.Index(err.Error(), "standalone.master is Completed with exit code 1")
-	cleanupIndex := strings.Index(err.Error(), "stop standalone.master after its failure: process-compose project update: daemon gone")
+	failureIndex := strings.Index(err.Error(), "standalone.master exited with code 1")
+	cleanupIndex := strings.Index(err.Error(), "stop standalone.master after its failure: the ilot daemon does not answer")
 	if failureIndex < 0 || cleanupIndex < failureIndex {
 		t.Fatalf("Start = %v, want the failure of standalone.master first, then the failed stop", err)
 	}
@@ -917,13 +903,13 @@ func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	publicapiRow := rowFor(listing.Apps, "proj-1234", "publicapi")
-	if publicapiRow.Status != "Running" || publicapiRow.URL != "http://publicapi.proj-1234.dev.example.net:18080" {
+	if publicapiRow.Status != "ready" || publicapiRow.URL != "http://publicapi.proj-1234.dev.example.net:18080" {
 		t.Errorf("publicapi row = %+v", publicapiRow)
 	}
 	if publicapiRow.Ports["http"] != environment.appPort(t, "proj-1234", "publicapi") {
 		t.Errorf("publicapi ports = %v, want the http port of its state", publicapiRow.Ports)
 	}
-	if temporalRow := rowFor(listing.Apps, "devbox", "temporal"); temporalRow.Status != "Running" || temporalRow.URL != "http://temporal.devbox.dev.example.net:18080" {
+	if temporalRow := rowFor(listing.Apps, "devbox", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.devbox.dev.example.net:18080" {
 		t.Errorf("temporal row = %+v", temporalRow)
 	}
 	wantExternalServices := []ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}, {Name: "legacyapi", Status: "up", Port: 10004}}
@@ -997,10 +983,10 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "restapi", "standalone")
 
-	if got := environment.supervisor.runningSpecs["restapi.devbox"].WorkingDir; got != "/legacy/restapi" {
+	if got := environment.supervisor.runningSpecs["restapi.devbox"].Dir; got != "/legacy/restapi" {
 		t.Errorf("restapi WorkingDir = %q", got)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].WorkingDir; got != "/worktrees/proj-1234" {
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Dir; got != "/worktrees/proj-1234" {
 		t.Errorf("standalone WorkingDir = %q", got)
 	}
 }
@@ -1076,7 +1062,7 @@ func TestSharedAppRoutesUseTheDevboxHostnames(t *testing.T) {
 func TestBootStartsAutostartAppsAndTheAppsThatWereRunning(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 
 	if err := environment.controller.Boot(t.Context(), environment.master); err != nil {
 		t.Fatalf("Boot: %v", err)
@@ -1128,7 +1114,7 @@ func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 func TestBootStopsAFailedAppAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "publicapi")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.master", processEndsAtEveryStart)
 
 	err := environment.controller.Boot(t.Context(), environment.master)
@@ -1162,7 +1148,7 @@ func TestBootStopsAFailedAppAndStartsTheOthers(t *testing.T) {
 func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.proj-1234", processEndsAtEveryStart)
 
 	err := environment.controller.Boot(t.Context(), environment.master)
@@ -1178,7 +1164,7 @@ func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 func TestBootSkipsAContainerWhoseLinkedContainerImageFailed(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}).ensure
 
 	err := environment.controller.Boot(t.Context(), environment.master)
@@ -1262,10 +1248,10 @@ func TestAppRunsFromTheCheckoutOfItsRepo(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone", "standalone")
 
 	portalSpec := environment.supervisor.runningSpecs["portal-standalone.proj-1234"]
-	if portalSpec.WorkingDir != "/src/portal" || !strings.HasSuffix(portalSpec.Command, "--from=/src/portal") {
+	if portalSpec.Dir != "/src/portal" || !strings.HasSuffix(portalSpec.Command, "--from=/src/portal") {
 		t.Errorf("portal-standalone spec = %+v, want portal's main checkout", portalSpec)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].WorkingDir; got != "/worktrees/proj-1234" {
+	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Dir; got != "/worktrees/proj-1234" {
 		t.Errorf("standalone WorkingDir = %q, want platform's worktree", got)
 	}
 	if !slices.Contains(*environment.builds, recordedBuild{workingDir: "/src/portal", command: "go build ./cmd/api"}) {
@@ -1488,8 +1474,8 @@ func TestAnAppWithAStopCommandStopsWithItRendered(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	if got, want := environment.supervisor.runningSpecs["standalone.proj-1234"].ShutdownCommand, "docker stop standalone-proj-1234"; got != want {
-		t.Errorf("ShutdownCommand = %q, want %q", got, want)
+	if got, want := environment.supervisor.runningSpecs["standalone.proj-1234"].Stop, "docker stop standalone-proj-1234"; got != want {
+		t.Errorf("Stop = %q, want %q", got, want)
 	}
 }
 
@@ -1498,11 +1484,11 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].ShutdownCommand; got != "docker stop --time 10 'ilot-proj-1234-search-cache'" {
-		t.Errorf("search-cache ShutdownCommand = %q", got)
+	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].Stop; got != "docker stop --time 10 'ilot-proj-1234-search-cache'" {
+		t.Errorf("search-cache Stop = %q", got)
 	}
-	if got := environment.supervisor.runningSpecs["gateway.proj-1234"].ShutdownCommand; got != "" {
-		t.Errorf("gateway ShutdownCommand = %q, want none", got)
+	if got := environment.supervisor.runningSpecs["gateway.proj-1234"].Stop; got != "" {
+		t.Errorf("gateway Stop = %q, want none", got)
 	}
 }
 
@@ -1608,7 +1594,7 @@ func TestStartChecksNoImageForARunningContainer(t *testing.T) {
 func TestBootSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "front-like")
-	environment.supervisor.simulateDevboxRestart()
+	environment.supervisor.simulateDaemonRestart()
 	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search:latest": "unauthorized"}}).ensure
 
 	err := environment.controller.Boot(t.Context(), environment.master)
@@ -1639,18 +1625,4 @@ func TestStartWithNoContainerChecksNoImage(t *testing.T) {
 
 func fixedShellEnv(valueByKey map[string]string) func() (map[string]string, error) {
 	return func() (map[string]string, error) { return valueByKey, nil }
-}
-
-// Every ilot command gives the same shell environment to its controller and to its daemon client.
-func shellEnvOf(controller *Controller) func() map[string]string {
-	return func() map[string]string {
-		if controller.ShellEnv == nil {
-			return nil
-		}
-		shellEnv, err := controller.ShellEnv()
-		if err != nil {
-			panic(err)
-		}
-		return shellEnv
-	}
 }
