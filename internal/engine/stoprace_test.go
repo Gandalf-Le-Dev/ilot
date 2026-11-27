@@ -24,7 +24,7 @@ func TestAStopDuringTheBuildOfAStartKeepsTheAppDown(t *testing.T) {
 		return other.Stop(t.Context(), environment.base, []string{"slow"})
 	})
 
-	environment.start(t, environment.base, StartOptions{}, "slow")
+	environment.startExpectingNoneStarted(t, environment.base, StartOptions{}, "slow")
 
 	if environment.isApplied("slow.base.shop") {
 		t.Error("slow.base.shop runs, but ilot stop took its membership away during the build")
@@ -40,7 +40,7 @@ func TestARemoveDuringTheBuildOfAStartKeepsTheAppDown(t *testing.T) {
 		return other.Remove(t.Context(), environment.featureStack)
 	})
 
-	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "slow")
+	environment.startExpectingNoneStarted(t, environment.featureStack, StartOptions{SkipDependencies: true}, "slow")
 
 	if environment.isApplied("slow.task-1234.shop") {
 		t.Error("slow.task-1234.shop runs, but ilot rm removed its stack during the build")
@@ -79,7 +79,7 @@ func TestAStopDuringThePutOfAStartStopsTheApp(t *testing.T) {
 		}
 	}
 
-	environment.start(t, environment.base, StartOptions{}, "standalone")
+	environment.startExpectingNoneStarted(t, environment.base, StartOptions{}, "standalone")
 
 	if environment.isApplied("standalone.base.shop") {
 		t.Error("standalone.base.shop runs, but ilot stop took its membership away while the daemon started it")
@@ -150,7 +150,7 @@ func TestAStopWhileAStartWaitsSkipsTheAppWithoutAFailureOrAnURL(t *testing.T) {
 	environment := newTestEnvironment(t)
 	stopWhenWaitedFor(environment, "doc.base.shop", "doc")
 
-	environment.start(t, environment.base, StartOptions{}, "doc")
+	environment.startExpectingNoneStarted(t, environment.base, StartOptions{}, "doc")
 
 	output := environment.output.String()
 	if !strings.Contains(output, "doc.base.shop does not start: another ilot command stopped it") {
@@ -165,7 +165,7 @@ func TestAStopOfADependencyWhileAStartWaitsSkipsItsDependents(t *testing.T) {
 	environment := newTestEnvironment(t)
 	stopWhenWaitedFor(environment, "router.base.shop", "router")
 
-	environment.start(t, environment.base, StartOptions{}, "internalapi")
+	environment.startExpectingNoneStarted(t, environment.base, StartOptions{}, "internalapi")
 
 	output := environment.output.String()
 	if !strings.Contains(output, "internalapi.base.shop does not start: router.base.shop was stopped by another ilot command") {
@@ -187,5 +187,24 @@ func TestStopSaysWhichAppsItStopped(t *testing.T) {
 
 	if !strings.Contains(environment.output.String(), "stopped standalone.base.shop") {
 		t.Errorf("output %q, want the line that says standalone stopped", environment.output.String())
+	}
+}
+
+func (environment testEnvironment) startExpectingNoneStarted(t *testing.T, stackName string, options StartOptions, appNames ...string) {
+	t.Helper()
+	err := environment.executor.Start(t.Context(), stackName, appNames, options)
+	if err == nil || !strings.Contains(err.Error(), "no requested app started") {
+		t.Errorf("Start(%s, %v) = %v, want the error that no requested app started", stackName, appNames, err)
+	}
+}
+
+func TestAStartWhereAnotherCommandStoppedOneOfTwoRequestedAppsSucceeds(t *testing.T) {
+	environment := newTestEnvironment(t)
+	stopWhenWaitedFor(environment, "doc.base.shop", "doc")
+
+	environment.start(t, environment.base, StartOptions{}, "doc", "standalone")
+
+	if !environment.isApplied("standalone.base.shop") {
+		t.Error("standalone.base.shop does not run, want it started")
 	}
 }

@@ -121,7 +121,11 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	if err := executor.sendRoutes(ctx); err != nil {
 		return err
 	}
-	executor.printURLs(after, slices.DeleteFunc(slices.Clone(requestedInstances), func(appInstance plan.Instance) bool { return isSkipped[appInstance] }))
+	startedInstances := slices.DeleteFunc(slices.Clone(requestedInstances), func(appInstance plan.Instance) bool { return isSkipped[appInstance] })
+	executor.printURLs(after, startedInstances)
+	if len(requestedInstances) > 0 && len(startedInstances) == 0 {
+		return errors.New("no requested app started: another ilot command stopped them")
+	}
 	return nil
 }
 
