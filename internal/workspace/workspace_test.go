@@ -316,66 +316,66 @@ func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testin
 }
 
 func TestCheckoutsForStackGivesTheBoundWorktreeElseTheMainCheckout(t *testing.T) {
-	platformDir := newRepo(t, "platform")
-	portalDir := newRepo(t, "portal")
-	platformWorktreeDir := addWorktree(t, platformDir, "example-feature", "retry-jobs")
-	addWorktree(t, portalDir, "same-branch-not-bound", "retry-jobs")
-	workspace := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": portalDir})
-	workspace.Bindings = Bindings{"retry-jobs": {"platform": platformWorktreeDir}}
+	shopDir := newRepo(t, "shop")
+	webDir := newRepo(t, "web")
+	shopWorktreeDir := addWorktree(t, shopDir, "example-feature", "retry-jobs")
+	addWorktree(t, webDir, "same-branch-not-bound", "retry-jobs")
+	workspace := workspaceOfRepos(map[string]string{"shop": shopDir, "web": webDir})
+	workspace.Bindings = Bindings{"retry-jobs": {"shop": shopWorktreeDir}}
 
 	checkoutByRepo, err := workspace.CheckoutsForStack("retry-jobs")
 
 	if err != nil {
 		t.Fatalf("CheckoutsForStack: %v", err)
 	}
-	if got := checkoutByRepo["platform"]; got.Dir != platformWorktreeDir || got.Branch != "retry-jobs" || got.IsMain {
-		t.Errorf("platform checkout = %+v, want the bound worktree", got)
+	if got := checkoutByRepo["shop"]; got.Dir != shopWorktreeDir || got.Branch != "retry-jobs" || got.IsMain {
+		t.Errorf("shop checkout = %+v, want the bound worktree", got)
 	}
-	if got := checkoutByRepo["portal"]; got.Dir != portalDir || !got.IsMain {
-		t.Errorf("portal checkout = %+v, want its main checkout: only a binding puts a worktree in a stack", got)
+	if got := checkoutByRepo["web"]; got.Dir != webDir || !got.IsMain {
+		t.Errorf("web checkout = %+v, want its main checkout: only a binding puts a worktree in a stack", got)
 	}
 }
 
 func TestCheckoutsForStackGivesTheMainCheckoutsToTheBaseStack(t *testing.T) {
-	platformDir := newRepo(t, "platform")
-	addWorktree(t, platformDir, "elsewhere", "PROJ-1-x")
+	shopDir := newRepo(t, "shop")
+	addWorktree(t, shopDir, "elsewhere", "retry-x")
 
-	checkoutByRepo, err := workspaceOfRepos(map[string]string{"platform": platformDir}).CheckoutsForStack("base")
+	checkoutByRepo, err := workspaceOfRepos(map[string]string{"shop": shopDir}).CheckoutsForStack("base")
 
-	if got := checkoutByRepo["platform"]; err != nil || got.Dir != platformDir {
-		t.Errorf("CheckoutsForStack(base) platform = %+v, %v; want the main checkout", got, err)
+	if got := checkoutByRepo["shop"]; err != nil || got.Dir != shopDir {
+		t.Errorf("CheckoutsForStack(base) shop = %+v, %v; want the main checkout", got, err)
 	}
 }
 
 func TestCheckoutsForStackGoesBackToTheMainCheckoutWhenTheBoundWorktreeIsDeleted(t *testing.T) {
-	platformDir := newRepo(t, "platform")
-	deletedWorktreeDir := addWorktree(t, platformDir, "old-attempt", "retry-jobs")
+	shopDir := newRepo(t, "shop")
+	deletedWorktreeDir := addWorktree(t, shopDir, "old-attempt", "retry-jobs")
 	if err := os.RemoveAll(deletedWorktreeDir); err != nil {
 		t.Fatal(err)
 	}
-	workspace := workspaceOfRepos(map[string]string{"platform": platformDir})
-	workspace.Bindings = Bindings{"retry-jobs": {"platform": deletedWorktreeDir}}
+	workspace := workspaceOfRepos(map[string]string{"shop": shopDir})
+	workspace.Bindings = Bindings{"retry-jobs": {"shop": deletedWorktreeDir}}
 
 	checkoutByRepo, err := workspace.CheckoutsForStack("retry-jobs")
 
-	if got := checkoutByRepo["platform"]; err != nil || got.Dir != platformDir {
-		t.Errorf("platform checkout = %+v, %v; want the main checkout", got, err)
+	if got := checkoutByRepo["shop"]; err != nil || got.Dir != shopDir {
+		t.Errorf("shop checkout = %+v, %v; want the main checkout", got, err)
 	}
 }
 
 func TestCheckoutsForStackSkipsARepoThatIsNotCloned(t *testing.T) {
-	platformDir := newRepo(t, "platform")
-	workspace := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": filepath.Join(t.TempDir(), "missing")})
+	shopDir := newRepo(t, "shop")
+	workspace := workspaceOfRepos(map[string]string{"shop": shopDir, "web": filepath.Join(t.TempDir(), "missing")})
 
 	checkoutByRepo, err := workspace.CheckoutsForStack("base")
 
 	if err != nil {
 		t.Fatalf("CheckoutsForStack: %v", err)
 	}
-	if _, isPresent := checkoutByRepo["portal"]; isPresent || len(checkoutByRepo) != 1 {
-		t.Errorf("checkouts = %+v, want only platform", checkoutByRepo)
+	if _, isPresent := checkoutByRepo["web"]; isPresent || len(checkoutByRepo) != 1 {
+		t.Errorf("checkouts = %+v, want only shop", checkoutByRepo)
 	}
-	if notCloned := workspace.ReposNotCloned(); len(notCloned) != 1 || notCloned["portal"] == "" {
-		t.Errorf("ReposNotCloned = %v, want portal", notCloned)
+	if notCloned := workspace.ReposNotCloned(); len(notCloned) != 1 || notCloned["web"] == "" {
+		t.Errorf("ReposNotCloned = %v, want web", notCloned)
 	}
 }
