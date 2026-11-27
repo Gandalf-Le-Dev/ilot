@@ -35,8 +35,10 @@ type fakeSupervisor struct {
 	daemonIsUp        bool
 	behaviorByProcess map[string]processBehavior
 	onWaitReady       func(processName string)
-	putError          error
-	routes            []daemon.Route
+	// Called when a Put arrives, before the fake holds the process.
+	onPut    func(processName string)
+	putError error
+	routes   []daemon.Route
 	// Every call that names a process, in order.
 	calls          []string
 	events         []string
@@ -56,6 +58,9 @@ func (supervisor *fakeSupervisor) Put(ctx context.Context, spec ProcessSpec) err
 	supervisor.calls = append(supervisor.calls, "put "+spec.Name)
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if supervisor.onPut != nil {
+		supervisor.onPut(spec.Name)
 	}
 	if supervisor.putError != nil {
 		return supervisor.putError
