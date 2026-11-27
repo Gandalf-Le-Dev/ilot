@@ -189,3 +189,31 @@ func TestAStartWithNoAppInAStackThatOwnsNoAppSaysSo(t *testing.T) {
 		t.Errorf("started %v, output %q; want nothing started and a line that says why", environment.supervisor.startedInOrder, environment.output.String())
 	}
 }
+
+func TestStartAllSkipsAStackWhoseWorktreesAreAllDeleted(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.supervisor.simulateDaemonRestart()
+	environment.supervisor.startedInOrder = nil
+	environment.executor.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
+		return map[string]workspace.Worktree{
+			"shop":   {Repo: "shop", Dir: "/src/shop", Branch: "base", IsMain: true},
+			"studio": {Repo: "studio", Dir: "/src/studio", Branch: "base", IsMain: true},
+		}, nil
+	}
+
+	err := environment.executor.StartAll(t.Context())
+
+	if err != nil {
+		t.Fatalf("StartAll = %v, want no failure for a stack with a deleted worktree", err)
+	}
+	for _, processName := range environment.supervisor.startedInOrder {
+		if strings.HasSuffix(processName, ".task-1234.shop") {
+			t.Errorf("started %s from the main checkout, want the stack left down", processName)
+		}
+	}
+	want := "task-1234 does not start: its worktree is deleted. ilot clean removes the stack"
+	if output := environment.output.String(); !strings.Contains(output, want) {
+		t.Errorf("output %q, want %q", output, want)
+	}
+}
