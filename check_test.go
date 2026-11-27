@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -117,5 +118,16 @@ func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "no-such-port") || !strings.Contains(joined.Error(), "ghost") {
 		t.Fatalf("checkConfigFile = %v, want both the route without a port and the template typo", joined)
+	}
+}
+
+func TestCheckWarnsAboutAnAppOfTheGlobalFileThatNoFileDeclares(t *testing.T) {
+	shopDir, webDir := shopAndWebForCheck(t)
+	settings := config.WorkspaceSettings{Repos: nil, Env: nil, Apps: map[string]map[string]string{"front": {"A": "1"}, "frnot": {"A": "1"}}}
+
+	warnings := unknownAppsOfTheGlobalFile("shop", settings, filepath.Join(webDir, "ilot.yaml"), map[string]string{"shop": filepath.Join(shopDir, "ilot.yaml")})
+
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "workspaces.shop.apps.frnot") {
+		t.Errorf("warnings = %q, want one about workspaces.shop.apps.frnot", warnings)
 	}
 }
