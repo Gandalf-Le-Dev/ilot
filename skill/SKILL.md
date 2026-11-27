@@ -58,7 +58,7 @@ ilot clean --dry-run            # print what ilot clean would do, and change not
 ilot logs --workspace shop --stack retry-jobs api  # select a workspace and a stack from any folder
 ilot stack show                 # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs      # put this worktree in the stack retry-jobs (ask first)
-ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already
+ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already: an app that ilot ls shows down needs ilot start api, which starts its dependencies first
 ilot doctor                     # test what ilot needs on this machine; each line that needs a fix names the fix
 ilot daemon status              # the version, the process ID and the proxy address of the ilot daemon
 ilot daemon stop                # stop every app of every stack, then the daemon (ask first)
