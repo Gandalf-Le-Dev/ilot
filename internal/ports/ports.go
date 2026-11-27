@@ -1,9 +1,12 @@
 package ports
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"syscall"
+	"time"
 )
 
 type Range struct {
@@ -25,10 +28,34 @@ func (portRange Range) Allocate(count int, portsHeldByStacks map[int]bool, isFre
 	return allocated, nil
 }
 
-func IsFreeOnHost(port int) bool {
-	listener, err := net.Listen("tcp", ":"+strconv.Itoa(port))
-	if err != nil {
-		return false
+var loopbackAddresses = []string{"127.0.0.1", "::1"}
+
+const connectTimeout = 500 * time.Millisecond
+
+// IsFreeOnLoopback tests the two loopback addresses only. A listener on every interface, as before,
+// can open the firewall dialog of macOS, and an app of ilot is reached on the loopback address anyway.
+func IsFreeOnLoopback(port int) bool {
+	for _, address := range loopbackAddresses {
+		hostPort := net.JoinHostPort(address, strconv.Itoa(port))
+		// On macOS, a listener on one address succeeds while another program holds the port on every interface. A connection finds that program.
+		if connection, err := net.DialTimeout("tcp", hostPort, connectTimeout); err == nil {
+			connection.Close()
+			return false
+		}
+		listener, err := net.Listen("tcp", hostPort)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			return false
+		}
+		if err != nil {
+			// A machine with no IPv6 has no ::1, and nothing can hold a port there.
+			if address == loopbackAddresses[0] {
+				return false
+			}
+			continue
+		}
+		if listener.Close() != nil {
+			return false
+		}
 	}
-	return listener.Close() == nil
+	return true
 }
