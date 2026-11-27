@@ -50,6 +50,9 @@ func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snaps
 	}
 	isBuilt := map[buildInWorktree]bool{}
 	for _, appInstance := range startOrder {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		app := snapshot.App(appInstance)
 		if app.Build == "" || !needsBuild(appInstance) {
 			continue

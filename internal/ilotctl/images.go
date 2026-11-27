@@ -46,6 +46,9 @@ func (controller *Controller) ensureImages(snapshot plan.Snapshot, ctx context.C
 	errByImage := map[string]error{}
 	var failures []imageFailure
 	for _, appInstance := range startOrder {
+		if err := ctx.Err(); err != nil {
+			return append(failures, imageFailure{appInstance: appInstance, err: err})
+		}
 		if !snapshot.IsContainer(appInstance) || !needsImage(appInstance) {
 			continue
 		}
