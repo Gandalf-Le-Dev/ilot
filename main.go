@@ -422,8 +422,9 @@ func newController(ctx context.Context, currentWorkspace workspace.Workspace, st
 	return controller, nil
 }
 
+// The same shell as the daemon gives an app, so a build and a run command read the same syntax.
 func runBuild(ctx context.Context, workingDir, shellCommand string, environ []string) error {
-	command := exec.CommandContext(ctx, "bash", "-c", shellCommand)
+	command := exec.CommandContext(ctx, "/bin/sh", "-c", shellCommand)
 	command.Dir = workingDir
 	command.Env = environ
 	command.Stdout = os.Stderr
