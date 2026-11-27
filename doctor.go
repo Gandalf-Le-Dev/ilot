@@ -133,6 +133,13 @@ func (checks doctor) run(ctx context.Context) []doctorCheck {
 	results := []doctorCheck{checks.git(ctx), checks.globalFile(), checks.stateFolder()}
 	results = append(results, checks.oldState()...)
 	daemonCheck, proxyCheck := checks.daemonAndProxy(ctx)
+	if checks.GlobalErr != nil {
+		// The defaults would test an address, a domain and shell flags that are maybe not the ones of the file.
+		skipped := func(name string) doctorCheck {
+			return doctorCheck{Status: checkSkip, Name: name, Detail: "the global file is broken: fix it, then run ilot doctor again"}
+		}
+		return append(results, daemonCheck, skipped("proxy"), skipped("name lookup"), skipped("shell"), skipped("apps"))
+	}
 	shellEnv, shellErr := checks.ShellEnv(ctx)
 	results = append(results, daemonCheck, proxyCheck, checks.resolution(ctx), shellCheck(shellEnv, shellErr))
 	return append(results, checks.toolsOfTheApps(ctx, shellEnv["PATH"])...)
