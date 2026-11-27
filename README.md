@@ -268,18 +268,9 @@ When you add a command, add it to the skill too: a test fails otherwise.
 | `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/`, its logs in `logs/<app>.log` and its `services.json`. |
 | `~/.local/state/ilot/process-compose/` | The state of the daemon, and the environment that it started with. |
 | `<routes folder>/ilot-<stack>.yml` | The proxy routes of a stack. |
-| `~/.cache/ilot/` | The builds of `ilot` itself (see below). |
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 After you delete the worktrees of a ticket, run `ilot clean` to give back its ports.
-
-## Building ilot from the platform repo
-
-`ilot` can live inside the platform repo, at `devbox/ilot`.
-A copy of `ilot` built with a stamped source tree then builds `ilot` again from the main checkout, after each pull that changes that folder.
-It keeps that build in `~/.cache/ilot/`.
-`ilot rebuild` shows the full build output, and `ilot rebuild --local` builds the uncommitted files too.
-A plain `go install` turns this off.
 
 ## Development
 
