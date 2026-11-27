@@ -28,18 +28,13 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 	if err != nil {
 		return err
 	}
-	removedStack, isKnown := stacks.byName[stackName]
+	_, isKnown := stacks.byName[stackName]
 	if !isKnown {
 		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
 	delete(stacks.byName, stackName)
 	if err := controller.prepareStacks(stacks); err != nil {
 		return err
-	}
-	hasNamespacedApp := removedStack.HasTemporalNamespace
-	for appName := range removedStack.Apps {
-		app, _ := controller.anyDeclaration(stackName, appName)
-		hasNamespacedApp = hasNamespacedApp || app.TemporalNamespace
 	}
 	if err := controller.saveStacks(stacks); err != nil {
 		return err
@@ -50,15 +45,7 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 	if err := os.Remove(filepath.Join(controller.RoutesDir, proxyfiles.RoutesFileName(stackName))); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := controller.Store.Delete(stackName); err != nil {
-		return err
-	}
-	if hasNamespacedApp {
-		if err := controller.DeleteTemporalNamespace(ctx, stackName); err != nil {
-			return fmt.Errorf("stack %s removed, but not its Temporal namespace: %w", stackName, err)
-		}
-	}
-	return nil
+	return controller.Store.Delete(stackName)
 }
 
 func (controller *Controller) StacksWithoutCheckouts() ([]string, error) {

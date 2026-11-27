@@ -32,30 +32,28 @@ type ProcessSupervisor interface {
 }
 
 type Controller struct {
-	Config                  appconfig.Config
-	Store                   state.Store
-	Supervisor              ProcessSupervisor
-	RunBuild                func(ctx context.Context, workingDir, shellCommand string, environ []string) error
-	EnsureImage             func(ctx context.Context, image string) (pullOutput string, err error)
-	IsPortFreeOnHost        func(port int) bool
-	IsExternalServiceUp     func(port int) bool
-	CheckoutsForStack       func(stackName string) (map[string]checkouts.Checkout, error)
-	ConfigForStack          func(stackName string) (appconfig.Config, error)
-	UsesMise                func(checkoutDir string) bool
-	ReposNotCloned          map[string]string
-	HostPath                func(devboxPath string) string
-	EnsureTemporalNamespace func(ctx context.Context, namespace string) error
-	DeleteTemporalNamespace func(ctx context.Context, namespace string) error
-	Personal                personal.Settings
-	KeyringFile             string
-	ShellEnv                func() (map[string]string, error)
-	Login                   string
-	RoutesDir               string
-	BackendHost             string
-	ProxyPort               string
-	ReadyTimeout            time.Duration
-	ProgressInterval        time.Duration
-	Output                  io.Writer
+	Config              appconfig.Config
+	Store               state.Store
+	Supervisor          ProcessSupervisor
+	RunBuild            func(ctx context.Context, workingDir, shellCommand string, environ []string) error
+	EnsureImage         func(ctx context.Context, image string) (pullOutput string, err error)
+	IsPortFreeOnHost    func(port int) bool
+	IsExternalServiceUp func(port int) bool
+	CheckoutsForStack   func(stackName string) (map[string]checkouts.Checkout, error)
+	ConfigForStack      func(stackName string) (appconfig.Config, error)
+	UsesMise            func(checkoutDir string) bool
+	ReposNotCloned      map[string]string
+	HostPath            func(devboxPath string) string
+	Personal            personal.Settings
+	KeyringFile         string
+	ShellEnv            func() (map[string]string, error)
+	Login               string
+	RoutesDir           string
+	BackendHost         string
+	ProxyPort           string
+	ReadyTimeout        time.Duration
+	ProgressInterval    time.Duration
+	Output              io.Writer
 
 	configByStack      map[string]appconfig.Config
 	resolvedShellEnv   map[string]string
@@ -292,12 +290,6 @@ func (controller *Controller) stackOf(requestedStackName, appName string) string
 }
 
 func (controller *Controller) startInstance(ctx context.Context, stacks stackSet, appInstance instance, needsRestart bool, isStartedByThisRun bool) error {
-	if controller.app(appInstance).TemporalNamespace {
-		if err := controller.EnsureTemporalNamespace(ctx, appInstance.stackName); err != nil {
-			return fmt.Errorf("create the Temporal namespace %s: %w", appInstance.stackName, err)
-		}
-		stacks.byName[appInstance.stackName].HasTemporalNamespace = true
-	}
 	stacks.setRunning(appInstance, true)
 	if err := controller.saveStacks(stacks); err != nil {
 		return err

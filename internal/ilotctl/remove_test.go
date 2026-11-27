@@ -40,32 +40,6 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	}
 }
 
-func TestRemoveDeletesTheTemporalNamespaceOfTheStack(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "namespaced-worker")
-
-	if err := environment.controller.Remove(t.Context(), "proj-1234"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-
-	if want := []string{"proj-1234"}; !slices.Equal(*environment.deletedNamespaces, want) {
-		t.Errorf("deleted namespaces = %v, want %v", *environment.deletedNamespaces, want)
-	}
-}
-
-func TestRemoveKeepsTheNamespaceOfAStackWithoutNamespacedApps(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
-
-	if err := environment.controller.Remove(t.Context(), "proj-1234"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-
-	if len(*environment.deletedNamespaces) != 0 {
-		t.Errorf("deleted namespaces = %v, want none", *environment.deletedNamespaces)
-	}
-}
-
 func TestRemoveRefusesMasterAndDevbox(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "internalapi")
@@ -94,7 +68,7 @@ func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 func saveEmptyStacks(t *testing.T, store state.Store, stackNames ...string) {
 	t.Helper()
 	for _, stackName := range stackNames {
-		if err := store.Save(state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", HasTemporalNamespace: false, Apps: map[string]state.AppState{}}); err != nil {
+		if err := store.Save(state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]state.AppState{}}); err != nil {
 			t.Fatal(err)
 		}
 	}

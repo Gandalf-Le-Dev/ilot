@@ -13,12 +13,10 @@ import (
 )
 
 type StackState struct {
-	Name              string            `json:"name"`
-	CheckoutDirs      map[string]string `json:"checkout_dirs"`
-	LegacyWorktreeDir string            `json:"worktree_dir,omitempty"`
-	// Set once ilot created the namespace: ilot rm must delete it even when no ilot.yaml declares the app any more.
-	HasTemporalNamespace bool                `json:"has_temporal_namespace,omitempty"`
-	Apps                 map[string]AppState `json:"apps"`
+	Name              string              `json:"name"`
+	CheckoutDirs      map[string]string   `json:"checkout_dirs"`
+	LegacyWorktreeDir string              `json:"worktree_dir,omitempty"`
+	Apps              map[string]AppState `json:"apps"`
 }
 
 // State files written before ilot knew several repos hold platform's checkout as worktree_dir.
@@ -44,7 +42,7 @@ func (store Store) stateFile(stackName string) string {
 func (store Store) Load(stackName string) (StackState, error) {
 	content, err := os.ReadFile(store.stateFile(stackName))
 	if errors.Is(err, fs.ErrNotExist) {
-		return StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", HasTemporalNamespace: false, Apps: map[string]AppState{}}, nil
+		return StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]AppState{}}, nil
 	}
 	if err != nil {
 		return StackState{}, err

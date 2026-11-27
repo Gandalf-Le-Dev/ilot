@@ -15,7 +15,7 @@ Inside devbox, `ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs
 Every `ilot` command is pre-approved for you. Two limits still apply:
 
 - Never run `make up` or `make down`, never recreate or restart the devbox container, and never edit `devbox/.env`. Recreating devbox ends every session inside it, yours included. If one of these is necessary, ask the user.
-- Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs, containers and Temporal namespace.
+- Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop a shared app (for example Temporal, auth-mock, restapi) or a `master` app that you did not start, ask the user. Other stacks and the user's other sessions use them.
 - Before you run `ilot restart`, ask the user. It stops every app of every stack, the user's other sessions included, then starts again the apps that ran.
 
@@ -48,7 +48,7 @@ ilot logs -f -n 20 publicapi    # the last 20 lines, then the new ones: it never
 ilot env portal-api             # the environment of the app, with where each value comes from
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
-ilot rm task-2006               # stop a stack and delete its state, logs, routes and Temporal namespace (ask first)
+ilot rm task-2006               # stop a stack and delete its state, logs and routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout>  # runs at login; you do not need it
 ilot restart                    # stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran (ask first)

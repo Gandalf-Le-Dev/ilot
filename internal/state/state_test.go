@@ -102,7 +102,7 @@ func TestLoadMapsALegacyWorktreeDir(t *testing.T) {
 func TestSaveKeepsTheStateReadableByItsOwnerOnly(t *testing.T) {
 	store := Store{RootDir: t.TempDir()}
 
-	if err := store.Save(StackState{Name: "proj-1234", CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", HasTemporalNamespace: false, Apps: map[string]AppState{}}); err != nil {
+	if err := store.Save(StackState{Name: "proj-1234", CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]AppState{}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
