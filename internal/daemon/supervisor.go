@@ -28,7 +28,7 @@ const (
 	// A grandchild that left the process group can hold the output pipe open for ever.
 	outputDrainTimeout = 2 * time.Second
 	exitCodeNotStarted = -1
-	appLogPerm         = 0o644
+	appLogPerm         = 0o600
 	// A command with a mistake exits within this time, and must not look ready to a caller that waits.
 	defaultAliveWindow = 500 * time.Millisecond
 )
