@@ -131,6 +131,15 @@ func TestParseOfBrokenYAMLHasNoHintAboutKeys(t *testing.T) {
 	}
 }
 
+func TestParseOfAnEmptyFileGivesAnEmptyConfig(t *testing.T) {
+	for _, content := range []string{"", "# apps come later\n"} {
+		config, err := Parse(writeConfigFile(t, content))
+		if err != nil || config.MemberOf != "" || len(config.Apps) != 0 {
+			t.Errorf("Parse(%q) = %+v, %v; want an empty config", content, config, err)
+		}
+	}
+}
+
 func TestValidateRejectsInvalidConfigs(t *testing.T) {
 	testCases := []struct {
 		name            string

@@ -149,6 +149,7 @@ func TestARootThatListsARepoWhichDoesNotNameItIsAnError(t *testing.T) {
 	}{
 		{name: "no member_of", webFile: "apps:\n  front: {run: front}\n", wantErrorSubstr: "add member_of: ../shop"},
 		{name: "another root", webFile: "member_of: ../blog\n", wantErrorSubstr: "names another root repo"},
+		{name: "a file with comments only", webFile: "# apps come later\n", wantErrorSubstr: "add member_of: ../shop"},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
