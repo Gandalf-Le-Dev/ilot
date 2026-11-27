@@ -1,62 +1,107 @@
 package shellenv
 
 import (
-	"maps"
 	"os"
-	"os/exec"
-	"slices"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestKeepTakesTheLoginShellVariablesAndDropsTheRest(t *testing.T) {
-	kept := Keep([]string{
-		"HOME=/home/user", "PATH=/usr/bin", "USER=acme", "LOGNAME=acme", "LANG=C.UTF-8",
-		"LC_DEVBOX_LOGIN=jdoe", "DEVBOX_VERSION=1.2.3", "DEVHOST_PORT_7=20007",
-		"GOPATH=/home/user/go", "GOPROXY=https://proxy", "GOPRIVATE=git.example.com", "GONOSUMDB=git.example.com", "CGO_ENABLED=0",
-		"DEPLOY_ENV=DEV", "REGION=DEV1", "LOGKIT_INFRASTRUCTURE=preproduction", "TEMPORAL_ADDRESS=localhost:7233",
-		"MISE_TRUSTED_CONFIG_PATHS=/home/user", "NVM_DIR=/home/user/.nvm",
-		"SSH_AUTH_SOCK=/tmp/agent", "GPG_TTY=/dev/pts/0", "ACME_APPLICATION_KEY=key", "CLAUDECODE=1", "TERM_PROGRAM=tmux",
-		"TERM=xterm", "DIRENV_DIR=/src", "GOFLAGS=-mod=vendor", "ILOT_PROXY_PORT=1", "no-equal-sign",
-	})
+// fakeShell stands for a login shell: it records its flags, prints a banner as a profile file can, exports one variable, then runs the command.
+func fakeShell(t *testing.T, profile string) (shell Shell, flagsFile string) {
+	t.Helper()
+	folder := t.TempDir()
+	flagsFile = filepath.Join(folder, "flags")
+	script := "#!/bin/sh\n" +
+		"echo \"$1\" > '" + flagsFile + "'\n" +
+		"echo 'Welcome to this machine'\n" +
+		profile + "\n" +
+		"shift\n" +
+		"exec /bin/sh \"$@\"\n"
+	program := filepath.Join(folder, "fake-shell")
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Shell{Program: program, Args: []string{"-l"}}, flagsFile
+}
 
-	want := []string{
-		"CGO_ENABLED", "DEPLOY_ENV", "DEVBOX_VERSION", "DEVHOST_PORT_7", "GONOSUMDB", "GOPATH", "GOPRIVATE",
-		"GOPROXY", "HOME", "LANG", "LC_DEVBOX_LOGIN", "LOGKIT_INFRASTRUCTURE", "LOGNAME",
-		"MISE_TRUSTED_CONFIG_PATHS", "NVM_DIR", "PATH", "REGION", "SSH_AUTH_SOCK", "TEMPORAL_ADDRESS", "USER",
+func TestEnvironmentIsTheOneOfALoginShell(t *testing.T) {
+	shell, flagsFile := fakeShell(t, "export PATH=\"/from/profile:$PATH\"\nexport EDITOR=vi")
+
+	environment, err := shell.Environment(t.Context())
+	if err != nil {
+		t.Fatalf("Environment: %v", err)
 	}
-	if got := slices.Sorted(maps.Keys(kept)); !slices.Equal(got, want) {
-		t.Errorf("Keep kept %v, want %v", got, want)
+
+	if flags, err := os.ReadFile(flagsFile); err != nil || strings.TrimSpace(string(flags)) != "-l" {
+		t.Errorf("the shell got the first flag %q, %v; want -l, which makes a login shell", flags, err)
 	}
-	if kept["GOPROXY"] != "https://proxy" || kept["DEVHOST_PORT_7"] != "20007" {
-		t.Errorf("Keep changed the values: %v", kept)
+	if !strings.HasPrefix(environment["PATH"], "/from/profile:") || environment["EDITOR"] != "vi" {
+		t.Errorf("PATH = %q, EDITOR = %q; want the values that the profile exports", environment["PATH"], environment["EDITOR"])
+	}
+	if environment["HOME"] != os.Getenv("HOME") || environment["USER"] == "" || environment["SHELL"] != shell.Program {
+		t.Errorf("HOME = %q, USER = %q, SHELL = %q; want the identity of the user", environment["HOME"], environment["USER"], environment["SHELL"])
 	}
 }
 
-func TestBaseComesFromACleanShellAndNotFromThisOne(t *testing.T) {
-	if _, err := exec.LookPath("zsh"); err != nil {
-		t.Skip("zsh is not on PATH")
-	}
-	t.Setenv("REGION", "set-by-a-envrc")
-	t.Setenv("DEVHOST_PORT_7", "set-by-a-envrc")
-	t.Setenv("PATH", "/a-envrc-bin:"+os.Getenv("PATH"))
+func TestEnvironmentTakesNothingFromTheTerminalOfTheCaller(t *testing.T) {
+	t.Setenv("API_TOKEN", "exported-in-a-terminal")
+	t.Setenv("PATH", "/a-virtualenv/bin:"+os.Getenv("PATH"))
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+	shell, _ := fakeShell(t, "")
 
-	base, err := Base(t.Context())
+	environment, err := shell.Environment(t.Context())
 	if err != nil {
-		t.Fatalf("Base: %v", err)
+		t.Fatalf("Environment: %v", err)
 	}
 
-	for _, name := range []string{"HOME", "PATH", "USER", "LOGNAME"} {
-		if base[name] == "" {
-			t.Errorf("base lacks %s: %v", name, base)
+	if _, isSet := environment["API_TOKEN"]; isSet || strings.Contains(environment["PATH"], "a-virtualenv") {
+		t.Errorf("API_TOKEN = %q, PATH = %q; want nothing of the caller", environment["API_TOKEN"], environment["PATH"])
+	}
+	if environment["SSH_AUTH_SOCK"] != "/tmp/agent.sock" {
+		t.Errorf("SSH_AUTH_SOCK = %q, want the agent of the session, which no shell file can give", environment["SSH_AUTH_SOCK"])
+	}
+}
+
+func TestEnvironmentLeavesOutTheVariablesOfTheShellProcess(t *testing.T) {
+	shell, _ := fakeShell(t, "export MULTILINE='first\nsecond'")
+
+	environment, err := shell.Environment(t.Context())
+	if err != nil {
+		t.Fatalf("Environment: %v", err)
+	}
+
+	for _, name := range []string{"PWD", "OLDPWD", "SHLVL", "_"} {
+		if value, isSet := environment[name]; isSet {
+			t.Errorf("%s = %q, want it left out: an app has its own folder", name, value)
 		}
 	}
-	for _, name := range []string{"REGION", "DEVHOST_PORT_7", "PATH"} {
-		if strings.Contains(base[name], "a-envrc") {
-			t.Errorf("%s=%q comes from this shell, want the value of the shell files", name, base[name])
-		}
+	if environment["MULTILINE"] != "first\nsecond" {
+		t.Errorf("MULTILINE = %q, want both lines", environment["MULTILINE"])
 	}
-	if base["HOME"] != os.Getenv("HOME") {
-		t.Errorf("HOME = %q, want %q", base["HOME"], os.Getenv("HOME"))
+}
+
+func TestEnvironmentReportsAShellThatDoesNotRunTheCommand(t *testing.T) {
+	folder := t.TempDir()
+	program := filepath.Join(folder, "broken-shell")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\necho 'not a shell'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Shell{Program: program, Args: []string{"-l"}}.Environment(t.Context())
+
+	if err == nil || !strings.Contains(err.Error(), program) || !strings.Contains(err.Error(), "not a shell") {
+		t.Errorf("Environment = %v, want an error with the shell and its output", err)
+	}
+}
+
+func TestLoginUsesTheShellOfTheUser(t *testing.T) {
+	t.Setenv("SHELL", "/usr/bin/fish")
+	if shell := Login(); shell.Program != "/usr/bin/fish" || len(shell.Args) != 1 || shell.Args[0] != "-l" {
+		t.Errorf("Login = %+v, want /usr/bin/fish -l", shell)
+	}
+	t.Setenv("SHELL", "")
+	if shell := Login(); shell.Program != "/bin/sh" {
+		t.Errorf("Login with no SHELL = %+v, want /bin/sh", shell)
 	}
 }
