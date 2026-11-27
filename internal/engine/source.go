@@ -62,25 +62,36 @@ func (source Source) snapshotOf(current state.State, ownStackName string) (plan.
 
 // Snapshot gives what a command of a stack renders from. The instances that no config declares any more lose their membership in it.
 func (source Source) Snapshot(stackName string) (plan.Snapshot, []plan.Instance, error) {
+	machine, err := source.machineWithShell()
+	if err != nil {
+		return plan.Snapshot{}, nil, err
+	}
+	return source.snapshotOn(machine, stackName)
+}
+
+// machineWithShell gives the machine with the environment of the login shell.
+// A login shell can take seconds, so a command reads it before it takes the state lock.
+func (source Source) machineWithShell() (plan.Machine, error) {
+	machine := source.Machine
+	var err error
+	machine.ShellEnv, machine.SessionEnv, err = source.shellEnvironment()
+	return machine, err
+}
+
+// snapshotOn is Snapshot on a machine whose shell environment is already read.
+func (source Source) snapshotOn(machine plan.Machine, stackName string) (plan.Snapshot, []plan.Instance, error) {
 	current, err := source.Store.Load()
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
 	current.Stack(source.Workspace, plan.BaseStack)
 	current.Stack(source.Workspace, stackName)
-	return source.complete(current, stackName)
-}
-
-func (source Source) complete(current state.State, stackName string) (plan.Snapshot, []plan.Instance, error) {
 	snapshot, err := source.snapshotOf(current, stackName)
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
+	snapshot.Machine = machine
 	if err := source.deriveCheckouts(snapshot, stackName); err != nil {
-		return plan.Snapshot{}, nil, err
-	}
-	snapshot.Machine.ShellEnv, snapshot.Machine.SessionEnv, err = source.shellEnvironment()
-	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
 	return snapshot, snapshot.DropUndeclared(), nil

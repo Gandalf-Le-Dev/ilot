@@ -44,15 +44,19 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
+	machine, err := executor.machineWithShell()
+	if err != nil {
+		return err
+	}
 	var processByName map[string]daemon.Process
 	var before plan.Snapshot
 	var dropped, requestedInstances []plan.Instance
 	var start plan.Start
-	err := executor.underLock(ctx, func() (err error) {
+	err = executor.underLock(ctx, func() (err error) {
 		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
 			return err
 		}
-		if before, dropped, err = executor.loadStacks(stackName); err != nil {
+		if before, dropped, err = executor.loadStacks(machine, stackName); err != nil {
 			return err
 		}
 		if requestedInstances, err = before.Instances(stackName, appNames); err != nil {
@@ -156,10 +160,14 @@ func (executor *Executor) Boot(ctx context.Context, baseStackName string) error 
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
 func (executor *Executor) RestartApps(ctx context.Context, stackName string, appNames []string) error {
+	machine, err := executor.machineWithShell()
+	if err != nil {
+		return err
+	}
 	var snapshot plan.Snapshot
 	var dropped []plan.Instance
-	err := executor.underLock(ctx, func() (err error) {
-		snapshot, dropped, err = executor.loadStacks(stackName)
+	err = executor.underLock(ctx, func() (err error) {
+		snapshot, dropped, err = executor.loadStacks(machine, stackName)
 		return err
 	})
 	if err != nil {
@@ -208,10 +216,14 @@ func (executor *Executor) bootApps(ctx context.Context, baseStackName string) er
 	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
+	machine, err := executor.machineWithShell()
+	if err != nil {
+		return err
+	}
 	var start plan.Start
 	var problems []error
-	err := executor.underLock(ctx, func() error {
-		snapshot, _, err := executor.loadStacks(baseStackName)
+	err = executor.underLock(ctx, func() error {
+		snapshot, _, err := executor.loadStacks(machine, baseStackName)
 		if err != nil {
 			return err
 		}
@@ -236,14 +248,18 @@ func (executor *Executor) StartAll(ctx context.Context) error {
 	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
+	machine, err := executor.machineWithShell()
+	if err != nil {
+		return err
+	}
 	var processByName map[string]daemon.Process
 	var start plan.Start
 	var problems []error
-	err := executor.underLock(ctx, func() (err error) {
+	err = executor.underLock(ctx, func() (err error) {
 		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
 			return err
 		}
-		snapshot, _, err := executor.loadStacks(plan.BaseStack)
+		snapshot, _, err := executor.loadStacks(machine, plan.BaseStack)
 		if err != nil {
 			return err
 		}
