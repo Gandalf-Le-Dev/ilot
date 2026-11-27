@@ -10,7 +10,7 @@ allowed-tools: Bash(ilot:*)
 
 ## The rule
 
-`ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
+`ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env`, `ilot stack show` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
 
 Every `ilot` command is pre-approved for you. These limits still apply:
 
@@ -23,14 +23,15 @@ Every `ilot` command is pre-approved for you. These limits still apply:
 
 A stack is the set of apps that run for one branch of work.
 
-- `ilot` names the stack of a linked worktree after its branch, in lowercase letters, digits and dashes: the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`. If the `ilot.yaml` of the root repo has `stack.pattern`, the name is the first match of that pattern in the branch name. A worktree with a detached HEAD takes the name of its folder. `ilot apps` prints the stack of the current folder.
+- `ilot` names the stack of a linked worktree after its branch, in lowercase letters, digits and dashes: the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`. If the `ilot.yaml` of the root repo has `stack.pattern`, the name is the first match of that pattern in the branch name. A worktree with a detached HEAD takes the name of its folder. `ilot stack show` prints the stack of the current folder.
 - The main checkout of every repo is the `base` stack, on any branch.
 - An app with `scope: base` in its `ilot.yaml` runs one time, in the `base` stack, for every stack.
 - A workspace is a root repo and its member repos. The `ilot.yaml` of the root lists the members under `repos`, and the `ilot.yaml` of a member names the root with `member_of`. `ilot` finds the workspace from the repo of the current folder.
-- A stack takes each repo's worktree whose branch gives its name. If a repo has no such worktree, the stack takes that repo's main checkout.
+- The first `ilot start` in a worktree binds the worktree to its stack. After that, `git switch`, a rebase or a bisect does not move it to another stack. `ilot stack show` prints the stack of the current worktree and the checkout of each repo for it. `ilot stack bind <name>` puts the current worktree in another stack: ask the user first, because the apps of the old stack keep running.
+- A stack takes each repo's worktree that is bound to it. If a repo has no such worktree, the stack takes that repo's main checkout.
 - If a worktree does not start an app, the app comes from the `base` stack, and `ilot` starts it there if necessary. An app with `scope: stack` is the exception: an app that depends on it always gets the copy of its own stack.
 
-Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps` and `ilot env` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
+Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps`, `ilot env` and `ilot stack` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
 
 ## Commands
 
@@ -49,7 +50,9 @@ ilot env api                    # the environment of the app, with where each va
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
 ilot rm retry-jobs              # stop a stack and delete its state, its logs and its routes (ask first)
-ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
+ilot clean                      # ilot rm on every stack whose bound worktrees are all deleted (ask first)
+ilot stack show                 # the stack of this worktree, and the checkout of each repo for it
+ilot stack bind retry-jobs      # put this worktree in the stack retry-jobs (ask first)
 ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
 ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already
 ilot restart                    # with no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
@@ -95,7 +98,7 @@ A port that "is taken by another process" belongs to something outside `ilot`. F
 
 ## Traps
 
-- Two worktrees of one repo whose branches give the same stack name make `ilot` refuse that stack. The error names both folders. Keep one.
+- A stack takes one worktree of a repo. A second worktree whose branch gives the same stack name gets an error that names the first. Give it another stack with `ilot stack bind <name>`.
 - A container app declares its ports in `container.ports`, with the port inside the container. `ilot` publishes each one on `127.0.0.1` on a port of the stack, which `ilot ls` and `ilot env` show. A container reaches another app with `{{host "<app>"}}`, which gives it `host.docker.internal`.
 - If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also give it a separate `HOME` whose `~/.config/ilot/config.yaml` sets `proxy.listen` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
 - If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.

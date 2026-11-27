@@ -285,6 +285,7 @@ func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testin
 	webWorktreeDir := addWorktree(t, webDir, "web-retry", "PROJ-1-retry")
 	gitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
 	workspace, _ := find(t, shopWorktreeDir)
+	workspace.Bindings = Bindings{"proj-1": {"shop": shopWorktreeDir, "web": webWorktreeDir}}
 
 	ticketConfig, err := workspace.ConfigForStack("proj-1")
 	if err != nil || ticketConfig.Apps["api"].Run != "api --retry" || ticketConfig.Apps["jobs"].Repo != "shop" || ticketConfig.Apps["front"].Repo != "web" {
@@ -296,22 +297,24 @@ func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testin
 	}
 }
 
-func TestCheckoutsForStackPicksTheStackWorktreeElseTheMainCheckout(t *testing.T) {
+func TestCheckoutsForStackGivesTheBoundWorktreeElseTheMainCheckout(t *testing.T) {
 	platformDir := newRepo(t, "platform")
 	portalDir := newRepo(t, "portal")
-	platformWorktreeDir := addWorktree(t, platformDir, "example-feature", "PROJ-1234-example-feature")
-	addWorktree(t, portalDir, "other-ticket", "TASK-99-other")
+	platformWorktreeDir := addWorktree(t, platformDir, "example-feature", "retry-jobs")
+	addWorktree(t, portalDir, "same-branch-not-bound", "retry-jobs")
+	workspace := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": portalDir})
+	workspace.Bindings = Bindings{"retry-jobs": {"platform": platformWorktreeDir}}
 
-	checkoutByRepo, err := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": portalDir}).CheckoutsForStack("proj-1234")
+	checkoutByRepo, err := workspace.CheckoutsForStack("retry-jobs")
 
 	if err != nil {
 		t.Fatalf("CheckoutsForStack: %v", err)
 	}
-	if got := checkoutByRepo["platform"]; got.Dir != platformWorktreeDir || got.Branch != "PROJ-1234-example-feature" || got.IsMain {
-		t.Errorf("platform checkout = %+v", got)
+	if got := checkoutByRepo["platform"]; got.Dir != platformWorktreeDir || got.Branch != "retry-jobs" || got.IsMain {
+		t.Errorf("platform checkout = %+v, want the bound worktree", got)
 	}
 	if got := checkoutByRepo["portal"]; got.Dir != portalDir || !got.IsMain {
-		t.Errorf("portal checkout = %+v, want its main checkout", got)
+		t.Errorf("portal checkout = %+v, want its main checkout: only a binding puts a worktree in a stack", got)
 	}
 }
 
@@ -326,15 +329,19 @@ func TestCheckoutsForStackGivesTheMainCheckoutsToTheBaseStack(t *testing.T) {
 	}
 }
 
-func TestCheckoutsForStackRefusesTwoWorktreesOfOneRepoForATicket(t *testing.T) {
-	portalDir := newRepo(t, "portal")
-	firstWorktreeDir := addWorktree(t, portalDir, "task-2006-first", "TASK-2006-first")
-	secondWorktreeDir := addWorktree(t, portalDir, "task-2006-second", "TASK-2006-second")
+func TestCheckoutsForStackGoesBackToTheMainCheckoutWhenTheBoundWorktreeIsDeleted(t *testing.T) {
+	platformDir := newRepo(t, "platform")
+	deletedWorktreeDir := addWorktree(t, platformDir, "old-attempt", "retry-jobs")
+	if err := os.RemoveAll(deletedWorktreeDir); err != nil {
+		t.Fatal(err)
+	}
+	workspace := workspaceOfRepos(map[string]string{"platform": platformDir})
+	workspace.Bindings = Bindings{"retry-jobs": {"platform": deletedWorktreeDir}}
 
-	_, err := workspaceOfRepos(map[string]string{"portal": portalDir}).CheckoutsForStack("task-2006")
+	checkoutByRepo, err := workspace.CheckoutsForStack("retry-jobs")
 
-	if err == nil || !IsSeveralWorktrees(err) || !strings.Contains(err.Error(), firstWorktreeDir) || !strings.Contains(err.Error(), secondWorktreeDir) {
-		t.Fatalf("err = %v, want an error naming both worktrees", err)
+	if got := checkoutByRepo["platform"]; err != nil || got.Dir != platformDir {
+		t.Errorf("platform checkout = %+v, %v; want the main checkout", got, err)
 	}
 }
 

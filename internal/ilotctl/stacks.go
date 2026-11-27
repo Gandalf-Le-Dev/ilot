@@ -77,7 +77,7 @@ func (stacks stackSet) clone() stackSet {
 		for appName, appState := range stackState.Apps {
 			clonedApps[appName] = state.AppState{Ports: maps.Clone(appState.Ports), Running: appState.Running}
 		}
-		cloned.byName[stackName] = &state.StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), Apps: clonedApps}
+		cloned.byName[stackName] = &state.StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), BoundWorktrees: maps.Clone(stackState.BoundWorktrees), Apps: clonedApps}
 	}
 	return cloned
 }

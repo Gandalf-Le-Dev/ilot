@@ -14,7 +14,7 @@ const dnsLabelMaxLength = 63
 
 var runsOfCharactersOutsideDNSLabels = regexp.MustCompile(`[^a-z0-9]+`)
 
-// DefaultStackName gives the stack of a worktree: base for a main checkout, and else a name from the branch.
+// DefaultStackName gives the stack that a worktree has before its binding: base for a main checkout, and else a name from the branch.
 // The branch is the natural key across repos: one ticket usually gets the same branch name in each repo.
 // With a detached HEAD, the folder gives the name.
 func (workspace Workspace) DefaultStackName(worktree Worktree) (string, error) {
@@ -31,10 +31,10 @@ func (workspace Workspace) DefaultStackName(worktree Worktree) (string, error) {
 	}
 	name := slug(source)
 	if name == "" {
-		return "", fmt.Errorf("the %s %q of the worktree %s gives no stack name: a name needs a letter or a digit", sourceKind, source, worktree.Dir)
+		return "", fmt.Errorf("the %s %q of the worktree %s gives no stack name: a name needs a letter or a digit. Give the worktree a stack with ilot stack bind <name>", sourceKind, source, worktree.Dir)
 	}
 	if name == BaseStackName {
-		return "", fmt.Errorf("the %s %q of the worktree %s gives the stack name %s, which is the stack of the main checkouts: rename the %s", sourceKind, source, worktree.Dir, BaseStackName, sourceKind)
+		return "", fmt.Errorf("the %s %q of the worktree %s gives the stack name %s, which is the stack of the main checkouts: give the worktree another stack with ilot stack bind <name>", sourceKind, source, worktree.Dir, BaseStackName)
 	}
 	return name, nil
 }

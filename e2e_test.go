@@ -284,6 +284,11 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Fatal("the proxy still answers after the daemon was killed")
 	}
 
+	// The first start bound the worktree to proj-1, so another branch does not move it to another stack.
+	machine.git(worktree, "switch", "--quiet", "--create", "another-idea")
+	if stackOutput := machine.ilot(worktree, "stack", "show"); !strings.Contains(stackOutput, "stack: proj-1 (this worktree is bound to it)") {
+		t.Errorf("ilot stack show after git switch printed %q, want the stack proj-1", stackOutput)
+	}
 	machine.ilot(mainCheckout, "start", "hello")
 	machine.ilot(worktree, "start", "hello")
 

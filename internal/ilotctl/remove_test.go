@@ -3,6 +3,7 @@ package ilotctl
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -74,43 +75,28 @@ func saveEmptyStacks(t *testing.T, store state.Store, stackNames ...string) {
 	}
 }
 
-func TestStacksWithoutCheckoutsListsOnlyGoneOnes(t *testing.T) {
+func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "base", "proj-1234", "proj-9999", "task-1")
-
-	gone, err := environment.controller.StacksWithoutCheckouts()
-
-	if err != nil {
-		t.Fatalf("StacksWithoutCheckouts: %v", err)
+	existingWorktreeDir, otherExistingWorktreeDir := t.TempDir(), t.TempDir()
+	deletedWorktreeDir := filepath.Join(t.TempDir(), "deleted")
+	boundWorktreesByStack := map[string]map[string]string{
+		"base":         nil,
+		"all-deleted":  {"platform": deletedWorktreeDir, "portal": deletedWorktreeDir + "-portal"},
+		"one-deleted":  {"platform": deletedWorktreeDir, "portal": existingWorktreeDir},
+		"none-deleted": {"platform": otherExistingWorktreeDir},
+		"moved-away":   nil,
 	}
-	if want := []string{"proj-9999", "task-1"}; !slices.Equal(gone, want) {
-		t.Errorf("StacksWithoutCheckouts = %v, want %v", gone, want)
-	}
-}
-
-func TestStacksWithoutCheckoutsKeepsAStackWithSeveralWorktreesOfARepo(t *testing.T) {
-	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "proj-2001")
-	environment.controller.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
-		return map[string]workspace.Worktree{}, workspace.SeveralWorktreesError{Repo: "platform", StackName: "proj-2001", WorktreeDirs: []string{"/a", "/b"}}
+	for stackName, boundWorktrees := range boundWorktreesByStack {
+		stackState := state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, BoundWorktrees: boundWorktrees, Apps: map[string]state.AppState{}}
+		if err := environment.controller.Store.Save(stackState); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	gone, err := environment.controller.StacksWithoutCheckouts()
+	removable, err := environment.controller.StacksWithoutWorktrees()
 
-	if err != nil || len(gone) != 0 {
-		t.Fatalf("StacksWithoutCheckouts = %v, %v, want no stack and no error", gone, err)
-	}
-}
-
-func TestStacksWithoutCheckoutsFailsWhenGitFails(t *testing.T) {
-	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "proj-2001")
-	environment.controller.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
-		return nil, errors.New("list the worktrees of platform: exit status 128")
-	}
-
-	if _, err := environment.controller.StacksWithoutCheckouts(); err == nil {
-		t.Fatal("StacksWithoutCheckouts hid a git failure")
+	if want := []string{"all-deleted", "moved-away"}; err != nil || !slices.Equal(removable, want) {
+		t.Errorf("StacksWithoutWorktrees = %v, %v; want %v", removable, err, want)
 	}
 }
 

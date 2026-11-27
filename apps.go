@@ -39,7 +39,11 @@ func (command *appsCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	stackName, err := currentWorkspace.DefaultStackName(worktree)
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return err
+	}
+	currentWorkspace, stackName, err := stackOfWorktree(store, currentWorkspace, worktree, false, os.Stderr)
 	if err != nil {
 		return err
 	}

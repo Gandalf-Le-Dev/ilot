@@ -32,6 +32,8 @@ type Workspace struct {
 	RepoPaths map[string]string
 	// The stack.pattern of the root repo. It is nil without the key.
 	StackPattern *regexp.Regexp
+	// The worktrees of each stack, from the state. Find leaves it empty.
+	Bindings Bindings
 
 	git *Git
 }
@@ -99,7 +101,7 @@ func Find(dir, homeDir string, global config.Global, git *Git) (Workspace, Workt
 			return Workspace{}, Worktree{}, err
 		}
 	}
-	workspace := Workspace{Name: name, RootDir: rootDir, HomeDir: homeDir, Global: global, Settings: settings, RepoPaths: repoPaths, StackPattern: stackPattern, git: git}
+	workspace := Workspace{Name: name, RootDir: rootDir, HomeDir: homeDir, Global: global, Settings: settings, RepoPaths: repoPaths, StackPattern: stackPattern, Bindings: nil, git: git}
 	current.Repo, err = workspace.repoOf(current)
 	if err != nil && ownConfig.MemberOf == "" {
 		return Workspace{}, Worktree{}, err
@@ -243,10 +245,9 @@ func (workspace Workspace) ReposNotCloned() map[string]string {
 	return pathByRepo
 }
 
-// CheckoutsForStack gives the checkout of each cloned repo for a stack: the worktree of the stack, else the main checkout.
+// CheckoutsForStack gives the checkout of each cloned repo for a stack: the worktree that is bound to the stack, else the main checkout.
 func (workspace Workspace) CheckoutsForStack(stackName string) (map[string]Worktree, error) {
 	checkoutByRepo := map[string]Worktree{}
-	var problems []error
 	for _, repoName := range slices.Sorted(maps.Keys(workspace.RepoPaths)) {
 		if isDeleted(workspace.RepoPaths[repoName]) {
 			continue
@@ -255,54 +256,15 @@ func (workspace Workspace) CheckoutsForStack(stackName string) (map[string]Workt
 		if err != nil {
 			return nil, err
 		}
-		checkout, err := workspace.checkoutForStack(worktrees, stackName)
-		if err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		checkoutByRepo[repoName] = checkout
-	}
-	return checkoutByRepo, errors.Join(problems...)
-}
-
-func (workspace Workspace) checkoutForStack(worktrees []Worktree, stackName string) (Worktree, error) {
-	mainCheckout := worktrees[0]
-	if stackName == BaseStackName {
-		return mainCheckout, nil
-	}
-	var matching []Worktree
-	for _, linkedWorktree := range worktrees[1:] {
-		name, err := workspace.DefaultStackName(linkedWorktree)
-		if err == nil && name == stackName {
-			matching = append(matching, linkedWorktree)
+		checkoutByRepo[repoName] = worktrees[0]
+		// A bound worktree whose folder is deleted is not in the list, so the stack is back on the main checkout.
+		for _, linkedWorktree := range worktrees[1:] {
+			if linkedWorktree.Dir == workspace.Bindings[stackName][repoName] {
+				checkoutByRepo[repoName] = linkedWorktree
+			}
 		}
 	}
-	switch len(matching) {
-	case 0:
-		return mainCheckout, nil
-	case 1:
-		return matching[0], nil
-	}
-	var matchingDirs []string
-	for _, worktree := range matching {
-		matchingDirs = append(matchingDirs, worktree.Dir)
-	}
-	return Worktree{}, SeveralWorktreesError{Repo: mainCheckout.Repo, StackName: stackName, WorktreeDirs: matchingDirs}
-}
-
-type SeveralWorktreesError struct {
-	Repo         string
-	StackName    string
-	WorktreeDirs []string
-}
-
-func (err SeveralWorktreesError) Error() string {
-	return fmt.Sprintf("repo %s has several worktrees for stack %s, keep one: %s", err.Repo, err.StackName, strings.Join(err.WorktreeDirs, ", "))
-}
-
-func IsSeveralWorktrees(err error) bool {
-	_, isSeveralWorktrees := errors.AsType[SeveralWorktreesError](err)
-	return isSeveralWorktrees
+	return checkoutByRepo, nil
 }
 
 // The main checkout tells the repo, so a repo path that is itself a linked worktree works too.

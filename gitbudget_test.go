@@ -54,11 +54,15 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stackName, err := currentWorkspace.DefaultStackName(worktree)
-	if err != nil || stackName != "proj-1" {
-		t.Fatalf("DefaultStackName = %q, %v; want proj-1", stackName, err)
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		t.Fatal(err)
 	}
-	controller, err := newController(currentWorkspace, stackName, time.Second)
+	currentWorkspace, stackName, err := stackOfWorktree(store, currentWorkspace, worktree, true, io.Discard)
+	if err != nil || stackName != "proj-1" {
+		t.Fatalf("stackOfWorktree = %q, %v; want proj-1", stackName, err)
+	}
+	controller, err := newController(currentWorkspace, store, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
