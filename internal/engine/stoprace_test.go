@@ -97,7 +97,7 @@ func TestStopStopsAProcessThatRunsWithoutItsMembership(t *testing.T) {
 	app := stack.Apps["standalone"]
 	app.Wanted = false
 	stack.Apps["standalone"] = app
-	if err := environment.executor.Store.Save(current); err != nil {
+	if _, err := environment.executor.Store.Save(current); err != nil {
 		t.Fatal(err)
 	}
 	environment.output.Reset()

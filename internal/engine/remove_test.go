@@ -74,7 +74,7 @@ func saveStacks(t *testing.T, executor *Executor, bindingByStack map[string]map[
 	for stackName, binding := range bindingByStack {
 		current.Stack(executor.Workspace, stackName).Checkouts = binding
 	}
-	if err := executor.Store.Save(current); err != nil {
+	if _, err := executor.Store.Save(current); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -2,6 +2,7 @@
 package state
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -233,26 +234,31 @@ func (store Store) Load() (State, error) {
 }
 
 // Save replaces the file in one rename, after the content is on the disk, and keeps the last version as the backup.
-func (store Store) Save(state State) error {
+// A state that the file already holds writes nothing, so that the backup stays the version before the last real change.
+func (store Store) Save(state State) (isChanged bool, err error) {
 	if err := os.MkdirAll(store.RootDir, 0o700); err != nil {
-		return err
+		return false, err
 	}
 	state.Version = CurrentVersion
 	content, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		return err
+		return false, err
+	}
+	content = append(content, '\n')
+	if current, err := os.ReadFile(store.File()); err == nil && bytes.Equal(current, content) {
+		return false, nil
 	}
 	temporaryFile := store.File() + ".tmp"
-	if err := writeSynced(temporaryFile, append(content, '\n')); err != nil {
-		return err
+	if err := writeSynced(temporaryFile, content); err != nil {
+		return false, err
 	}
 	if err := store.keepBackup(); err != nil {
-		return err
+		return false, err
 	}
 	if err := os.Rename(temporaryFile, store.File()); err != nil {
-		return err
+		return false, err
 	}
-	return syncDir(store.RootDir)
+	return true, syncDir(store.RootDir)
 }
 
 // The rename is in the folder entry, which a crash can lose until the folder itself is on the disk.

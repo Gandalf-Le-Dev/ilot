@@ -24,7 +24,7 @@ func sampleState() State {
 
 func TestSaveThenLoadKeepsEveryWorkspaceInOneVersionedFile(t *testing.T) {
 	store := Store{RootDir: filepath.Join(t.TempDir(), "ilot")}
-	if err := store.Save(sampleState()); err != nil {
+	if _, err := store.Save(sampleState()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -73,12 +73,12 @@ func TestLoadRefusesAFileOfAnotherVersion(t *testing.T) {
 func TestAnUnreadableFileGivesOneErrorThatNamesTheFileAndItsBackup(t *testing.T) {
 	store := Store{RootDir: t.TempDir()}
 	first := sampleState()
-	if err := store.Save(first); err != nil {
+	if _, err := store.Save(first); err != nil {
 		t.Fatal(err)
 	}
 	second := sampleState()
 	second.RemoveStack("shop", "retry-jobs")
-	if err := store.Save(second); err != nil {
+	if _, err := store.Save(second); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(store.File(), []byte(`{"version": 1, "workspaces": {"shop"`), 0o600); err != nil {
@@ -93,6 +93,29 @@ func TestAnUnreadableFileGivesOneErrorThatNamesTheFileAndItsBackup(t *testing.T)
 	backup, err := Store{RootDir: backupAsState(t, store)}.Load()
 	if err != nil || backup.Stacks("shop")["retry-jobs"] == nil {
 		t.Errorf("the backup = %+v, %v; want the version before the last Save, with retry-jobs", backup, err)
+	}
+}
+
+func TestASaveOfTheSameStateKeepsTheBackupOfTheLastChange(t *testing.T) {
+	store := Store{RootDir: t.TempDir()}
+	first := sampleState()
+	if _, err := store.Save(first); err != nil {
+		t.Fatal(err)
+	}
+	second := sampleState()
+	second.RemoveStack("shop", "retry-jobs")
+	if isChanged, err := store.Save(second); err != nil || !isChanged {
+		t.Fatalf("Save of a new state = %t, %v; want a write", isChanged, err)
+	}
+
+	isChanged, err := store.Save(second)
+
+	if err != nil || isChanged {
+		t.Fatalf("Save of the same state = %t, %v; want no write", isChanged, err)
+	}
+	backup, err := Store{RootDir: backupAsState(t, store)}.Load()
+	if err != nil || backup.Stacks("shop")["retry-jobs"] == nil {
+		t.Errorf("the backup = %+v, %v; want the version before the last change, with retry-jobs", backup, err)
 	}
 }
 

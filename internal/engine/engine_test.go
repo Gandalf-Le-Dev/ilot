@@ -1039,6 +1039,23 @@ func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
 	}
 }
 
+// Each save moves the last version to the backup, so a save with no change would lose the version before the last real change.
+func TestASecondStartThatChangesNothingDoesNotSaveTheState(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	before, err := os.Stat(environment.executor.Store.File())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+
+	after, err := os.Stat(environment.executor.Store.File())
+	if err != nil || !os.SameFile(before, after) {
+		t.Errorf("a second start replaced %s (%v): want no save when nothing changed", environment.executor.Store.File(), err)
+	}
+}
+
 func TestRestartAppsBuildsThenRestartsTheNamedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")

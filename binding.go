@@ -181,7 +181,7 @@ func bindWorktree(ctx context.Context, store state.Store, currentWorkspace works
 			}
 		}
 	}
-	if err := store.Save(current); err != nil {
+	if _, err := store.Save(current); err != nil {
 		return workspace.Workspace{}, "", err
 	}
 	auditLog.Info("worktree bound", "workspace", currentWorkspace.Name, "stack", stackName, "worktree", worktree.Dir, "previous_stack", previousStackName)

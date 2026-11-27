@@ -170,7 +170,8 @@ func (executor *Executor) saveStacks(snapshot plan.Snapshot) error {
 		return err
 	}
 	before, beforeErr := executor.Store.Load()
-	if err := executor.Store.Save(snapshot.State); err != nil {
+	isChanged, err := executor.Store.Save(snapshot.State)
+	if err != nil || !isChanged {
 		return err
 	}
 	if beforeErr == nil {
