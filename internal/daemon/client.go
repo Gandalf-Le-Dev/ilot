@@ -212,17 +212,7 @@ func (client *Client) call(ctx context.Context, method, path string, input, outp
 	}
 	response, err := client.http.Do(request)
 	if err != nil {
-		// A cancelled call says nothing about the daemon, so it must not look like a dead one.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
-			return fmt.Errorf("%w on %s", ErrDaemonDown, client.socketPath)
-		}
-		if isBrokenConnection(err) {
-			return fmt.Errorf("call the ilot daemon: %w: %w", errConnectionBroken, err)
-		}
-		return fmt.Errorf("call the ilot daemon: %w", err)
+		return client.transportError(ctx, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusBadRequest {
@@ -235,5 +225,23 @@ func (client *Client) call(ctx context.Context, method, path string, input, outp
 	if output == nil {
 		return nil
 	}
-	return json.NewDecoder(response.Body).Decode(output)
+	if err := json.NewDecoder(response.Body).Decode(output); err != nil {
+		// A daemon that exits can cut its answer after the headers.
+		return client.transportError(ctx, err)
+	}
+	return nil
+}
+
+func (client *Client) transportError(ctx context.Context, err error) error {
+	// A cancelled call says nothing about the daemon, so it must not look like a dead one.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+		return fmt.Errorf("%w on %s", ErrDaemonDown, client.socketPath)
+	}
+	if isBrokenConnection(err) {
+		return fmt.Errorf("call the ilot daemon: %w: %w", errConnectionBroken, err)
+	}
+	return fmt.Errorf("call the ilot daemon: %w", err)
 }

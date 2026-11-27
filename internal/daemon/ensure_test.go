@@ -3,10 +3,13 @@ package daemon
 import (
 	"context"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -364,5 +367,49 @@ func TestShutdownReturnsWhenTheNextDaemonAlreadyHoldsTheSocket(t *testing.T) {
 				t.Fatalf("iteration %d: Ensure of the caller %d gives %v", iteration, index, err)
 			}
 		}
+	}
+}
+
+func TestEnsureWaitsWhenTheDaemonCutsItsAnswer(t *testing.T) {
+	paths := Paths{StateDir: shortDir(t)}
+	listener, err := net.Listen("unix", paths.Socket())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	httpServer := &http.Server{Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if calls.Add(1) > 1 {
+			writeJSON(writer, http.StatusOK, Status{Version: "v-next", PID: os.Getpid()})
+			return
+		}
+		connection, buffered, err := writer.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer connection.Close()
+		_, _ = buffered.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"version\":")
+		_ = buffered.Flush()
+	})}
+	serving := make(chan struct{})
+	go func() {
+		defer close(serving)
+		_ = httpServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		httpServer.Close()
+		<-serving
+	})
+
+	if _, err := NewClient(paths.Socket()).Status(t.Context()); !errors.Is(err, errConnectionBroken) {
+		t.Fatalf("an answer that is cut gives %v, want a broken connection", err)
+	}
+	calls.Store(0)
+	client, err := Starter{Paths: paths, Spawn: func() error { return nil }}.Ensure(t.Context())
+	if err != nil {
+		t.Fatalf("Ensure gives %v, want a wait for the next answer", err)
+	}
+	if status, err := client.Status(t.Context()); err != nil || status.Version != "v-next" {
+		t.Fatalf("the status is %+v, %v", status, err)
 	}
 }
