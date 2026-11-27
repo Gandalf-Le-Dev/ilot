@@ -75,6 +75,7 @@ func TestAStartReplacesTheAppsOfItsStackWhoseTemplatesItChanged(t *testing.T) {
 	environment.executor.Config.Apps["reader"] = config.App{Run: `reader --api={{port "internalapi"}}`, DependsOn: []string{"internalapi"}}
 	environment.start(t, environment.featureStack, StartOptions{}, "reader")
 	environment.supervisor.startedInOrder = nil
+	environment.supervisor.waitedReady = nil
 	environment.output.Reset()
 
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
@@ -85,6 +86,27 @@ func TestAStartReplacesTheAppsOfItsStackWhoseTemplatesItChanged(t *testing.T) {
 	}
 	if !strings.Contains(environment.output.String(), "restarting reader.proj-1234.platform: this start changed its specification") {
 		t.Errorf("output %q, want the line that says why reader restarts", environment.output.String())
+	}
+	if !slices.Contains(environment.supervisor.waitedReady, "reader.proj-1234.platform") {
+		t.Errorf("waited for %v, want reader too: a replaced app is ready before the start ends", environment.supervisor.waitedReady)
+	}
+}
+
+func TestAStartSaysNothingOfADependentThatAlreadyRunsItsNewSpecification(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.executor.Config.Apps["reader"] = config.App{Run: `reader --api={{port "internalapi"}}`, DependsOn: []string{"internalapi"}}
+	environment.start(t, environment.featureStack, StartOptions{}, "reader")
+	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
+	if err := environment.executor.Stop(t.Context(), environment.featureStack, []string{"internalapi"}); err != nil {
+		t.Fatal(err)
+	}
+	environment.output.Reset()
+	environment.supervisor.calls = nil
+
+	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
+
+	if strings.Contains(environment.output.String(), "restarting reader") || slices.Contains(environment.supervisor.calls, "put reader.proj-1234.platform") {
+		t.Errorf("output %q, calls %v; want no restart of reader, which already runs with the port of this internalapi", environment.output.String(), environment.supervisor.calls)
 	}
 }
 
