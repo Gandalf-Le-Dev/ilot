@@ -190,7 +190,7 @@ func (checks doctor) stateFolder() doctorCheck {
 	return doctorCheck{Status: checkOK, Name: "state folder", Detail: checks.StateDir}
 }
 
-// The state of the company version of ilot was one folder per stack, with stacks named master and devbox, beside the files of process-compose.
+// An older ilot kept one folder per stack, beside the files of the process manager that it ran.
 // This ilot does not read them, so they only take room, and an old env.yaml stops every command.
 func (checks doctor) oldState() []doctorCheck {
 	var results []doctorCheck

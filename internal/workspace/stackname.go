@@ -15,7 +15,7 @@ const dnsLabelMaxLength = 63
 var runsOfCharactersOutsideDNSLabels = regexp.MustCompile(`[^a-z0-9]+`)
 
 // DefaultStackName gives the stack that a worktree has before its binding: base for a main checkout, and else a name from the branch.
-// The branch is the natural key across repos: one ticket usually gets the same branch name in each repo.
+// The branch is the natural key across repos: one line of work usually gets the same branch name in each repo.
 // With a detached HEAD, the folder gives the name.
 func (workspace Workspace) DefaultStackName(worktree Worktree) (string, error) {
 	if worktree.IsMain {
