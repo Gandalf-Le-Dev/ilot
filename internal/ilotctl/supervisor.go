@@ -29,7 +29,6 @@ type ProcessSupervisor interface {
 	// WaitReady returns a *daemon.ExitedError for an ended process, and a *daemon.NotReadyError after the timeout.
 	WaitReady(ctx context.Context, processName string, timeout time.Duration) error
 	IsUp(ctx context.Context) bool
-	RestartCommand(processName string) string
 	// SetRoutes replaces the route table of the proxy. It does nothing when no daemon runs.
 	SetRoutes(ctx context.Context, routes []daemon.Route) error
 	Shutdown(ctx context.Context) error
@@ -174,12 +173,6 @@ func (supervisor *DaemonSupervisor) WaitReady(ctx context.Context, processName s
 func (supervisor *DaemonSupervisor) IsUp(ctx context.Context) bool {
 	_, err := supervisor.client().Status(ctx)
 	return err == nil
-}
-
-// The watcher of an app runs this command. It talks to the API of the daemon, so that it needs no state of ilot.
-func (supervisor *DaemonSupervisor) RestartCommand(processName string) string {
-	socket := supervisor.Starter.Paths.Socket()
-	return "curl --silent --show-error --fail --unix-socket " + shellQuote(socket) + " -X POST " + shellQuote("http://ilot/v1/processes/"+processName+"/restart")
 }
 
 func (supervisor *DaemonSupervisor) SetRoutes(ctx context.Context, routes []daemon.Route) error {

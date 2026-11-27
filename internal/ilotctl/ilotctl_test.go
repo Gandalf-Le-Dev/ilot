@@ -101,10 +101,6 @@ func (supervisor *fakeSupervisor) Shutdown(context.Context) error {
 	return nil
 }
 
-func (supervisor *fakeSupervisor) RestartCommand(processName string) string {
-	return "restart " + processName
-}
-
 func (supervisor *fakeSupervisor) simulateDaemonRestart() {
 	supervisor.daemonIsUp = false
 	supervisor.runningSpecs = map[string]ProcessSpec{}
@@ -328,6 +324,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
 		BackendHost:         "devbox",
+		IlotBinary:          "/opt/ilot/bin/ilot",
 		ReadyTimeout:        time.Second,
 		ProgressInterval:    0,
 		Output:              output,
@@ -1017,8 +1014,10 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestWatchedAppRunsWithAWatcherThatRestartsIt(t *testing.T) {
+func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	environment := newTestEnvironment(t)
+	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe"})
+	environment.controller.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
 
 	environment.start(t, environment.master, StartOptions{}, "restapi")
 
@@ -1026,10 +1025,16 @@ func TestWatchedAppRunsWithAWatcherThatRestartsIt(t *testing.T) {
 	if !isRunning {
 		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
-	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", "'restart restapi.devbox'"} {
+	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- ''"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'devbox'"'"' '"'"'restapi'"'"''`} {
 		if !strings.Contains(watcher.Command, wantPart) {
 			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
 		}
+	}
+	if strings.Contains(watcher.Command, "flock") {
+		t.Errorf("watcher command %q uses the flock command, which macOS does not have", watcher.Command)
+	}
+	if want := map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe", "XDG_STATE_HOME": "/scratch/state"}; !maps.Equal(watcher.Env, want) {
+		t.Errorf("watcher environment = %v, want %v: the shell, and what makes ilot find the same state", watcher.Env, want)
 	}
 
 	if err := environment.controller.Stop(t.Context(), environment.master, []string{"restapi"}); err != nil {
@@ -1040,35 +1045,78 @@ func TestWatchedAppRunsWithAWatcherThatRestartsIt(t *testing.T) {
 	}
 }
 
-func TestWatchedAppWithABuildRebuildsBeforeTheRestart(t *testing.T) {
+func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	internalapi := environment.controller.Config.Apps["internalapi"]
-	internalapi.Watch = appconfig.Watch{Paths: []string{"."}, Exts: []string{"go"}}
-	environment.controller.Config.Apps["internalapi"] = internalapi
+	portalStandalone := environment.controller.Config.Apps["portal-standalone"]
+	portalStandalone.Watch = appconfig.Watch{Paths: []string{"."}, Exts: []string{"go"}}
+	environment.controller.Config.Apps["portal-standalone"] = portalStandalone
 
+	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+
+	watcher := environment.supervisor.runningSpecs["portal-standalone-watch.proj-1234"]
+	if !strings.Contains(watcher.Command, "--watch '/src/portal'") || !strings.Contains(watcher.Command, `restart --stack '"'"'proj-1234'"'"' '"'"'portal-standalone'"'"'`) {
+		t.Errorf("watcher command %q, want the main checkout of portal watched for the stack proj-1234", watcher.Command)
+	}
+}
+
+func TestRestartAppsBuildsThenRestartsTheNamedApp(t *testing.T) {
+	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
+	*environment.builds = nil
+	environment.supervisor.events = nil
 
-	watcher, isRunning := environment.supervisor.runningSpecs["internalapi-watch.proj-1234"]
-	if !isRunning {
-		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
+	if err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"}); err != nil {
+		t.Fatalf("RestartApps: %v", err)
 	}
-	binDir := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "bin")
-	lockFile := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "build.lock")
-	for _, wantPart := range []string{
-		"--watch '/worktrees/proj-1234'",
-		"--exts go",
-		"flock ",
-		lockFile,
-		"cd ",
-		"go build -o " + binDir + "/platform ./cmd/platformv2",
-		"&& restart internalapi.proj-1234",
-	} {
-		if !strings.Contains(watcher.Command, wantPart) {
-			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
-		}
+
+	if len(*environment.builds) != 1 || (*environment.builds)[0].workingDir != "/worktrees/proj-1234" {
+		t.Errorf("builds = %+v, want one build in the worktree", *environment.builds)
 	}
-	if strings.Index(watcher.Command, "go build") > strings.Index(watcher.Command, "restart internalapi") {
-		t.Errorf("watcher command %q restarts before it builds", watcher.Command)
+	if want := []string{"restart internalapi.proj-1234", "ready internalapi.proj-1234"}; !slices.Equal(environment.supervisor.events, want) {
+		t.Errorf("events = %v, want %v: the dependencies stay as they are", environment.supervisor.events, want)
+	}
+}
+
+func TestRestartAppsKeepsTheRunningAppWhenItsBuildFails(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
+	environment.supervisor.events = nil
+	environment.controller.RunBuild = func(context.Context, string, string, []string) error { return errors.New("exit status 1") }
+
+	err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
+
+	if err == nil || !strings.Contains(err.Error(), "build internalapi.proj-1234") {
+		t.Fatalf("RestartApps = %v, want the failed build", err)
+	}
+	if len(environment.supervisor.events) != 0 || !environment.isApplied("internalapi.proj-1234") {
+		t.Errorf("events = %v, want none: the old version keeps running", environment.supervisor.events)
+	}
+}
+
+func TestRestartAppsRefusesAnAppThatDoesNotRun(t *testing.T) {
+	environment := newTestEnvironment(t)
+
+	err := environment.controller.RestartApps(t.Context(), environment.featureStack, []string{"internalapi"})
+
+	if err == nil || !strings.Contains(err.Error(), "internalapi.proj-1234 does not run") || !strings.Contains(err.Error(), "ilot start internalapi") {
+		t.Fatalf("RestartApps = %v, want a refusal that names ilot start", err)
+	}
+	if len(*environment.builds) != 0 || environment.supervisor.daemonIsUp {
+		t.Errorf("builds = %+v, daemon up %t; want nothing done: a watcher must not start again an app that the user stopped", *environment.builds, environment.supervisor.daemonIsUp)
+	}
+}
+
+func TestRestartAppsStartsOneTimeAProcessThatTheDaemonLost(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
+	environment.supervisor.simulateDaemonRestart()
+
+	if err := environment.controllerOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
+		t.Fatalf("RestartApps: %v", err)
+	}
+
+	if want := []string{"start standalone.proj-1234", "ready standalone.proj-1234"}; !slices.Equal(environment.supervisor.events, want) {
+		t.Errorf("events = %v, want %v", environment.supervisor.events, want)
 	}
 }
 

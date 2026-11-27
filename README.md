@@ -130,7 +130,8 @@ ilot check                    # check the ilot.yaml of this repo with the files 
 ilot check path/to/ilot.yaml  # check that file
 ilot rm proj-1234             # stop a stack and delete its state, its logs and its routes
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
-ilot restart                  # stop every app and the daemon, start a new daemon, then start the apps that ran
+ilot restart api              # build the app again, then restart it; its dependencies stay as they are
+ilot restart                  # with no app: stop every app and the daemon, start a new daemon, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login
 ilot --version
 ilot skill print              # print the skill for AI agents
@@ -142,6 +143,7 @@ ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do n
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
 `ilot start` also rebuilds an app that already runs, then restarts it.
+Only one build runs in a stack at a time. A second build, from another `ilot` command or from a watcher, waits and says so.
 When an app that `ilot start` started ends, `ilot start` stops it, marks it stopped and keeps its log.
 When the timeout passes while the app still runs, `ilot` keeps the app and says so.
 
@@ -175,7 +177,7 @@ The fields of an app:
 | `autostart` | `ilot boot` starts the app in the `master` stack. |
 | `shared` | The app runs once, in the `devbox` stack, for every worktree. Each of its ports needs a number in `fixed_ports`. |
 | `per_stack` | An app that depends on this app gets the copy of its own stack, not the `master` copy. |
-| `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. An app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
+| `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. It needs `watchexec` on the `PATH` of the app. A watcher process runs `ilot restart <app>` at each change, so an app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
 
 The `build`, `run`, `stop` and `env` values can use these templates:

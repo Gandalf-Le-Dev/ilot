@@ -16,7 +16,7 @@ Every `ilot` command is pre-approved for you. These limits still apply:
 
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop a shared app (for example Temporal, auth-mock, restapi) or a `master` app that you did not start, ask the user. Other stacks and the user's other sessions use them.
-- Before you run `ilot restart`, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
+- Before you run `ilot restart` with no app name, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
 - Never run `ilot daemon run`. `ilot` starts its daemon by itself.
 
 ## Stacks
@@ -51,7 +51,8 @@ ilot check path/to/ilot.yaml     # check that file
 ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout>  # starts again the apps that ran before a restart of the machine; you do not need it
-ilot restart                    # stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
+ilot restart publicapi          # build the app again, then restart it, in this folder's stack; it must run already
+ilot restart                    # with no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
 ilot daemon run                 # the daemon itself: ilot starts it, never run it
 ilot --version                  # the version of ilot
 ilot skill print                # print this skill

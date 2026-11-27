@@ -36,9 +36,12 @@ type Controller struct {
 	Login               string
 	BackendHost         string
 	ProxyPort           string
-	ReadyTimeout        time.Duration
-	ProgressInterval    time.Duration
-	Output              io.Writer
+	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
+	IlotBinary       string
+	IlotEnv          map[string]string
+	ReadyTimeout     time.Duration
+	ProgressInterval time.Duration
+	Output           io.Writer
 
 	configByStack map[string]appconfig.Config
 }
@@ -138,6 +141,46 @@ func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Workt
 		return nil
 	}
 	return controller.bootApps(ctx, mainCheckout)
+}
+
+// RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
+// A build that fails keeps the running app.
+func (controller *Controller) RestartApps(ctx context.Context, worktree stack.Worktree, appNames []string) (err error) {
+	release, err := controller.Store.Lock()
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, release()) }()
+
+	stacks, err := controller.loadStacks(worktree)
+	if err != nil {
+		return err
+	}
+	restartedInstances, err := controller.instancesOf(worktree.Name, appNames)
+	if err != nil {
+		return err
+	}
+	for _, appInstance := range restartedInstances {
+		if !stacks.isRunning(appInstance) {
+			return fmt.Errorf("%s does not run: start it with ilot start %s", appInstance.processName(), appInstance.appName)
+		}
+	}
+	if err := controller.buildApps(ctx, stacks, restartedInstances, func(instance) bool { return true }); err != nil {
+		return err
+	}
+	processByName, err := controller.Supervisor.Processes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, appInstance := range restartedInstances {
+		// A process that the daemon does not hold starts in the apply. A restart on top would start it twice.
+		_, isHeldByDaemon := processByName[appInstance.processName()]
+		if err := controller.startInstance(ctx, stacks, appInstance, isHeldByDaemon, false); err != nil {
+			return err
+		}
+	}
+	controller.printURLs(stacks, restartedInstances)
+	return nil
 }
 
 // The only command that replaces the daemon, for example after an upgrade of ilot.
