@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"regexp"
@@ -135,7 +136,8 @@ func Parse(configPath string) (Config, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 	decoder.KnownFields(true)
 	var config Config
-	if err := decoder.Decode(&config); err != nil {
+	// An empty file or a file of comments holds no document, and the decoder says io.EOF for it.
+	if err := decoder.Decode(&config); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, fmt.Errorf("parse %s: %w", configPath, errors.Join(append([]error{err}, hintsForUnknownKeys(err)...)...))
 	}
 	return config, nil
