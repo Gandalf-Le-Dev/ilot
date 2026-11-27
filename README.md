@@ -423,7 +423,7 @@ It needs git and the Go toolchain. Its home folder has its own state folder and 
 
 ### Release
 
-A tag `v*` runs `.github/workflows/release.yml`, which runs the tests, then GoReleaser with `.goreleaser.yaml`.
+A tag `v*` runs `.github/workflows/release.yml`. It first runs the checks of `ci.yml` on Linux and macOS, and stops when the secret `HOMEBREW_TAP_GITHUB_TOKEN` is empty. Then it runs GoReleaser with `.goreleaser.yaml`.
 GoReleaser builds `ilot` for macOS and Linux on amd64 and arm64, stamps the version of the tag into `ilot --version`, puts the archives and their checksums on the release page, and pushes a Homebrew cask to the tap repo `Gandalf-Le-Dev/homebrew-tap`.
 The workflow needs the repository secret `HOMEBREW_TAP_GITHUB_TOKEN`, a token that can push to the tap repo.
 
