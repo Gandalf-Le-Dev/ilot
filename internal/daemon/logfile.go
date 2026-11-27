@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,9 +19,13 @@ type rotatingFile struct {
 	path     string
 	maxBytes int64
 
-	mu   sync.Mutex
-	file *os.File
-	size int64
+	// Called with the lock held, so it must not write to this file.
+	onRotationFailure func(error)
+
+	mu       sync.Mutex
+	file     *os.File
+	size     int64
+	isClosed bool
 }
 
 func openRotatingFile(path string, maxBytes int64) (*rotatingFile, error) {
@@ -51,8 +56,14 @@ func (rotating *rotatingFile) open() error {
 func (rotating *rotatingFile) Write(data []byte) (int, error) {
 	rotating.mu.Lock()
 	defer rotating.mu.Unlock()
-	if rotating.file == nil {
+	if rotating.isClosed {
 		return 0, fs.ErrClosed
+	}
+	if rotating.file == nil {
+		// An earlier write lost the file. The cause may be gone now.
+		if err := rotating.open(); err != nil {
+			return 0, err
+		}
 	}
 	if rotating.size > 0 && rotating.size+int64(len(data)) > rotating.maxBytes {
 		if err := rotating.rotate(); err != nil {
@@ -64,12 +75,25 @@ func (rotating *rotatingFile) Write(data []byte) (int, error) {
 	return written, err
 }
 
+// rotate fails only when no file is open at the end. Old files that do not move must not end the log.
 func (rotating *rotatingFile) rotate() error {
-	closeErr := rotating.file.Close()
+	_ = rotating.file.Close()
 	rotating.file = nil
-	if closeErr != nil {
-		return closeErr
+	shiftErr := rotating.shiftOldFiles()
+	if err := rotating.open(); err != nil {
+		return err
 	}
+	if shiftErr != nil {
+		// The count starts again, so that the next attempt comes after maxBytes more, and not at each write.
+		rotating.size = 0
+		if rotating.onRotationFailure != nil {
+			rotating.onRotationFailure(shiftErr)
+		}
+	}
+	return nil
+}
+
+func (rotating *rotatingFile) shiftOldFiles() error {
 	for index := rotatedLogFiles; index >= 1; index-- {
 		newer := rotating.path
 		if index > 1 {
@@ -80,16 +104,34 @@ func (rotating *rotatingFile) rotate() error {
 			return err
 		}
 	}
-	return rotating.open()
+	return nil
 }
 
 func (rotating *rotatingFile) Close() error {
 	rotating.mu.Lock()
 	defer rotating.mu.Unlock()
+	rotating.isClosed = true
 	if rotating.file == nil {
 		return nil
 	}
 	err := rotating.file.Close()
 	rotating.file = nil
 	return err
+}
+
+// lossyWriter drops what its target refuses. The reader of a pipe must go on, and a later write can succeed.
+type lossyWriter struct {
+	target io.Writer
+	// Called at the first write of each row of writes that fail.
+	onLoss   func(error)
+	isLosing bool
+}
+
+func (lossy *lossyWriter) Write(data []byte) (int, error) {
+	_, err := lossy.target.Write(data)
+	if err != nil && !lossy.isLosing {
+		lossy.onLoss(err)
+	}
+	lossy.isLosing = err != nil
+	return len(data), nil
 }
