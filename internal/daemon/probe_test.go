@@ -183,8 +183,10 @@ func TestAProcessThatExitedIsNotReadyWhileAGrandchildHoldsItsOutput(t *testing.T
 	if _, err := exec.LookPath("perl"); err != nil {
 		t.Skip("perl makes the grandchild that leaves the group")
 	}
-	// Longer than the start of perl and shorter than the drain of the output, so that the window ends during the drain.
-	supervisor := newTestSupervisor(t, SupervisorOptions{AliveWindow: outputDrainTimeout / 4})
+	supervisor := newTestSupervisor(t, SupervisorOptions{})
+	// The window ends right after the shell exits, so it ends during the drain however slow perl is to start.
+	windowEnd := make(chan time.Time)
+	supervisor.afterAliveWindow = func(time.Duration) <-chan time.Time { return windowEnd }
 	spec := sleeperWithProbe(t, Probe{})
 	spec.Ready = nil
 	spec.Command = `perl -MPOSIX -e 'setsid(); open(my $mark, ">", "left") or die; close($mark); sleep 300' &
@@ -192,16 +194,21 @@ echo $! > grandchild.pid
 while [ ! -e left ]; do sleep 0.02; done
 exit 1`
 
-	begin := time.Now()
 	if _, err := supervisor.Put("broken", spec); err != nil {
 		t.Fatal(err)
 	}
 	grandchild := readPIDFile(t, filepath.Join(spec.Dir, "grandchild.pid"))
 	t.Cleanup(func() { _ = syscall.Kill(grandchild, syscall.SIGKILL) })
+	supervisor.mu.Lock()
+	dead := supervisor.entries["broken"].run.dead
+	supervisor.mu.Unlock()
+	<-dead.Done()
+	close(windowEnd)
 
+	begin := time.Now()
 	for time.Since(begin) < outputDrainTimeout {
 		if got := processNamed(t, supervisor, "broken").State; got == StateReady {
-			t.Fatalf("the process is ready %s after its start, although its shell exited", time.Since(begin))
+			t.Fatalf("the process is ready %s after its shell exited", time.Since(begin))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
