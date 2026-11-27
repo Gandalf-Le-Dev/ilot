@@ -426,6 +426,7 @@ func (executor *Executor) saveStart(start plan.Start) error {
 
 // startInstance sends one instance to the daemon and waits until it is ready.
 // A requested instance starts again: with Put when its specification changed, which replaces it one time, and with Restart when it did not.
+// Both send the specification, so the app gets the session of this terminal, for example a new SSH_AUTH_SOCK.
 // A dependency that runs gets no call, so a change that a command did not ask for never replaces it.
 func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process, isRequested bool) error {
 	spec, err := snapshot.Spec(appInstance)
@@ -455,7 +456,7 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 		}
 	case isRequested:
 		fmt.Fprintf(executor.Output, "restarting %s\n", spec.Name)
-		if err := executor.Supervisor.Restart(ctx, spec.Name); err != nil {
+		if err := executor.Supervisor.Restart(ctx, spec); err != nil {
 			return err
 		}
 	}

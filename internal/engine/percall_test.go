@@ -141,3 +141,31 @@ func TestTheSessionOfTheTerminalReachesAnAppOutsideItsHash(t *testing.T) {
 		t.Errorf("build environ = %v, want the agent of the terminal", (*environment.buildEnvirons)[0])
 	}
 }
+
+// After an SSH reconnect the old SSH_AUTH_SOCK is dead, and only the session differs, so the hash is the same.
+func TestARequestedStartOrRestartGivesTheAppTheSessionOfTheNewTerminal(t *testing.T) {
+	environment := newTestEnvironment(t)
+	sessionOf := func(agent string) func() (map[string]string, map[string]string, error) {
+		return func() (map[string]string, map[string]string, error) {
+			return map[string]string{"PATH": "/usr/bin"}, map[string]string{"SSH_AUTH_SOCK": agent}, nil
+		}
+	}
+	environment.executor.ShellEnv = sessionOf("/tmp/first-agent")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+
+	environment.executor.ShellEnv = sessionOf("/tmp/second-agent")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+
+	if got := environment.supervisor.runningSpecs["standalone.base.platform"].Session["SSH_AUTH_SOCK"]; got != "/tmp/second-agent" {
+		t.Errorf("SSH_AUTH_SOCK after ilot start = %q, want the agent of the new terminal", got)
+	}
+
+	environment.executor.ShellEnv = sessionOf("/tmp/third-agent")
+	if err := environment.executor.RestartApps(t.Context(), environment.base, []string{"standalone"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := environment.supervisor.runningSpecs["standalone.base.platform"].Session["SSH_AUTH_SOCK"]; got != "/tmp/third-agent" {
+		t.Errorf("SSH_AUTH_SOCK after ilot restart = %q, want the agent of the new terminal", got)
+	}
+}

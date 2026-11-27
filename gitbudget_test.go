@@ -30,7 +30,7 @@ func (supervisor *readySupervisor) Delete(context.Context, string) error { retur
 
 func (supervisor *readySupervisor) Up(context.Context) error { return nil }
 
-func (supervisor *readySupervisor) Restart(context.Context, string) error { return nil }
+func (supervisor *readySupervisor) Restart(context.Context, engine.ProcessSpec) error { return nil }
 
 func (supervisor *readySupervisor) Processes(context.Context) (map[string]daemon.Process, error) {
 	return map[string]daemon.Process{}, nil

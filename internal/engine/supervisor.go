@@ -22,7 +22,9 @@ type ProcessSupervisor interface {
 	// Put starts a process. It replaces a process whose specification changed or that ended, and leaves a live one with the same specification as it is.
 	// It starts the daemon when none runs.
 	Put(ctx context.Context, spec ProcessSpec) error
-	Restart(ctx context.Context, processName string) error
+	// Restart stops a known process and starts it with the specification, even when its hash is the same, so that it gets the session of this terminal.
+	// An unknown process is a daemon.ErrUnknownProcess.
+	Restart(ctx context.Context, spec ProcessSpec) error
 	// Delete stops a process and forgets it. A process or a daemon that does not exist is no error.
 	Delete(ctx context.Context, processName string) error
 	// Up starts the daemon when none runs. A new daemon first kills the processes that a dead one left, which can hold the ports of the apps.
@@ -123,8 +125,8 @@ func (supervisor *DaemonSupervisor) Delete(ctx context.Context, processName stri
 	return withRetryHint(err)
 }
 
-func (supervisor *DaemonSupervisor) Restart(ctx context.Context, processName string) error {
-	_, err := supervisor.client().Restart(ctx, processName)
+func (supervisor *DaemonSupervisor) Restart(ctx context.Context, spec ProcessSpec) error {
+	_, err := supervisor.client().Restart(ctx, spec.Name, spec.Spec)
 	return withRetryHint(err)
 }
 

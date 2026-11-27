@@ -1,9 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -75,8 +77,30 @@ func (server *Server) Handler() http.Handler {
 		process, err := server.Supervisor.Put(request.PathValue("name"), spec)
 		writeProcess(writer, process, err)
 	})
+	// A body is the specification to restart with. A caller without one restarts the stored specification.
 	mux.HandleFunc("POST /v1/processes/{name}/restart", func(writer http.ResponseWriter, request *http.Request) {
-		process, err := server.Supervisor.Restart(request.PathValue("name"))
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if len(body) == 0 {
+			process, err := server.Supervisor.Restart(request.PathValue("name"))
+			writeProcess(writer, process, err)
+			return
+		}
+		var spec Spec
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&spec); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := spec.Validate(); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		process, err := server.Supervisor.RestartWith(request.PathValue("name"), spec)
 		writeProcess(writer, process, err)
 	})
 	mux.HandleFunc("DELETE /v1/processes/{name}", func(writer http.ResponseWriter, request *http.Request) {

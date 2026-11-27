@@ -179,7 +179,7 @@ func checkSupervisorContract(t *testing.T, subject supervisorUnderContract) {
 	if crashing, _ := stateOf(subject.crashing.Name); crashing.State != daemon.StateExited {
 		t.Fatalf("crashing = %+v, want an exited process that the supervisor still knows", crashing)
 	}
-	if err := supervisor.Restart(ctx, subject.crashing.Name); err != nil {
+	if err := supervisor.Restart(ctx, subject.crashing); err != nil {
 		t.Fatalf("Restart(crashing): %v", err)
 	}
 	if _, hasEnded := errors.AsType[*daemon.ExitedError](supervisor.WaitReady(ctx, subject.crashing.Name, longWait)); !hasEnded {
@@ -194,7 +194,7 @@ func checkSupervisorContract(t *testing.T, subject supervisorUnderContract) {
 	if starts := subject.startsOf(t, subject.crashing.Name); starts != 3 {
 		t.Fatalf("crashing started %d times, want 3: a Restart and a Put both start an ended process again", starts)
 	}
-	if err := supervisor.Restart(ctx, "unknown"); !errors.Is(err, daemon.ErrUnknownProcess) {
+	if err := supervisor.Restart(ctx, ProcessSpec{Name: "unknown", Spec: subject.crashing.Spec}); !errors.Is(err, daemon.ErrUnknownProcess) {
 		t.Fatalf("Restart(unknown) = %v, want ErrUnknownProcess", err)
 	}
 
