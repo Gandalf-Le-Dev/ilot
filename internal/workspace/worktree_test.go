@@ -119,7 +119,7 @@ func TestLocateInAWorktreeOfABareRepoNamesTheBareRepo(t *testing.T) {
 
 	_, err := NewGit().Locate(worktreeDir)
 
-	if err == nil || !strings.Contains(err.Error(), "the bare repo "+bareDir) {
+	if err == nil || !strings.Contains(err.Error(), "the bare repo "+bareDir) || strings.Contains(err.Error(), "not inside") {
 		t.Errorf("Locate(worktree of a bare repo) = %v; want an error that names the bare repo %s", err, bareDir)
 	}
 }
