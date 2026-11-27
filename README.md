@@ -43,7 +43,6 @@ A URL of an app that does not run answers with the command that starts the app. 
 - macOS or Linux, and Go 1.26 to build `ilot`.
 - git.
 - Docker, for container apps only. A mount of a container app names a path on this machine.
-- zsh. `ilot` reads the environment of the apps from a clean zsh.
 - mise, only for repos with a `mise.toml` at the root.
 
 ## Install
@@ -232,10 +231,13 @@ repos:
 
 `ilot` builds the environment of an app in this order, and the last value wins:
 
-1. The shell files. `ilot` runs a clean zsh and keeps `HOME`, `PATH`, `USER`, `LOGNAME` and `LANG`. It also keeps the variables of a fixed list in `internal/shellenv/shellenv.go`. Nothing of your own shell gets in.
+1. The shell files. `ilot` runs your shell, `$SHELL`, as a login shell (`$SHELL -l`), and takes its whole environment. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
 2. The `ilot.yaml` of the repo: its top-level `env`, then the `env` of the app.
 3. Your personal file: its `env`, then its entry under `apps`.
 4. The values that `ilot.yaml` writes with a template. Your personal file cannot replace them.
+
+A login shell reads the profile files, for example `~/.zprofile` or `~/.profile`. It does not read the files of an interactive shell, for example `~/.zshrc`.
+If a tool is on your `PATH` in a terminal and an app does not find it, look at the `PATH` that `ilot env <app>` prints, and move the line that adds the tool to a profile file.
 
 A container app does not get the top-level `env` of your personal file, so a third-party image does not get your tokens. It gets its entry under `apps`.
 An app gets its whole environment from `ilot` when it starts, and nothing from the daemon. To give a running app fresh values, run `ilot start <app>` again.

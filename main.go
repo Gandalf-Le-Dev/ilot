@@ -344,7 +344,7 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
-	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
+	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Login().Environment(context.Background()) })
 	ilotBinary, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("find the ilot binary, to start its daemon: %w", err)
