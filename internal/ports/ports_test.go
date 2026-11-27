@@ -27,19 +27,39 @@ func TestAllocateFailsWhenTheRangeIsExhausted(t *testing.T) {
 	}
 }
 
-func TestIsFreeOnHostSeesAListeningPort(t *testing.T) {
-	listener, err := net.Listen("tcp", ":0")
+func listenOn(t *testing.T, address string) (port int) {
+	t.Helper()
+	listener, err := net.Listen("tcp", net.JoinHostPort(address, "0"))
+	if err != nil {
+		t.Skipf("this machine cannot listen on %s: %v", address, err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	return listener.Addr().(*net.TCPAddr).Port
+}
+
+func TestAPortWithAListenerOnALoopbackAddressIsNotFree(t *testing.T) {
+	for _, address := range []string{"127.0.0.1", "::1"} {
+		t.Run(address, func(t *testing.T) {
+			busyPort := listenOn(t, address)
+
+			if IsFreeOnLoopback(busyPort) {
+				t.Errorf("IsFreeOnLoopback(%d) = true for a port with a listener on %s", busyPort, address)
+			}
+		})
+	}
+}
+
+func TestAPortWithNoListenerIsFree(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
-	listenerAddress, isTCP := listener.Addr().(*net.TCPAddr)
-	if !isTCP {
-		t.Fatalf("listener address %v is not TCP", listener.Addr())
+	freedPort := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
 	}
-	busyPort := listenerAddress.Port
 
-	if IsFreeOnHost(busyPort) {
-		t.Errorf("IsFreeOnHost(%d) = true for a port with a listener", busyPort)
+	if !IsFreeOnLoopback(freedPort) {
+		t.Errorf("IsFreeOnLoopback(%d) = false for a port that nothing holds", freedPort)
 	}
 }

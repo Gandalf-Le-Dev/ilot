@@ -390,7 +390,7 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
-		IsPortFreeOnHost:    ports.IsFreeOnHost,
+		IsPortFreeOnHost:    ports.IsFreeOnLoopback,
 		IsExternalServiceUp: isListeningOnLocalhost,
 		CheckoutsForStack:   currentWorkspace.checkoutsForStack,
 		ConfigForStack:      currentWorkspace.configForStack,
