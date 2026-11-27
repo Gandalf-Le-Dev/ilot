@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-var quickProbes = SupervisorOptions{ProbeInterval: 20 * time.Millisecond}
+var quickProbes = SupervisorOptions{ProbeInterval: 20 * time.Millisecond, AliveWindow: 50 * time.Millisecond}
 
 func sleeperWithProbe(t *testing.T, probe Probe) Spec {
 	t.Helper()
@@ -155,6 +155,45 @@ func TestWaitReadyReportsAProcessThatExited(t *testing.T) {
 	}
 	if got := processNamed(t, supervisor, "broken").State; got != StateExited {
 		t.Fatalf("the process is %s", got)
+	}
+}
+
+func TestAProcessWithNoProbeThatExitsAtOnceIsNeverReady(t *testing.T) {
+	supervisor := newTestSupervisor(t, SupervisorOptions{})
+	spec := sleeperWithProbe(t, Probe{})
+	spec.Ready = nil
+	spec.Command = "exit 4"
+
+	started, err := supervisor.Put("broken", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.State != StateStarting {
+		t.Fatalf("a process is %s at its start, before it proved that it stays alive", started.State)
+	}
+	err = supervisor.WaitReady(t.Context(), "broken")
+	if exitedError, isExited := errors.AsType[*ExitedError](err); !isExited || exitedError.ExitCode != 4 {
+		t.Fatalf("got %v, want an exit with code 4", err)
+	}
+}
+
+func TestWaitReadyReportsAProcessThatExitedAfterItWasReady(t *testing.T) {
+	supervisor := newTestSupervisor(t, quickProbes)
+	spec := sleeperWithProbe(t, Probe{})
+	spec.Ready = nil
+	spec.Command = "sleep 0.3; exit 5"
+
+	if _, err := supervisor.Put("short", spec); err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, supervisor, "short", StateReady)
+	waitForState(t, supervisor, "short", StateExited)
+	// Many times, because a wait that picks at random between ready and exited is right half of the time.
+	for range 20 {
+		err := supervisor.WaitReady(t.Context(), "short")
+		if exitedError, isExited := errors.AsType[*ExitedError](err); !isExited || exitedError.ExitCode != 5 {
+			t.Fatalf("got %v, want an exit with code 5", err)
+		}
 	}
 }
 
