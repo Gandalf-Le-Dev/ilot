@@ -10,9 +10,9 @@ allowed-tools: "Bash(ilot ls:*), Bash(ilot apps:*), Bash(ilot logs:*), Bash(ilot
 
 ## The rule
 
-`ilot` is yours to run. Run `ilot start`, `ilot restart`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env`, `ilot stack show`, `ilot doctor` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
+`ilot` is yours to run. Run `ilot start`, `ilot restart`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
 
-This skill pre-approves `ilot ls`, `ilot apps`, `ilot logs`, `ilot env`, `ilot check`, `ilot start`, `ilot restart` and `ilot stop`. Every other `ilot` command asks the user for permission first. These limits still apply:
+This skill pre-approves these commands only. Every other `ilot` command asks the user for permission first. `ilot stack show` and `ilot doctor` only read: when you need one, run it, and the user approves it. These limits still apply:
 
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop an app of the `base` stack that you did not start, ask the user. Other stacks and the user's other sessions use them.
@@ -68,7 +68,7 @@ ilot skill print                # print this skill
 ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md
 ```
 
-`ilot start` leaves an app that runs as it is, unless its specification changed. After a code change, run `ilot restart <app>`: it builds the app again and restarts it. An app with `watch` in its `ilot.yaml` is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot restart <app>`.
+`ilot start` leaves an app that runs as it is, unless its specification changed. After a code change, run `ilot restart <app>`: it builds the app again and restarts it. An app with `watch` in its `ilot.yaml` is the exception: it is rebuilt and restarted when its files change, so you run nothing after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`.
 
 ## Where things are
 
