@@ -249,7 +249,19 @@ func (store Store) Save(state State) error {
 	if err := store.keepBackup(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryFile, store.File())
+	if err := os.Rename(temporaryFile, store.File()); err != nil {
+		return err
+	}
+	return syncDir(store.RootDir)
+}
+
+// The rename is in the folder entry, which a crash can lose until the folder itself is on the disk.
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	return errors.Join(dir.Sync(), dir.Close())
 }
 
 func writeSynced(path string, content []byte) error {
