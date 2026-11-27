@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -78,7 +76,6 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 
 func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instance) error {
 	portsInUse := stacks.portsInUse()
-	reservedRange := ports.Range{First: appconfig.ReservedPortFirst, Last: appconfig.ReservedPortLast}
 	for _, appInstance := range startOrder {
 		appState := stacks.app(appInstance)
 		for portName, fixedPort := range controller.fixedPortsOf(appInstance) {
@@ -93,7 +90,7 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 				portNamesWithoutPort = append(portNamesWithoutPort, portName)
 			}
 		}
-		allocated, err := reservedRange.Allocate(len(portNamesWithoutPort), portsInUse, controller.IsPortFreeOnHost)
+		allocated, err := controller.PortRange.Allocate(len(portNamesWithoutPort), portsInUse, controller.IsPortFreeOnHost)
 		if err != nil {
 			return err
 		}
@@ -241,7 +238,7 @@ func (controller *Controller) checkoutDir(stacks stackSet, appInstance instance)
 	repoName := cmp.Or(controller.app(appInstance).Repo, controller.Workspace)
 	checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 	if checkoutDir == "" {
-		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", appInstance.processName(), repoName, repoName)
+		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", appInstance.processName(), repoName, controller.repoPathKey(repoName))
 	}
 	return checkoutDir, nil
 }

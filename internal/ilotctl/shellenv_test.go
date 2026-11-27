@@ -6,21 +6,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://proxy", "LOG_LEVEL": "info", "REGION": "DEV1"})
 	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"REGION": "EU1"}}
-	environment.controller.Personal = personal.Settings{Env: map[string]string{"LOG_LEVEL": "debug"}, Apps: nil, Repos: nil}
+	environment.controller.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"LOG_LEVEL": "debug"}, Apps: nil}
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	entryByKey := environmentOf(t, environment, "standalone")
 
 	want := map[string]EnvEntry{
 		"GOPROXY":   {Key: "GOPROXY", Value: "https://proxy", Source: "shell"},
-		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "personal"},
+		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "global"},
 		"REGION":    {Key: "REGION", Value: "EU1", Source: "repo"},
 	}
 	for key, wantEntry := range want {

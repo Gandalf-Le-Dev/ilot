@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 )
 
@@ -81,7 +82,7 @@ func daemonWarnings(status daemon.Status, version, proxyListen string) []string 
 	}
 	switch {
 	case status.ProxyError != "":
-		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address or set ILOT_PROXY_LISTEN to another one, then run ilot restart", status.ProxyError))
+		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address, or set proxy.listen to another one in ~/"+config.GlobalFilePath+", then run ilot restart", status.ProxyError))
 	case status.ProxyAddress != proxyListen:
 		warnings = append(warnings, fmt.Sprintf("the proxy of the ilot daemon listens on %q, and this ilot expects %q: the URLs that ilot prints do not answer. Run ilot restart", status.ProxyAddress, proxyListen))
 	}

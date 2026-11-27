@@ -105,7 +105,7 @@ func (controller *Controller) publicURL(appInstance instance) string {
 }
 
 func (controller *Controller) publicHost(appInstance instance) string {
-	return appInstance.appName + "." + appInstance.stackName + "." + controller.Workspace + "." + controller.Config.Domain
+	return appInstance.appName + "." + appInstance.stackName + "." + controller.Workspace + "." + controller.Domain
 }
 
 func (controller *Controller) publicBaseURL(appInstance instance) string {
@@ -130,5 +130,5 @@ func (controller *Controller) printURLs(stacks stackSet, requestedInstances []in
 
 // The proxy answers a host that is no app with the list of every route.
 func (controller *Controller) HomeURL() string {
-	return controller.proxyURL(controller.Config.Domain)
+	return controller.proxyURL(controller.Domain)
 }

@@ -20,10 +20,10 @@ func writeConfigFile(t *testing.T, content string) string {
 }
 
 func TestCheckConfigFileFindsAnAppDeclaredInTwoFiles(t *testing.T) {
-	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  shared-name: {run: one}\n")
+	platformFile := writeConfigFile(t, "apps:\n  shared-name: {run: one}\n")
 	portalFile := writeConfigFile(t, "apps:\n  shared-name: {run: two}\n")
 
-	problems := checkConfigFile("platform", []string{"platform", "portal"}, "portal", portalFile, map[string]string{"platform": platformFile})
+	problems := checkConfigFile("platform", []string{"platform", "portal"}, testGlobal.Ports, "portal", portalFile, map[string]string{"platform": platformFile})
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "platform") || !strings.Contains(joined.Error(), "portal") {
@@ -41,7 +41,7 @@ func shopAndWebForCheck(t *testing.T) (shopDir, webDir string) {
 
 func TestCheckWithoutAPathChecksTheFileOfTheCheckoutWithTheFilesOfTheOtherRepos(t *testing.T) {
 	shopDir, webDir := shopAndWebForCheck(t)
-	currentWorkspace, checkout, err := workspace.Find(webDir, t.TempDir(), workspace.NewGit())
+	currentWorkspace, checkout, err := workspace.Find(webDir, t.TempDir(), testGlobal, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestCheckWithoutAPathChecksTheFileOfTheCheckoutWithTheFilesOfTheOtherRepos(
 	if err != nil || checkedFile != filepath.Join(webDir, "ilot.yaml") || len(otherFileByRepo) != 1 || otherFileByRepo["shop"] != filepath.Join(shopDir, "ilot.yaml") {
 		t.Fatalf("configFilesToCheck = %q, %v, %v; want the file of web with the file of shop", checkedFile, otherFileByRepo, err)
 	}
-	if problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, checkout.Repo, checkedFile, otherFileByRepo); len(problems) != 0 {
+	if problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, testGlobal.Ports, checkout.Repo, checkedFile, otherFileByRepo); len(problems) != 0 {
 		t.Errorf("checkConfigFile = %v, want no problem", problems)
 	}
 }
@@ -61,7 +61,7 @@ func TestCheckInAWorktreeWithNoFileChecksTheFileOfTheMainCheckout(t *testing.T) 
 	webWorktreeDir := filepath.Join(filepath.Dir(webDir), "web-retry")
 	runGitInTest(t, webDir, "worktree", "add", "-q", "-b", "retry", webWorktreeDir)
 	runGitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
-	currentWorkspace, checkout, err := workspace.Find(webWorktreeDir, t.TempDir(), workspace.NewGit())
+	currentWorkspace, checkout, err := workspace.Find(webWorktreeDir, t.TempDir(), testGlobal, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestCheckOfARequestedFileKeepsThatFile(t *testing.T) {
 	if err := os.WriteFile(draftFile, []byte("apps: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	currentWorkspace, checkout, err := workspace.Find(shopDir, t.TempDir(), workspace.NewGit())
+	currentWorkspace, checkout, err := workspace.Find(shopDir, t.TempDir(), testGlobal, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,17 +89,17 @@ func TestCheckOfARequestedFileKeepsThatFile(t *testing.T) {
 	if err != nil || checkedFile != draftFile || len(otherFileByRepo) != 1 {
 		t.Fatalf("configFilesToCheck = %q, %v, %v; want the draft with the file of web", checkedFile, otherFileByRepo, err)
 	}
-	problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, checkout.Repo, checkedFile, otherFileByRepo)
+	problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, testGlobal.Ports, checkout.Repo, checkedFile, otherFileByRepo)
 	if joined := errors.Join(problems...); joined == nil || !strings.Contains(joined.Error(), `"api"`) {
 		t.Errorf("checkConfigFile = %v, want the port template of web that lost its app", joined)
 	}
 }
 
 func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
-	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  gateway: {run: gw, ports: [http]}\n")
+	platformFile := writeConfigFile(t, "apps:\n  gateway: {run: gw, ports: [http]}\n")
 	portalFile := writeConfigFile(t, "apps:\n  portal-api: {run: 'api --port={{port \"gateway\" \"htp\"}}'}\n")
 
-	problems := checkConfigFile("platform", []string{"platform", "portal"}, "platform", platformFile, map[string]string{"portal": portalFile})
+	problems := checkConfigFile("platform", []string{"platform", "portal"}, testGlobal.Ports, "platform", platformFile, map[string]string{"portal": portalFile})
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), portalFile) || strings.Contains(joined.Error(), platformFile) {
@@ -108,11 +108,11 @@ func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
 }
 
 func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
-	configFile := writeConfigFile(t, "domain: dev.example.net\napps:\n"+
+	configFile := writeConfigFile(t, "apps:\n"+
 		"  first: {run: one, ports: [http], route: no-such-port}\n"+
 		"  second: {run: 'two --port={{port \"ghost\" \"http\"}}', ports: [http], route: http}\n")
 
-	problems := checkConfigFile("platform", []string{"platform"}, "platform", configFile, nil)
+	problems := checkConfigFile("platform", []string{"platform"}, testGlobal.Ports, "platform", configFile, nil)
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "no-such-port") || !strings.Contains(joined.Error(), "ghost") {

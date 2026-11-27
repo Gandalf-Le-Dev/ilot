@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -38,7 +38,7 @@ func (command *checkCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	problems := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), checkout.Repo, checkedFile, otherFileByRepo)
+	problems := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), currentWorkspace.Global.Ports, checkout.Repo, checkedFile, otherFileByRepo)
 	for _, problem := range problems {
 		fmt.Fprintln(os.Stderr, problem)
 	}
@@ -52,27 +52,27 @@ func (command *checkCommand) Run() error {
 	return nil
 }
 
-func checkConfigFile(workspaceName string, repoNames []string, checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
+func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts config.PortRange, checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
 	fileByRepo := map[string]string{checkedRepo: checkedFile}
 	for repoName, configFile := range otherFileByRepo {
 		if repoName != checkedRepo {
 			fileByRepo[repoName] = configFile
 		}
 	}
-	configByRepo := map[string]appconfig.Config{}
+	configByRepo := map[string]config.Config{}
 	var problems []error
 	for _, repoName := range slices.Sorted(maps.Keys(fileByRepo)) {
-		config, err := appconfig.Parse(fileByRepo[repoName])
+		repoConfig, err := config.Parse(fileByRepo[repoName])
 		if err != nil {
 			problems = append(problems, err)
 			continue
 		}
-		configByRepo[repoName] = config
+		configByRepo[repoName] = repoConfig
 	}
 	if len(problems) > 0 {
 		return problems
 	}
-	merged, err := appconfig.Merge(workspaceName, configByRepo)
+	merged, err := config.Merge(configByRepo, allocatedPorts)
 	if err != nil {
 		mergedFiles := slices.Sorted(maps.Values(fileByRepo))
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
@@ -94,7 +94,7 @@ func configFilesToCheck(currentWorkspace workspace.Workspace, checkout workspace
 	if checkedFile == "" {
 		ownFile, hasFile := workspace.ConfigFileOf(checkout)
 		if !hasFile {
-			return "", nil, fmt.Errorf("the repo %s has no %s in %s", checkout.Repo, appconfig.FileName, checkout.Dir)
+			return "", nil, fmt.Errorf("the repo %s has no %s in %s", checkout.Repo, config.FileName, checkout.Dir)
 		}
 		checkedFile = ownFile
 	}

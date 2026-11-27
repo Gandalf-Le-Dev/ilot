@@ -20,7 +20,7 @@ func TestAProxyThatCannotListenGivesAWarningWithItsError(t *testing.T) {
 
 	warnings := daemonWarnings(status, "v1", "127.0.0.1:4580")
 
-	if len(warnings) != 1 || !strings.Contains(warnings[0], "address already in use") || !strings.Contains(warnings[0], "ILOT_PROXY_LISTEN") {
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "address already in use") || !strings.Contains(warnings[0], "proxy.listen") {
 		t.Errorf("warnings = %q, want the error of the proxy and the way out", warnings)
 	}
 }

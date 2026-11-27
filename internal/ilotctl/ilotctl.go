@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
-	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -22,7 +22,7 @@ import (
 type Controller struct {
 	// The name of the workspace, which is also the name of its root repo.
 	Workspace           string
-	Config              appconfig.Config
+	Config              config.Config
 	Store               state.Store
 	Supervisor          ProcessSupervisor
 	RunBuild            func(ctx context.Context, workingDir, shellCommand string, environ []string) error
@@ -30,12 +30,15 @@ type Controller struct {
 	IsPortFreeOnHost    func(port int) bool
 	IsExternalServiceUp func(port int) bool
 	CheckoutsForStack   func(stackName string) (map[string]workspace.Worktree, error)
-	ConfigForStack      func(stackName string) (appconfig.Config, error)
+	ConfigForStack      func(stackName string) (config.Config, error)
 	ReposNotCloned      map[string]string
-	Personal            personal.Settings
-	ShellEnv            func() (map[string]string, error)
-	Login               string
-	ProxyPort           string
+	// What the global file holds for the workspace: values for every app, and values for one app.
+	Settings  config.WorkspaceSettings
+	Domain    string
+	PortRange ports.Range
+	ShellEnv  func() (map[string]string, error)
+	Login     string
+	ProxyPort string
 	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
 	IlotBinary       string
 	IlotEnv          map[string]string
@@ -43,7 +46,7 @@ type Controller struct {
 	ProgressInterval time.Duration
 	Output           io.Writer
 
-	configByStack map[string]appconfig.Config
+	configByStack map[string]config.Config
 }
 
 type StartOptions struct {
@@ -302,9 +305,14 @@ func (controller *Controller) instancesOf(stackName string, appNames []string) (
 func (controller *Controller) reposNotClonedHint() error {
 	var hints []error
 	for _, repoName := range slices.Sorted(maps.Keys(controller.ReposNotCloned)) {
-		hints = append(hints, fmt.Errorf("repo %s is not at %s: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", repoName, controller.ReposNotCloned[repoName], repoName))
+		hints = append(hints, fmt.Errorf("repo %s is not at %s: clone it, or set %s", repoName, controller.ReposNotCloned[repoName], controller.repoPathKey(repoName)))
 	}
 	return errors.Join(hints...)
+}
+
+// Where the user gives the path of a repo that is cloned at another place.
+func (controller *Controller) repoPathKey(repoName string) string {
+	return fmt.Sprintf("workspaces.%s.repos.%s in ~/%s", controller.Workspace, repoName, config.GlobalFilePath)
 }
 
 func (controller *Controller) stackOf(requestedStackName, appName string) string {

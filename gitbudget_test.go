@@ -50,7 +50,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	git, gitProcessCount := countingGit()
 
-	currentWorkspace, worktree, err := workspace.Find(webWorktreeDir, t.TempDir(), git)
+	currentWorkspace, worktree, err := workspace.Find(webWorktreeDir, t.TempDir(), testGlobal, git)
 	if err != nil {
 		t.Fatal(err)
 	}

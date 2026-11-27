@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 const webFile = "member_of: ../shop\napps:\n  front: {run: front}\n"
@@ -18,9 +20,18 @@ func shopAndWeb(t *testing.T, shopFile, webFile string) (shopDir, webDir string)
 	return shopDir, webDir
 }
 
+func defaultGlobal(t *testing.T) config.Global {
+	t.Helper()
+	global, err := config.LoadGlobal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return global
+}
+
 func find(t *testing.T, dir string) (Workspace, Worktree) {
 	t.Helper()
-	workspace, worktree, err := Find(dir, t.TempDir(), NewGit())
+	workspace, worktree, err := Find(dir, t.TempDir(), defaultGlobal(t), NewGit())
 	if err != nil {
 		t.Fatalf("Find(%s): %v", dir, err)
 	}
@@ -74,7 +85,7 @@ func TestFindFromAWorktreeOfAMemberReadsTheFileOfTheMainCheckout(t *testing.T) {
 func TestAMemberThatTheRootDoesNotListIsAnError(t *testing.T) {
 	shopDir, webDir := shopAndWeb(t, "apps:\n  api: {run: api}\n", webFile)
 
-	_, _, err := Find(webDir, t.TempDir(), NewGit())
+	_, _, err := Find(webDir, t.TempDir(), defaultGlobal(t), NewGit())
 
 	for _, wantPart := range []string{filepath.Join(webDir, "ilot.yaml"), filepath.Join(shopDir, "ilot.yaml"), "member_of: ../shop", "web: ../web"} {
 		if err == nil || !strings.Contains(err.Error(), wantPart) {
@@ -104,7 +115,7 @@ func TestAWrongMemberOfIsAnError(t *testing.T) {
 			newRepoAt(t, filepath.Join(codeDir, "shop"), rootFiles)
 			webDir := newRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: " + testCase.memberOf + "\n"})
 
-			_, _, err := Find(webDir, t.TempDir(), NewGit())
+			_, _, err := Find(webDir, t.TempDir(), defaultGlobal(t), NewGit())
 
 			if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) || !strings.Contains(err.Error(), filepath.Join(webDir, "ilot.yaml")) {
 				t.Errorf("Find = %v, want an error with %q that names the file of the member", err, testCase.wantErrorSubstr)
@@ -127,7 +138,7 @@ func TestARootThatListsARepoWhichDoesNotNameItIsAnError(t *testing.T) {
 			shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\n", testCase.webFile)
 			newRepoAt(t, filepath.Join(filepath.Dir(shopDir), "blog"), map[string]string{"ilot.yaml": "apps: {}\n"})
 
-			_, _, err := Find(shopDir, t.TempDir(), NewGit())
+			_, _, err := Find(shopDir, t.TempDir(), defaultGlobal(t), NewGit())
 
 			for _, wantPart := range []string{testCase.wantErrorSubstr, filepath.Join(shopDir, "ilot.yaml"), filepath.Join(webDir, "ilot.yaml")} {
 				if err == nil || !strings.Contains(err.Error(), wantPart) {
@@ -158,13 +169,13 @@ func TestAMemberWithNoFileDeclaresNoApp(t *testing.T) {
 }
 
 func TestFindOutsideAWorkspaceSaysWhatItLooksFor(t *testing.T) {
-	_, _, err := Find(t.TempDir(), t.TempDir(), NewGit())
+	_, _, err := Find(t.TempDir(), t.TempDir(), defaultGlobal(t), NewGit())
 	if err == nil || !strings.Contains(err.Error(), "not inside a git checkout") || !strings.Contains(err.Error(), "ilot.yaml") {
 		t.Errorf("Find outside a repo = %v, want an error that names the git checkout and ilot.yaml", err)
 	}
 
 	repoDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "platform"), map[string]string{"devbox/ilot.yaml": "apps: {}\n"})
-	_, _, err = Find(repoDir, t.TempDir(), NewGit())
+	_, _, err = Find(repoDir, t.TempDir(), defaultGlobal(t), NewGit())
 	if err == nil || !strings.Contains(err.Error(), "has no ilot.yaml") || !strings.Contains(err.Error(), "devbox/ilot.yaml is the old place") {
 		t.Errorf("Find in a repo with the old layout = %v, want an error that says where the file goes", err)
 	}
@@ -187,7 +198,7 @@ func TestTheNameOfTheWorkspace(t *testing.T) {
 	for _, testCase := range testCases {
 		rootDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), testCase.folder), map[string]string{"ilot.yaml": testCase.rootFile})
 
-		workspace, _, err := Find(rootDir, t.TempDir(), NewGit())
+		workspace, _, err := Find(rootDir, t.TempDir(), defaultGlobal(t), NewGit())
 
 		switch {
 		case testCase.wantErrorSubstr != "":
@@ -200,22 +211,31 @@ func TestTheNameOfTheWorkspace(t *testing.T) {
 	}
 }
 
-func TestThePersonalFileGivesAnotherPathToARepo(t *testing.T) {
+func TestTheGlobalFileGivesAnotherPathToARepo(t *testing.T) {
 	shopDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n"})
 	homeDir := canonicalTempDir(t)
 	webDir := newRepoAt(t, filepath.Join(homeDir, "elsewhere", "web"), map[string]string{"ilot.yaml": "member_of: " + shopDir + "\n"})
-	if err := os.MkdirAll(filepath.Join(homeDir, ".config", "ilot"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(homeDir, PersonalSettingsPath), []byte("repos:\n  web: {path: ~/elsewhere/web}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	global := config.Global{Ports: config.PortRange{First: 20000, Last: 29999}, Workspaces: map[string]config.WorkspaceSettings{
+		"shop":  {Repos: map[string]string{"web": "~/elsewhere/web"}, Env: map[string]string{"LOG_LEVEL": "debug"}},
+		"other": {Repos: map[string]string{"web": "/nowhere"}},
+	}}
 
 	for _, dir := range []string{shopDir, webDir} {
-		workspace, _, err := Find(dir, homeDir, NewGit())
-		if err != nil || workspace.RepoPaths["web"] != webDir {
-			t.Errorf("Find(%s) = %+v, %v; want web at %s", dir, workspace.RepoPaths, err, webDir)
+		workspace, _, err := Find(dir, homeDir, global, NewGit())
+		if err != nil || workspace.RepoPaths["web"] != webDir || workspace.Settings.Env["LOG_LEVEL"] != "debug" {
+			t.Errorf("Find(%s) = %+v, %v; want web at %s and the settings of shop", dir, workspace, err, webDir)
 		}
+	}
+}
+
+func TestAPathInTheGlobalFileForARepoThatTheRootDoesNotListIsAnError(t *testing.T) {
+	shopDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n"})
+	global := config.Global{Workspaces: map[string]config.WorkspaceSettings{"shop": {Repos: map[string]string{"wbe": "~/elsewhere/web"}}}}
+
+	_, _, err := Find(shopDir, t.TempDir(), global, NewGit())
+
+	if err == nil || !strings.Contains(err.Error(), "workspaces.shop.repos.wbe") || !strings.Contains(err.Error(), filepath.Join(shopDir, "ilot.yaml")) {
+		t.Errorf("Find = %v, want an error that names the key and the file of the root", err)
 	}
 }
 
@@ -228,7 +248,7 @@ func TestARepoReachedThroughALinkIsTheSameRepo(t *testing.T) {
 	}
 
 	for _, dir := range []string{shopDir, webDir, filepath.Join(filepath.Dir(shopDir), "shop-link"), filepath.Join(filepath.Dir(shopDir), "web-link")} {
-		workspace, _, err := Find(dir, t.TempDir(), NewGit())
+		workspace, _, err := Find(dir, t.TempDir(), defaultGlobal(t), NewGit())
 		if err != nil || workspace.RootDir != shopDir || workspace.RepoPaths["web"] != webDir {
 			t.Errorf("Find(%s) = %+v, %v; want the root %s and web at %s", dir, workspace, err, shopDir, webDir)
 		}

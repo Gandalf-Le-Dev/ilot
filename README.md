@@ -37,7 +37,7 @@ Each stack reads the `ilot.yaml` files of its own checkouts, so a change in one 
 A checkout with no `ilot.yaml` reads the file of the main checkout. An untracked `ilot.yaml` in the main checkout therefore works in a repo where you cannot commit one.
 Two worktrees of one repo for the same ticket make `ilot` refuse that stack, and the error names both folders.
 
-Each app gets its ports in the range 20000-29999 and keeps them.
+Each app gets its ports in the range 20000-29999 and keeps them. The global file can set another range.
 Its URL, `http://<app>.<stack>.<workspace>.localhost:4580`, therefore stays the same.
 One daemon supervises the apps of every stack. It is the `ilot` binary itself, and `ilot` starts it when a command needs it.
 The same daemon holds the proxy: it listens on `127.0.0.1:4580` and sends each URL to its app.
@@ -170,8 +170,6 @@ Three keys describe the workspace. `ilot` reads them from the main checkout of a
 The link goes both ways. A member that the root does not list is an error, and a listed repo whose file does not name the root is an error. Each message names both files.
 A listed repo with no `ilot.yaml` declares no app. A listed repo that is not cloned is left out.
 
-Only the file of the root sets `domain`.
-`domain` is optional, and its default is `localhost`. With another domain, for example `localtest.me`, every name under it must point to this machine.
 Every repo can declare `env`, `external`, `apps` and `wrap`.
 
 `wrap` is a prefix for every `build`, `run` and `stop` command of the repo of the file.
@@ -187,7 +185,7 @@ The fields of an app:
 | `build` | Command that builds the app. `ilot start` runs it in the checkout before it starts the app. |
 | `env` | Environment variables of the process. |
 | `dir` | Working folder of the process. A relative path is relative to the checkout. The default is the checkout. |
-| `ports` | Names of the ports of the app. `ilot` gives each name a free port in 20000-29999 and keeps it. A container app declares its ports in the `container` block. |
+| `ports` | Names of the ports of the app. `ilot` gives each name a free port of its range and keeps it. A container app declares its ports in the `container` block. |
 | `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. On an app that is not `shared`, they apply to the `master` stack only. |
 | `route` | Port that the proxy URL sends requests to. |
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
@@ -214,7 +212,7 @@ The `build`, `run`, `stop` and `env` values can use these templates:
 | `{{.Stack}}` | The name of the stack. |
 | `{{.Workspace}}` | The name of the workspace. |
 | `{{.User}}` | Your user name on this machine. |
-| `{{.Domain}}` | The domain of the proxy URLs. |
+| `{{.Domain}}` | The domain of the proxy URLs, which the global file sets. |
 | `{{.ProxyPort}}` | The port of the proxy. |
 
 An app never chooses its own port. It reads the port from a flag or a variable that its `run` command gives it.
@@ -262,34 +260,51 @@ A `ready` check with a `command` runs inside the container, with `docker exec`.
 Prefer a `command` or a `path` to a bare port check: Docker accepts a connection on a published port before the server inside listens.
 For a case that the block does not cover, write `run: docker run ...` with a `stop` command.
 
-## Personal settings
+## The global file
 
-Settings that differ from person to person go in `~/.config/ilot/env.yaml`, outside every repo.
-Make it readable only by you (`chmod 600`), because it can hold tokens.
+The values of the machine, and the values that must stay out of a repo, go in `~/.config/ilot/config.yaml`.
+The file is optional, and so is each of its keys. This example shows the defaults of `proxy`, `ports` and `shell_env`.
+Make the file readable only by you (`chmod 600`) when it holds tokens.
 
 ```yaml
-env:                      # every app of every repo
-  LOG_LEVEL: debug
-apps:                     # one app only
-  front:
-    API_TOKEN: <token>
-repos:
-  web: {path: ~/elsewhere/web}   # a member repo that is cloned at another path
+proxy:
+  listen: 127.0.0.1:4580      # the address of the proxy: change it when another program has the port
+  domain: localhost           # the end of every URL
+ports:
+  first: 20000                # the range that ilot gives ports from
+  last: 29999
+shell_env:
+  args: [-l]                  # the flags of the shell that gives the base environment
+workspaces:
+  shop:                       # the name of a workspace
+    repos:
+      web: ~/elsewhere/web    # a member repo that is cloned at another path
+    env:
+      LOG_LEVEL: debug        # every app of the workspace
+    apps:
+      front:
+        API_TOKEN: <token>    # one app only
 ```
 
-The `ilot.yaml` of that clone still names the root with `member_of`.
+- With another `domain`, for example `localtest.me`, every name under it must point to this machine.
+- A fixed port of an `ilot.yaml` must be outside the `ports` range.
+- A path under `repos` replaces the path that the root repo declares. The `ilot.yaml` of that clone still names the root with `member_of`.
+- After a change of `proxy`, run `ilot restart` with no app, which starts a new daemon.
+
+An older `ilot` read a personal file, `~/.config/ilot/env.yaml`. `ilot` now stops with an error while that file exists: move its content under `workspaces.<name>` of the global file, then delete it.
 
 `ilot` builds the environment of an app in this order, and the last value wins:
 
-1. The shell files. `ilot` runs your shell, `$SHELL`, as a login shell (`$SHELL -l`), and takes its whole environment. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
-2. The `ilot.yaml` of the repo: its top-level `env`, then the `env` of the app.
-3. Your personal file: its `env`, then its entry under `apps`.
-4. The values that `ilot.yaml` writes with a template. Your personal file cannot replace them.
+1. The shell. `ilot` runs your shell, `$SHELL`, with the flags of `shell_env.args`, and takes its whole environment. The default, `-l`, makes a login shell. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
+2. The top-level `env` of the `ilot.yaml` of the root repo, for the apps of every repo.
+3. The top-level `env` of the `ilot.yaml` of the repo of the app, then the `env` of the app.
+4. The global file: the `env` of the workspace, then its entry under `apps`.
+5. The values that an `ilot.yaml` writes with a template. The global file cannot replace them.
 
 A login shell reads the profile files, for example `~/.zprofile` or `~/.profile`. It does not read the files of an interactive shell, for example `~/.zshrc`.
-If a tool is on your `PATH` in a terminal and an app does not find it, look at the `PATH` that `ilot env <app>` prints, and move the line that adds the tool to a profile file.
+If a tool is on your `PATH` in a terminal and an app does not find it, look at the `PATH` that `ilot env <app>` prints. Then move the line that adds the tool to a profile file, or give the shell another flag with `shell_env.args`, for example `[-l, -i]`.
 
-A container app does not get the top-level `env` of your personal file, so a third-party image does not get your tokens. It gets its entry under `apps`.
+A container app does not get the `env` of the workspace in the global file, so a third-party image does not get your tokens. It gets its entry under `apps`.
 An app gets its whole environment from `ilot` when it starts, and nothing from the daemon. To give a running app fresh values, run `ilot start <app>` again.
 
 ## For AI agents
@@ -305,13 +320,13 @@ When you add a command, add it to the skill too: a test fails otherwise.
 
 | Path | Content |
 |---|---|
-| `~/.config/ilot/env.yaml` | Your personal settings. |
+| `~/.config/ilot/config.yaml` | The global file. |
 | `~/.local/state/ilot/stacks/<stack>/` | The state of a stack, its binaries in `bin/` and its logs in `logs/<app>.log`. |
 | `~/.local/state/ilot/daemon.lock`, `daemon.sock`, `daemon.log`, `processes.json` | The lock, the socket and the log of the daemon, and the record of the processes that it runs. If the path of the socket is longer than 100 bytes, the socket is in `/tmp/ilot-<user ID>/`. |
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 If another program has port 4580, each command prints a warning, the apps run, and their URLs do not answer.
-Set `ILOT_PROXY_LISTEN` to another address, for example `127.0.0.1:4581`, in the environment of every `ilot` command, then run `ilot restart`.
+Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot restart`.
 After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot restart` to replace it.
 After you delete the worktrees of a ticket, run `ilot clean` to give back its ports.
 
@@ -324,4 +339,4 @@ go test -tags e2e ./...
 ```
 
 The `e2e` tag adds the end-to-end test. It builds `ilot`, makes a home folder under `/tmp` with the workspace of `testdata/e2e`, and runs the real commands: a start in the main checkout and in a worktree, requests through the proxy, a kill of the daemon, and a restore.
-It needs git and the Go toolchain, and it uses its own state folder and its own proxy port.
+It needs git and the Go toolchain. Its home folder has its own state folder and its own global file, which gives the proxy a free port.

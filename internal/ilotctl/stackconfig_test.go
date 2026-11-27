@@ -7,32 +7,32 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
-func configWithApps(base appconfig.Config, extraApps map[string]appconfig.App) appconfig.Config {
+func configWithApps(base config.Config, extraApps map[string]config.App) config.Config {
 	config := base
 	config.Apps = maps.Clone(base.Apps)
 	maps.Copy(config.Apps, extraApps)
 	return config
 }
 
-var ticketOnlyApps = map[string]appconfig.App{
+var ticketOnlyApps = map[string]config.App{
 	"ticket-search": {
 		Route:     "http",
-		Container: appconfig.Container{Image: "registry/ticket-search:latest", Ports: map[string]int{"http": 16271}},
+		Container: config.Container{Image: "registry/ticket-search:latest", Ports: map[string]int{"http": 16271}},
 	},
 	"ticket-iam": {
 		Shared:     true,
 		FixedPorts: map[string]int{"http": 8080},
 		Route:      "http",
-		Container:  appconfig.Container{Image: "registry/iam:latest", Ports: map[string]int{"http": 8080}},
+		Container:  config.Container{Image: "registry/iam:latest", Ports: map[string]int{"http": 8080}},
 	},
 }
 
-func useConfigPerStack(environment testEnvironment, configByStack map[string]appconfig.Config) {
-	environment.controller.ConfigForStack = func(stackName string) (appconfig.Config, error) {
+func useConfigPerStack(environment testEnvironment, configByStack map[string]config.Config) {
+	environment.controller.ConfigForStack = func(stackName string) (config.Config, error) {
 		if config, isKnown := configByStack[stackName]; isKnown {
 			return config, nil
 		}
@@ -44,7 +44,7 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	environment := newTestEnvironment(t)
 	masterConfig := testConfig()
 	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	useConfigPerStack(environment, map[string]appconfig.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig})
+	useConfigPerStack(environment, map[string]config.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig})
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search", "ticket-iam")
 	searchSpecBefore := environment.supervisor.runningSpecs["ticket-search.proj-1234"]
@@ -68,7 +68,7 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 	environment := newTestEnvironment(t)
 	masterConfig := testConfig()
 	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	configByStack := map[string]appconfig.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig}
+	configByStack := map[string]config.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig}
 	useConfigPerStack(environment, configByStack)
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search")
@@ -88,9 +88,9 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.controller.ConfigForStack = func(stackName string) (appconfig.Config, error) {
+	environment.controller.ConfigForStack = func(stackName string) (config.Config, error) {
 		if stackName == "proj-1234" {
-			return appconfig.Config{}, errors.New("parse ilot.yaml: bad indentation")
+			return config.Config{}, errors.New("parse ilot.yaml: bad indentation")
 		}
 		return testConfig(), nil
 	}
@@ -105,9 +105,9 @@ func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 func TestListKeepsGoingWhenTheConfigOfAStackCannotBeRead(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.controller.ConfigForStack = func(stackName string) (appconfig.Config, error) {
+	environment.controller.ConfigForStack = func(stackName string) (config.Config, error) {
 		if stackName == "proj-1234" {
-			return appconfig.Config{}, errors.New("repo platform has several worktrees for stack proj-1234")
+			return config.Config{}, errors.New("repo platform has several worktrees for stack proj-1234")
 		}
 		return testConfig(), nil
 	}

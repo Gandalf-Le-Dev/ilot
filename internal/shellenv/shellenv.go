@@ -34,9 +34,10 @@ type Shell struct {
 	Args []string
 }
 
-// Login is the shell of the user, as a login shell. A login shell reads the profile files, and not the files of an interactive shell.
-func Login() Shell {
-	return Shell{Program: cmp.Or(os.Getenv("SHELL"), fallbackShell), Args: []string{"-l"}}
+// OfUser is the shell of the user, with the flags of the global file. The default flag, -l, makes a login shell,
+// which reads the profile files, and not the files of an interactive shell.
+func OfUser(args []string) Shell {
+	return Shell{Program: cmp.Or(os.Getenv("SHELL"), fallbackShell), Args: args}
 }
 
 // Environment starts the shell with a few seed variables, so that a value exported in the terminal of the caller never reaches an app.
