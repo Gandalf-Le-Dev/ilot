@@ -270,6 +270,7 @@ func (executor *Executor) startMembers(ctx context.Context, stackName string, is
 	var processByName map[string]daemon.Process
 	var start plan.Start
 	var problems []error
+	var warnings []string
 	err = executor.underLock(ctx, func() (err error) {
 		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
 			return err
@@ -282,14 +283,17 @@ func (executor *Executor) startMembers(ctx context.Context, stackName string, is
 		if isOnlyThisStack {
 			onlyStack = stackName
 		}
-		start, problems, err = executor.planMembers(snapshot, onlyStack, processByName)
+		start, problems, warnings, err = executor.planMembers(snapshot, onlyStack, processByName)
 		return err
 	})
 	if err != nil {
 		return err
 	}
+	for _, warning := range warnings {
+		fmt.Fprintln(executor.Output, "warning: "+warning)
+	}
 	if len(start.Order) == 0 && len(problems) == 0 {
-		if isOnlyThisStack {
+		if isOnlyThisStack && len(warnings) == 0 {
 			fmt.Fprintf(executor.Output, "the stack %s owns no app: name the apps to start\n", stackName)
 		}
 		return executor.sendRoutes(ctx)
@@ -308,8 +312,9 @@ func (executor *Executor) startMembers(ctx context.Context, stackName string, is
 
 // planMembers plans the start of every member of one stack, or of every stack when onlyStack is empty.
 // It reads the file of each stack. A stack whose file is broken stays down, and so does an instance whose templates do not render, with its dependents. The others start.
-func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, processByName map[string]daemon.Process) (plan.Start, []error, error) {
+func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, processByName map[string]daemon.Process) (plan.Start, []error, []string, error) {
 	var problems []error
+	var warnings []string
 	var loadedInstances []plan.Instance
 	for _, wantedInstance := range snapshot.Wanted() {
 		if onlyStack != "" && wantedInstance.Stack != onlyStack {
@@ -325,24 +330,24 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 	var memberInstances []plan.Instance
 	for _, loadedInstance := range loadedInstances {
 		if _, isDeclared := snapshot.Declaration(loadedInstance); !isDeclared {
-			problems = append(problems, fmt.Errorf("%s does not start: no ilot.yaml declares it any more. Give back its ports with ilot stop %s in stack %s", snapshot.ProcessName(loadedInstance), loadedInstance.App, loadedInstance.Stack))
+			warnings = append(warnings, fmt.Sprintf("%s does not start: no ilot.yaml declares it any more. Give back its ports with ilot stop %s in stack %s", snapshot.ProcessName(loadedInstance), loadedInstance.App, loadedInstance.Stack))
 			continue
 		}
 		memberInstances = append(memberInstances, loadedInstance)
 	}
 	if len(memberInstances) == 0 {
-		return plan.Start{}, problems, nil
+		return plan.Start{}, problems, warnings, nil
 	}
 	start, err := executor.planWithPorts(snapshot, memberInstances, StartOptions{SkipDependencies: false}, processByName)
 	if err != nil {
-		return plan.Start{}, nil, err
+		return plan.Start{}, nil, nil, err
 	}
 	if err := executor.saveStart(start); err != nil {
-		return plan.Start{}, nil, err
+		return plan.Start{}, nil, nil, err
 	}
 	var renderProblems []error
 	start.Order, renderProblems = executor.withoutUnrenderable(start.After, start.Order)
-	return start, append(problems, renderProblems...), nil
+	return start, append(problems, renderProblems...), warnings, nil
 }
 
 // withoutUnrenderable leaves out each instance whose specification or build does not render, and each instance that depends on one.
