@@ -113,7 +113,12 @@ func TestTheDataCommandsPrintOnlyDataOnStdoutWhenAWarningIsPresent(t *testing.T)
 		if key, _, isPair := strings.Cut(line, "="); !isPair || strings.Contains(key, " ") || strings.HasPrefix(line, "warning") {
 			t.Errorf("ilot env api printed %q, which is not a variable", line)
 		}
-		beforeSource := line[:strings.LastIndex(line, "(")]
+		sourceStart := strings.LastIndex(line, "(")
+		if sourceStart < 0 {
+			t.Errorf("ilot env api printed %q, which names no source", line)
+			continue
+		}
+		beforeSource := line[:sourceStart]
 		source := strings.TrimSpace(line[len(beforeSource):])
 		gap := len(beforeSource) - len(strings.TrimRight(beforeSource, " "))
 		valueMayEndWithSpaces := source == "(shell)" || source == "(session)"

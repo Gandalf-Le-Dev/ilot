@@ -260,3 +260,23 @@ func TestStartAllStartsAStackWhenOnlyOneOfItsWorktreesIsDeleted(t *testing.T) {
 		t.Errorf("output %q, want no skip line", environment.output.String())
 	}
 }
+
+func TestARestartOrAStartWithNoAppInAStackWhoseWorktreesAreAllDeletedIsRefused(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.supervisor.startedInOrder = nil
+	environment.executor.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
+		return map[string]workspace.Worktree{"shop": {Repo: "shop", Dir: "/src/shop", Branch: "base", IsMain: true}}, nil
+	}
+	want := "task-1234 has no worktree of its own. ilot clean removes it, or binds it again if its worktree moved"
+
+	if err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"publicapi"}); err == nil || err.Error() != want {
+		t.Errorf("RestartApps = %v, want %q", err, want)
+	}
+	if err := environment.executor.StartStack(t.Context(), environment.featureStack); err == nil || err.Error() != want {
+		t.Errorf("StartStack = %v, want %q", err, want)
+	}
+	if len(environment.supervisor.startedInOrder) != 0 {
+		t.Errorf("started %v, want nothing from the main checkout", environment.supervisor.startedInOrder)
+	}
+}

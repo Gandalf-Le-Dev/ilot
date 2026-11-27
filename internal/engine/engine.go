@@ -216,6 +216,9 @@ func (executor *Executor) replaceChangedDependents(ctx context.Context, before, 
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
 func (executor *Executor) RestartApps(ctx context.Context, stackName string, appNames []string) error {
+	if executor.hasOnlyDeletedWorktrees(stackName) {
+		return fmt.Errorf("%s has no worktree of its own. %s", stackName, deletedWorktreesAdvice)
+	}
 	machine, err := executor.machineWithShell()
 	if err != nil {
 		return err
@@ -277,6 +280,9 @@ func (executor *Executor) StartAll(ctx context.Context) error {
 
 // StartStack is StartAll for the members of one stack, and the dependencies that they need from base.
 func (executor *Executor) StartStack(ctx context.Context, stackName string) error {
+	if executor.hasOnlyDeletedWorktrees(stackName) {
+		return fmt.Errorf("%s has no worktree of its own. %s", stackName, deletedWorktreesAdvice)
+	}
 	return executor.startMembers(ctx, stackName, true)
 }
 
