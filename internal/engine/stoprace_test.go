@@ -175,3 +175,17 @@ func TestAStopOfADependencyWhileAStartWaitsSkipsItsDependents(t *testing.T) {
 		t.Error("internalapi.base.shop runs without its dependency")
 	}
 }
+
+func TestStopSaysWhichAppsItStopped(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	environment.output.Reset()
+
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(environment.output.String(), "stopped standalone.base.shop") {
+		t.Errorf("output %q, want the line that says standalone stopped", environment.output.String())
+	}
+}

@@ -35,8 +35,14 @@ func TestRmWithTheWorkspaceFlagWorksFromAnyFolder(t *testing.T) {
 	}
 	fromAnotherFolder(t)
 
-	if err := (&rmCommand{Stack: "retry-jobs", Selection: workspaceSelection{Workspace: "shop"}}).Run(t.Context()); err != nil {
+	_, stderr, err := captureOutput(t, func() error {
+		return (&rmCommand{Stack: "retry-jobs", Selection: workspaceSelection{Workspace: "shop"}}).Run(t.Context())
+	})
+	if err != nil {
 		t.Fatalf("ilot rm --workspace shop retry-jobs: %v", err)
+	}
+	if !strings.Contains(stderr, "removed stack retry-jobs") {
+		t.Errorf("stderr = %q, want the line that says the stack is removed", stderr)
 	}
 
 	if _, isKept := stateOfTheTest(t).Stacks("shop")["retry-jobs"]; isKept {
