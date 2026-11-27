@@ -24,6 +24,7 @@ apps:
     shared: true
     dir: /home/user/legacy/restapi
     run: perl main.pl prefork
+    stop: perl main.pl stop
     ports: [http]
     fixed_ports: {http: 10003}
     route: http
@@ -68,6 +69,9 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 		t.Errorf("temporal = %+v", temporal)
 	}
 	restapi := config.Apps["restapi"]
+	if restapi.Stop != "perl main.pl stop" {
+		t.Errorf("restapi stop = %q", restapi.Stop)
+	}
 	if restapi.Dir != "/home/user/legacy/restapi" || len(restapi.Watch.Paths) != 2 || restapi.Watch.Exts[1] != "pm" {
 		t.Errorf("restapi = %+v", restapi)
 	}
@@ -139,6 +143,11 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 			name:            "shared app with a port that is not fixed",
 			config:          Config{Apps: map[string]App{"temporal": {Run: "temporal", Shared: true, Ports: []string{"grpc", "ui"}, FixedPorts: map[string]int{"grpc": 7233}}}},
 			wantErrorSubstr: `shared app "temporal" needs a fixed number for port "ui"`,
+		},
+		{
+			name:            "stop command on a container app",
+			config:          Config{Apps: map[string]App{"db": {Stop: "docker stop db", Container: Container{Image: "postgres:17"}}}},
+			wantErrorSubstr: `app "db": stop is for an app with a run command`,
 		},
 		{
 			name:            "home path without a route",

@@ -159,6 +159,7 @@ The fields of an app:
 | Field | Meaning |
 |---|---|
 | `run` | Command that starts the app. Required, except for a container. |
+| `stop` | Command that stops the app. Without it, `ilot` sends SIGTERM. Use it when the `run` command starts something that a signal does not stop, for example `run: docker run --name db-{{.Stack}} ...` with `stop: docker stop db-{{.Stack}}`. Not for an app with a `container` block. |
 | `build` | Command that builds the app. `ilot start` runs it in the checkout before it starts the app. |
 | `env` | Environment variables of the process. |
 | `dir` | Working folder of the process. A relative path is relative to the checkout. The default is the checkout. |
@@ -174,7 +175,7 @@ The fields of an app:
 | `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. An app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
 
-The `build`, `run` and `env` values can use these templates:
+The `build`, `run`, `stop` and `env` values can use these templates:
 
 | Template | Value |
 |---|---|

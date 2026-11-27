@@ -52,10 +52,7 @@ func (controller *Controller) containerCommand(stacks stackSet, appInstance inst
 }
 
 // docker run only forwards SIGTERM, and Postgres answers it by waiting for its clients: docker stop kills after 10 s.
-func (controller *Controller) shutdownCommand(appInstance instance) string {
-	if !controller.isContainer(appInstance) {
-		return ""
-	}
+func containerStopCommand(appInstance instance) string {
 	return "docker stop --time 10 " + processcompose.ShellQuote(containerName(appInstance))
 }
 
