@@ -67,3 +67,33 @@ func (workspace Workspace) StackOf(worktree Worktree) (stackName string, isBound
 	stackName, err = workspace.DefaultStackName(worktree)
 	return stackName, false, err
 }
+
+// MovedWorktrees gives, for each repo whose worktree in the stack is deleted, the one unbound worktree whose branch
+// gives the name of the stack. The state keeps the folder of a binding, and git worktree move changes that folder.
+func (workspace Workspace) MovedWorktrees(stackName string) (map[string]Worktree, error) {
+	movedByRepo := map[string]Worktree{}
+	for _, repoName := range slices.Sorted(maps.Keys(workspace.Bindings[stackName])) {
+		repoPath, isDeclared := workspace.RepoPaths[repoName]
+		if !isDeclared || isDeleted(repoPath) || !isDeleted(workspace.Bindings[stackName][repoName]) {
+			continue
+		}
+		worktrees, err := workspace.git.Worktrees(repoName, repoPath)
+		if err != nil {
+			return nil, err
+		}
+		var candidates []Worktree
+		for _, linkedWorktree := range worktrees[1:] {
+			if _, isBound := workspace.Bindings.StackOf(linkedWorktree); isBound {
+				continue
+			}
+			defaultName, err := workspace.DefaultStackName(linkedWorktree)
+			if err == nil && defaultName == stackName {
+				candidates = append(candidates, linkedWorktree)
+			}
+		}
+		if len(candidates) == 1 {
+			movedByRepo[repoName] = candidates[0]
+		}
+	}
+	return movedByRepo, nil
+}

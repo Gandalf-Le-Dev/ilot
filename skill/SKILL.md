@@ -51,7 +51,7 @@ ilot env api                    # the environment of the app, with where each va
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
 ilot rm retry-jobs              # stop a stack and delete its state, its logs and its routes (ask first)
-ilot clean                      # ilot rm on every stack whose bound worktrees are all deleted (ask first)
+ilot clean                      # ilot rm on every stack whose bound worktrees are all deleted (ask first); a moved worktree keeps its stack
 ilot stack show                 # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs      # put this worktree in the stack retry-jobs (ask first)
 ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
