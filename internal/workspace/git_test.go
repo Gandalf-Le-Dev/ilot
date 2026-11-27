@@ -41,8 +41,8 @@ func TestGitKeepsAFailureToo(t *testing.T) {
 	notARepo := canonicalTempDir(t)
 
 	for range 2 {
-		if _, err := git.Locate(notARepo); err == nil {
-			t.Fatal("Locate outside a repo gave no error")
+		if _, err := git.Locate(notARepo); err == nil || !strings.Contains(err.Error(), "not a git repository") {
+			t.Fatalf("Locate outside a repo = %v, want the error that git prints", err)
 		}
 	}
 
