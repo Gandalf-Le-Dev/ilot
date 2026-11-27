@@ -354,7 +354,6 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		ConfigForStack:      currentWorkspace.configForStack,
 		UsesMise:            hasMiseConfig,
 		ReposNotCloned:      currentWorkspace.reposNotCloned(),
-		HostPath:            hostPathFor(currentWorkspace.homeDir, os.Getenv("LC_DEVBOX_LOGIN")),
 		Personal:            currentWorkspace.settings,
 		KeyringFile:         filepath.Join(currentWorkspace.homeDir, ".keyring"),
 		ShellEnv:            shellEnv,

@@ -43,7 +43,6 @@ type Controller struct {
 	ConfigForStack      func(stackName string) (appconfig.Config, error)
 	UsesMise            func(checkoutDir string) bool
 	ReposNotCloned      map[string]string
-	HostPath            func(devboxPath string) string
 	Personal            personal.Settings
 	KeyringFile         string
 	ShellEnv            func() (map[string]string, error)

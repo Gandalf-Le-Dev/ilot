@@ -34,7 +34,7 @@ func (controller *Controller) containerCommand(stacks stackSet, appInstance inst
 		if err != nil {
 			return "", err
 		}
-		commandParts = append(commandParts, "-v "+processcompose.ShellQuote(controller.HostPath(source)+":"+containerPath))
+		commandParts = append(commandParts, "-v "+processcompose.ShellQuote(source+":"+containerPath))
 	}
 	for _, alias := range slices.Sorted(maps.Keys(container.Links)) {
 		linkedInstance := instance{stackName: appInstance.stackName, appName: container.Links[alias]}

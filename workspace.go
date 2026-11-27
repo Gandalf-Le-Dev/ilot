@@ -97,19 +97,6 @@ func expandHome(path, homeDir string) string {
 	return path
 }
 
-// The Docker daemon runs on the devhost, where devbox's home is ~/devbox: a bind mount must name the host path.
-func hostPathFor(devboxHomeDir, login string) func(devboxPath string) string {
-	return func(devboxPath string) string {
-		if devboxPath == devboxHomeDir {
-			return filepath.Join("/home", login, "devbox")
-		}
-		if rest, isUnderHome := strings.CutPrefix(devboxPath, devboxHomeDir+"/"); isUnderHome {
-			return filepath.Join("/home", login, "devbox", rest)
-		}
-		return devboxPath
-	}
-}
-
 func hasMiseConfig(checkoutDir string) bool {
 	_, err := os.Stat(filepath.Join(checkoutDir, "mise.toml"))
 	return err == nil
