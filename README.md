@@ -43,7 +43,6 @@ A URL of an app that does not run answers with the command that starts the app. 
 - macOS or Linux, and Go 1.26 to build `ilot`.
 - git.
 - Docker, for container apps only. A mount of a container app names a path on this machine.
-- mise, only for repos with a `mise.toml` at the root.
 
 ## Install
 
@@ -82,6 +81,7 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
 3. Write `ilot.yaml` at the root of the web repo:
 
    ```yaml
+   wrap: mise exec --
    apps:
      front:
        build: npm ci
@@ -151,7 +151,11 @@ The root file is `devbox/ilot.yaml` in the main checkout of the platform repo.
 Only this file sets `repos` and `domain`.
 `domain` is optional, and its default is `localhost`. With another domain, for example `localtest.me`, every name under it must point to this machine.
 Each entry of `repos` gives the default path of a repo and, for a repo with apps, the name of its file.
-Every repo can declare `env`, `external` and `apps`.
+Every repo can declare `env`, `external`, `apps` and `wrap`.
+
+`wrap` is a prefix for every `build`, `run` and `stop` command of the repo of the file.
+Use it when a tool manager gives the repo its tools, for example `wrap: mise exec --` or `wrap: nix develop -c`.
+`ilot` then runs `<wrap> sh -c '<command>'`. `ilot` no longer looks for a `mise.toml` by itself.
 
 The fields of an app:
 

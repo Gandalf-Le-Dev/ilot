@@ -327,7 +327,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsPortFreeOnHost:    func(int) bool { return true },
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
-		UsesMise:            func(string) bool { return false },
 		BackendHost:         "devbox",
 		ReadyTimeout:        time.Second,
 		ProgressInterval:    0,

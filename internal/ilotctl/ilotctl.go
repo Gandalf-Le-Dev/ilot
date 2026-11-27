@@ -30,7 +30,6 @@ type Controller struct {
 	IsExternalServiceUp func(port int) bool
 	CheckoutsForStack   func(stackName string) (map[string]checkouts.Checkout, error)
 	ConfigForStack      func(stackName string) (appconfig.Config, error)
-	UsesMise            func(checkoutDir string) bool
 	ReposNotCloned      map[string]string
 	Personal            personal.Settings
 	ShellEnv            func() (map[string]string, error)

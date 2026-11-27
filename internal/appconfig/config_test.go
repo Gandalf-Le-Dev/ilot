@@ -301,3 +301,26 @@ func TestMergeGivesTheLocalhostDomainWhenNoFileSetsOne(t *testing.T) {
 		t.Errorf("Domain = %q, want localhost, which needs no DNS", merged.Domain)
 	}
 }
+
+func TestMergeKeepsTheWrapOfEachRepo(t *testing.T) {
+	merged, err := Merge(map[string]Config{
+		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
+		"portal":   {Wrap: "mise exec --", Apps: map[string]App{"front": {Run: "npm run dev"}}},
+	})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if len(merged.RepoWrap) != 1 || merged.RepoWrap["portal"] != "mise exec --" {
+		t.Errorf("RepoWrap = %v, want the prefix of portal only", merged.RepoWrap)
+	}
+}
+
+func TestParseReadsTheWrapOfARepo(t *testing.T) {
+	config, err := Parse(writeConfigFile(t, "wrap: mise exec --\napps:\n  front:\n    run: npm run dev\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if config.Wrap != "mise exec --" {
+		t.Errorf("Wrap = %q", config.Wrap)
+	}
+}

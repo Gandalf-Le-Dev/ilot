@@ -97,11 +97,6 @@ func expandHome(path, homeDir string) string {
 	return path
 }
 
-func hasMiseConfig(checkoutDir string) bool {
-	_, err := os.Stat(filepath.Join(checkoutDir, "mise.toml"))
-	return err == nil
-}
-
 func (currentWorkspace workspace) reposNotCloned() map[string]string {
 	pathByRepo := map[string]string{}
 	for repoName, repoPath := range currentWorkspace.repoPaths {

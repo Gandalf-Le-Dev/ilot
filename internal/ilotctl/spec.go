@@ -84,11 +84,7 @@ func (controller *Controller) processCommand(stacks stackSet, appInstance instan
 	if err != nil {
 		return "", err
 	}
-	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
-	if err != nil {
-		return "", err
-	}
-	return controller.withRepoTools(checkoutDir, command), nil
+	return controller.wrapped(appInstance, command), nil
 }
 
 func (controller *Controller) shutdownCommand(stacks stackSet, appInstance instance) (string, error) {
@@ -103,18 +99,18 @@ func (controller *Controller) shutdownCommand(stacks stackSet, appInstance insta
 	if err != nil {
 		return "", err
 	}
-	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
-	if err != nil {
-		return "", err
-	}
-	return controller.withRepoTools(checkoutDir, command), nil
+	return controller.wrapped(appInstance, command), nil
 }
 
-func (controller *Controller) withRepoTools(checkoutDir, shellCommand string) string {
-	if !controller.UsesMise(checkoutDir) {
+// The wrap of a repo, for example "mise exec --", gives its commands the tools of the repo.
+// The command goes to a shell as one word, because it can hold pipes and variables.
+func (controller *Controller) wrapped(appInstance instance, shellCommand string) string {
+	config, _ := controller.declaringConfig(appInstance)
+	wrap := config.RepoWrap[cmp.Or(controller.app(appInstance).Repo, appconfig.DefaultRepo)]
+	if wrap == "" {
 		return shellCommand
 	}
-	return "mise exec -- bash -c " + shellQuote(shellCommand)
+	return wrap + " sh -c " + shellQuote(shellCommand)
 }
 
 func (controller *Controller) workingDir(stacks stackSet, appInstance instance) (string, error) {
@@ -182,7 +178,7 @@ func (controller *Controller) watcherCommand(stacks stackSet, watchedInstance in
 		return "", err
 	}
 	lockFile := filepath.Join(controller.Store.StackDir(watchedInstance.stackName), "build.lock")
-	build := "cd " + shellQuote(checkoutDir) + " && " + controller.withRepoTools(checkoutDir, buildCommand)
+	build := "cd " + shellQuote(checkoutDir) + " && " + controller.wrapped(watchedInstance, buildCommand)
 	return "flock " + shellQuote(lockFile) + " bash -c " + shellQuote(build) + " && " + restart, nil
 }
 

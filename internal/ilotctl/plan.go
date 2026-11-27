@@ -143,7 +143,7 @@ func (controller *Controller) buildApps(ctx context.Context, stacks stackSet, st
 		if err != nil {
 			return err
 		}
-		build := buildInWorktree{workingDir: workingDir, command: controller.withRepoTools(workingDir, buildCommand)}
+		build := buildInWorktree{workingDir: workingDir, command: controller.wrapped(appInstance, buildCommand)}
 		if isBuilt[build] {
 			continue
 		}
