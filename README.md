@@ -247,7 +247,7 @@ Every repo can declare `env`, `external`, `apps` and `wrap`.
 
 `wrap` is a prefix for every `build`, `run` and `stop` command of the repo of the file.
 Use it when a tool manager gives the repo its tools, for example `wrap: mise exec --` or `wrap: nix develop -c`.
-`ilot` then runs `<wrap> sh -c '<command>'`. `ilot` no longer looks for a `mise.toml` by itself.
+`ilot` then runs `<wrap> sh -c '<command>'`.
 
 The fields of an app:
 
@@ -264,7 +264,7 @@ The fields of an app:
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
 | `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. The command can use templates, and it runs behind the `wrap` of its repo. |
 | `depends_on` | Apps and external services that the app needs at startup. |
-| `scope` | `base` or `stack`: which stack serves the app to the apps that depend on it. See "How it works". The old keys `shared: true` and `per_stack: true` are now `scope: base` and `scope: stack`. |
+| `scope` | `base` or `stack`: which stack serves the app to the apps that depend on it. See "How it works". |
 | `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. It needs `watchexec` on the `PATH` of the app. A watcher process runs `ilot restart <app>` at each change, so an app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
 
