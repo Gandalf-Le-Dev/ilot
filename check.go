@@ -42,7 +42,10 @@ func (command *checkCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	problems := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), currentWorkspace.Global.Ports, checkout.Repo, checkedFile, otherFileByRepo)
+	problems, warnings := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), currentWorkspace.Global.Ports, checkout.Repo, checkedFile, otherFileByRepo)
+	for _, warning := range warnings {
+		fmt.Fprintln(os.Stderr, "warning: "+warning)
+	}
 	for _, problem := range problems {
 		fmt.Fprintln(os.Stderr, problem)
 	}
@@ -56,7 +59,7 @@ func (command *checkCommand) Run() error {
 	return nil
 }
 
-func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts config.PortRange, checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
+func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts config.PortRange, checkedRepo, checkedFile string, otherFileByRepo map[string]string) (problems []error, warnings []string) {
 	fileByRepo := map[string]string{checkedRepo: checkedFile}
 	for repoName, configFile := range otherFileByRepo {
 		if repoName != checkedRepo {
@@ -64,7 +67,6 @@ func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts co
 		}
 	}
 	configByRepo := map[string]config.Config{}
-	var problems []error
 	for _, repoName := range slices.Sorted(maps.Keys(fileByRepo)) {
 		repoConfig, err := config.Parse(fileByRepo[repoName])
 		if err != nil {
@@ -74,7 +76,7 @@ func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts co
 		configByRepo[repoName] = repoConfig
 	}
 	if len(problems) > 0 {
-		return problems
+		return problems, nil
 	}
 	merged, err := config.Merge(configByRepo, allocatedPorts)
 	if err != nil {
@@ -82,13 +84,12 @@ func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts co
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
 	}
 	for _, problem := range plan.CheckRendering(workspaceName, repoNames, merged) {
-		var renderProblem plan.RenderProblem
-		if errors.As(problem, &renderProblem) {
+		if renderProblem, isRenderProblem := errors.AsType[plan.RenderProblem](problem); isRenderProblem {
 			problem = fmt.Errorf("%s: %w", fileByRepo[renderProblem.Repo], problem)
 		}
 		problems = append(problems, problem)
 	}
-	return problems
+	return problems, plan.CheckWarnings(workspaceName, merged)
 }
 
 // configFilesToCheck gives the file to check and the files that the stack of its checkout merges it with.

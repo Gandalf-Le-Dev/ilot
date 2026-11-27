@@ -203,7 +203,7 @@ The fields of an app:
 | `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. They apply to the `base` stack only. In another stack, `ilot` gives the port a number of its range. |
 | `route` | Port that the proxy URL sends requests to. |
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
-| `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. |
+| `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. The command can use templates, and it runs behind the `wrap` of its repo. |
 | `depends_on` | Apps and external services that the app needs at startup. |
 | `autostart` | `ilot boot` starts the app in the `base` stack. |
 | `scope` | `base` or `stack`: which stack serves the app to the apps that depend on it. See "How it works". The old keys `shared: true` and `per_stack: true` are now `scope: base` and `scope: stack`. |
@@ -257,7 +257,7 @@ apps:
 |---|---|
 | `image` | Image to run. Required. |
 | `ports` | The ports of the app, from the name of a port to its number inside the container. A container app has no top-level `ports`. |
-| `mounts` | Folders to mount, from the path on this machine to the path in the container. The path on this machine can use templates. |
+| `mounts` | Folders to mount, from the path on this machine to the path in the container. The path on this machine can use templates. A relative path is a folder of the checkout of the repo. |
 | `env_files` | Env files that `docker run` reads. |
 | `args` | More flags for `docker run`, before the image. A flag can use templates. |
 
@@ -270,7 +270,7 @@ On Linux, that name is the address of the Docker bridge, and not the loopback ad
 The `env` of the app goes to the container with `-e KEY`, so the values stay out of the command line.
 `ilot` pulls a missing image before any build, one time for all the apps that use it.
 A `ready` check with a `command` runs inside the container, with `docker exec`.
-Prefer a `command` or a `path` to a bare port check: Docker accepts a connection on a published port before the server inside listens.
+Give a container app a `command` or a `path`: Docker accepts a connection on a published port before the server inside listens, so a bare port check passes at once. `ilot check` warns about such an app.
 For a case that the block does not cover, write `run: docker run ...` with a `stop` command.
 
 ## The global file

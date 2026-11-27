@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
@@ -50,5 +51,48 @@ func TestRoutesComeFromTheStateAndKeepAStoppedApp(t *testing.T) {
 
 	if len(routes) != 1 || routes[0].Host != "api.retry-jobs.shop.localhost" || routes[0].Port != 20001 || routes[0].StartHint != "cd '/code/shop-retry' && ilot start api" {
 		t.Errorf("routes = %+v, want the route of the stopped api with the command that starts it", routes)
+	}
+}
+
+func TestAReadyCommandRendersAsATemplateBehindTheWrapOfItsRepo(t *testing.T) {
+	snapshot := renderSnapshot()
+	shop := snapshot.Configs[ticket]
+	shop.RepoWrap = map[string]string{"shop": "mise exec --"}
+	db := shop.Apps["db"]
+	db.Ready = config.ReadyCheck{Port: "", Path: "", Command: "pg_isready -p {{.Ports.pg}}"}
+	shop.Apps["db"] = db
+	snapshot.Configs[ticket] = shop
+
+	spec, err := snapshot.Spec(Instance{Stack: BaseStack, App: "db"})
+
+	if err != nil || spec.Ready == nil || spec.Ready.Command != "mise exec -- sh -c 'pg_isready -p 5432'" {
+		t.Errorf("probe = %+v, %v; want the rendered command behind the wrap", spec.Ready, err)
+	}
+}
+
+func TestARelativeMountSourceIsAFolderOfTheCheckout(t *testing.T) {
+	snapshot := renderSnapshot()
+	snapshot.Configs[ticket].Apps["pg"] = config.App{Container: config.Container{Image: "postgres:17", Ports: map[string]int{"pg": 5432}, Mounts: map[string]string{"data/pg": "/var/lib/postgresql/data", "/abs": "/abs"}}}
+	snapshot.SetPort(Instance{Stack: ticket, App: "pg"}, "pg", 20002)
+
+	spec, err := snapshot.Spec(Instance{Stack: ticket, App: "pg"})
+
+	if err != nil || !strings.Contains(spec.Command, "-v '/code/shop-retry/data/pg:/var/lib/postgresql/data'") || !strings.Contains(spec.Command, "-v '/abs:/abs'") {
+		t.Errorf("command = %q, %v; want the relative source under the checkout and the absolute one as it is", spec.Command, err)
+	}
+}
+
+func TestCheckWarnsAboutAContainerThatIsReadyAtOnce(t *testing.T) {
+	merged := config.Config{Apps: map[string]config.App{
+		"bare":    {Container: config.Container{Image: "nginx", Ports: map[string]int{"http": 80}}, Route: "http"},
+		"command": {Container: config.Container{Image: "postgres", Ports: map[string]int{"pg": 5432}}, Ready: config.ReadyCheck{Port: "", Path: "", Command: "pg_isready"}},
+		"path":    {Container: config.Container{Image: "nginx", Ports: map[string]int{"http": 80}}, Ready: config.ReadyCheck{Port: "http", Path: "/", Command: ""}},
+		"process": {Run: "api", Ports: []string{"http"}, Ready: config.ReadyCheck{Port: "http", Path: "", Command: ""}},
+	}}
+
+	warnings := CheckWarnings("shop", merged)
+
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"bare"`) {
+		t.Errorf("warnings = %q, want one for bare", warnings)
 	}
 }

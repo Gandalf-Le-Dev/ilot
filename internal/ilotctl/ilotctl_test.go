@@ -1035,7 +1035,7 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	if !isRunning {
 		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
-	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- 'cd '"'"'/src/platform'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'base'"'"' '"'"'restapi'"'"''`} {
+	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts 'pl,pm'", `-- 'cd '"'"'/src/platform'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'base'"'"' '"'"'restapi'"'"''`} {
 		if !strings.Contains(watcher.Command, wantPart) {
 			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
 		}
@@ -1582,7 +1582,7 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234.platform"].Stop; got != "docker stop --time 10 'ilot_search-cache_proj-1234_platform'" {
+	if got := environment.supervisor.runningSpecs["search-cache.proj-1234.platform"].Stop; got != "docker stop -t 10 'ilot_search-cache_proj-1234_platform'" {
 		t.Errorf("search-cache Stop = %q", got)
 	}
 	if got := environment.supervisor.runningSpecs["gateway.proj-1234.platform"].Stop; got != "" {
