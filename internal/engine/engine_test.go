@@ -1544,6 +1544,32 @@ func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t
 	}
 }
 
+func TestAMoreSpecificLiteralBeatsATemplatedValueOfTheRootRepo(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.executor.Config.RepoEnv = map[string]map[string]string{
+		"platform": {"REGION": "{{.Stack}}", "DB_URL": "db-{{.Stack}}", "TOKEN": "{{.Stack}}"},
+		"portal":   {"DB_URL": "db-of-portal"},
+	}
+	portalStandalone := environment.executor.Config.Apps["portal-standalone"]
+	portalStandalone.Env = map[string]string{"REGION": "EU1"}
+	environment.executor.Config.Apps["portal-standalone"] = portalStandalone
+	environment.executor.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"DB_URL": "db-of-the-user", "TOKEN": "of-the-user"}, Apps: nil}
+	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+
+	entryByKey := environmentOf(t, environment, "portal-standalone")
+
+	want := map[string]plan.EnvEntry{
+		"REGION": {Key: "REGION", Value: "EU1", Source: "app"},
+		"DB_URL": {Key: "DB_URL", Value: "db-of-the-user", Source: "global"},
+		"TOKEN":  {Key: "TOKEN", Value: "proj-1234", Source: "computed"},
+	}
+	for key, wantEntry := range want {
+		if entryByKey[key] != wantEntry {
+			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
+		}
+	}
+}
+
 func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}

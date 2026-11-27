@@ -320,7 +320,7 @@ An older `ilot` read a personal file, `~/.config/ilot/env.yaml`. `ilot` now stop
 2. The top-level `env` of the `ilot.yaml` of the root repo, for the apps of every repo.
 3. The top-level `env` of the `ilot.yaml` of the repo of the app, then the `env` of the app.
 4. The global file: the `env` of the workspace, then its entry under `apps`.
-5. The values that an `ilot.yaml` writes with a template. The global file cannot replace them.
+5. The values that an `ilot.yaml` writes with a template. The global file cannot replace them. A key takes its value from the most specific `ilot.yaml` layer first, so a literal value of the app replaces a template of the root repo.
 
 A login shell reads the profile files, for example `~/.zprofile` or `~/.profile`. It does not read the files of an interactive shell, for example `~/.zshrc`.
 If a tool is on your `PATH` in a terminal and an app does not find it, look at the `PATH` that `ilot env <app>` prints. Then move the line that adds the tool to a profile file, or give the shell another flag with `shell_env.args`, for example `[-l, -i]`.

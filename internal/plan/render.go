@@ -435,7 +435,8 @@ const (
 )
 
 // The layers, and the last one wins: the terminal of the command, the login shell, the env of the root repo, the env of the repo of the app, the env of the app, the global file.
-// A value written with a template is computed by ilot (ports, addresses, the stack), so a value of the global file cannot override it.
+// The most specific of the three repo layers gives the value of a key. When that value is written with a template, ilot computes it
+// (ports, addresses, the stack), so a value of the global file cannot override it.
 func (snapshot Snapshot) Environment(appInstance Instance) ([]EnvEntry, error) {
 	app := snapshot.App(appInstance)
 	entryByKey := map[string]EnvEntry{}
@@ -446,40 +447,41 @@ func (snapshot Snapshot) Environment(appInstance Instance) ([]EnvEntry, error) {
 	}
 	setAll(sourceSession, snapshot.Machine.SessionEnv)
 	setAll(sourceShell, snapshot.Machine.ShellEnv)
-	literalRootEnv, templatedRootEnv := splitByTemplate(snapshot.repoEnvOf(appInstance)[snapshot.Workspace])
-	literalRepoEnv, templatedRepoEnv := splitByTemplate(snapshot.repoEnvOf(appInstance)[cmp.Or(app.Repo, snapshot.Workspace)])
-	literalAppEnv, templatedAppEnv := splitByTemplate(app.Env)
-	setAll(sourceRoot, literalRootEnv)
-	setAll(sourceRepo, literalRepoEnv)
-	setAll(sourceApp, literalAppEnv)
+	repoEnv := map[string]EnvEntry{}
+	for _, layer := range []struct {
+		source     string
+		valueByKey map[string]string
+	}{
+		{sourceRoot, snapshot.repoEnvOf(appInstance)[snapshot.Workspace]},
+		{sourceRepo, snapshot.repoEnvOf(appInstance)[cmp.Or(app.Repo, snapshot.Workspace)]},
+		{sourceApp, app.Env},
+	} {
+		for key, value := range layer.valueByKey {
+			repoEnv[key] = EnvEntry{Key: key, Value: value, Source: layer.source}
+		}
+	}
+	var templatedKeys []string
+	for _, key := range slices.Sorted(maps.Keys(repoEnv)) {
+		if strings.Contains(repoEnv[key].Value, "{{") {
+			templatedKeys = append(templatedKeys, key)
+			continue
+		}
+		entryByKey[key] = repoEnv[key]
+	}
 	setAll(sourceGlobal, snapshot.Settings.Env)
 	setAll(sourceGlobalApp, snapshot.Settings.Apps[appInstance.App])
-	for _, templatedEnv := range []map[string]string{templatedRootEnv, templatedRepoEnv, templatedAppEnv} {
-		for _, key := range slices.Sorted(maps.Keys(templatedEnv)) {
-			value, err := snapshot.Render(appInstance, templatedEnv[key])
-			if err != nil {
-				return nil, err
-			}
-			entryByKey[key] = EnvEntry{Key: key, Value: value, Source: sourceComputed}
+	for _, key := range templatedKeys {
+		value, err := snapshot.Render(appInstance, repoEnv[key].Value)
+		if err != nil {
+			return nil, err
 		}
+		entryByKey[key] = EnvEntry{Key: key, Value: value, Source: sourceComputed}
 	}
 	var entries []EnvEntry
 	for _, key := range slices.Sorted(maps.Keys(entryByKey)) {
 		entries = append(entries, entryByKey[key])
 	}
 	return entries, nil
-}
-
-func splitByTemplate(valueByKey map[string]string) (literalValues, templatedValues map[string]string) {
-	literalValues, templatedValues = map[string]string{}, map[string]string{}
-	for key, value := range valueByKey {
-		if strings.Contains(value, "{{") {
-			templatedValues[key] = value
-			continue
-		}
-		literalValues[key] = value
-	}
-	return literalValues, templatedValues
 }
 
 // A stopped app keeps its route, so that its URL answers with the command that starts it.
