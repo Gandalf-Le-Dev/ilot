@@ -94,7 +94,7 @@ When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too.
 
 `ilot start` checks the container images before any build. It pulls a missing image (`pulling <image>`), once for all apps that share it. A failed pull stops `ilot start` before the builds. The error is `pull <image>: <error>`, and it can end with the hint `log in to the registry, then run the command again: docker login <registry>`. The login needs the user. Tell the user, wait, then run the same `ilot start` again.
 
-When an app of the start ends, it stays in its stack: `ilot ls` shows it `exited (<code>)` and its log stays. Fix the cause, then run the same `ilot start` again. It starts that app again, in the same stack, and every other app of the start that does not run. A dependency that runs gets no call and is never stopped.
+When an app of the start ends, it stays in its stack: `ilot ls` shows it `exited (<code>)` and its log stays. Fix the cause, then run the same `ilot start` again. It starts that app again, in the same stack, and every other app of the start that does not run. A dependency that runs gets no call and is never stopped. If another ilot command stops every requested app during the start, `ilot start` exits non-zero.
 
 When the timeout passes while the app still runs, the error ends with `it still starts: ilot keeps it`. The app stays. Do not run `ilot restart` for it: that restarts it from zero. Follow its log with `ilot logs -f <app>` until it is ready, and check with `ilot ls` that it still runs. Next time, use a longer `--timeout`. Ctrl-C keeps the app too.
 
