@@ -42,8 +42,8 @@ func TestARemoveDuringTheBuildOfAStartKeepsTheAppDown(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "slow")
 
-	if environment.isApplied("slow.proj-1234.shop") {
-		t.Error("slow.proj-1234.shop runs, but ilot rm removed its stack during the build")
+	if environment.isApplied("slow.task-1234.shop") {
+		t.Error("slow.task-1234.shop runs, but ilot rm removed its stack during the build")
 	}
 }
 
@@ -120,7 +120,7 @@ func TestStopStackStopsTheMembersOfTheStackOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, stoppedName := range []string{"publicapi.proj-1234.shop", "gateway.proj-1234.shop"} {
+	for _, stoppedName := range []string{"publicapi.task-1234.shop", "router.task-1234.shop"} {
 		if !slices.Contains(environment.supervisor.calls, "delete "+stoppedName) {
 			t.Errorf("calls = %v, want %s stopped", environment.supervisor.calls, stoppedName)
 		}
@@ -129,7 +129,7 @@ func TestStopStackStopsTheMembersOfTheStackOnly(t *testing.T) {
 		t.Errorf("calls = %v, want no call for the base stack", environment.supervisor.calls)
 	}
 	if environment.isStoredAsRunning(t, environment.featureStack, "publicapi") {
-		t.Error("publicapi.proj-1234.shop is still a member")
+		t.Error("publicapi.task-1234.shop is still a member")
 	}
 }
 
@@ -163,12 +163,12 @@ func TestAStopWhileAStartWaitsSkipsTheAppWithoutAFailureOrAnURL(t *testing.T) {
 
 func TestAStopOfADependencyWhileAStartWaitsSkipsItsDependents(t *testing.T) {
 	environment := newTestEnvironment(t)
-	stopWhenWaitedFor(environment, "gateway.base.shop", "gateway")
+	stopWhenWaitedFor(environment, "router.base.shop", "router")
 
 	environment.start(t, environment.base, StartOptions{}, "internalapi")
 
 	output := environment.output.String()
-	if !strings.Contains(output, "internalapi.base.shop does not start: gateway.base.shop was stopped by another ilot command") {
+	if !strings.Contains(output, "internalapi.base.shop does not start: router.base.shop was stopped by another ilot command") {
 		t.Errorf("output %q, want the dependent skipped with the dependency named", output)
 	}
 	if environment.isApplied("internalapi.base.shop") {

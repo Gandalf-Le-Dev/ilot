@@ -192,7 +192,7 @@ func TestFindOutsideAWorkspaceSaysWhatItLooksFor(t *testing.T) {
 		t.Errorf("Find outside a repo = %v, want an error that names the git checkout and ilot.yaml", err)
 	}
 
-	repoDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "platform"), map[string]string{"devbox/ilot.yaml": "apps: {}\n"})
+	repoDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "payments"), map[string]string{"devbox/ilot.yaml": "apps: {}\n"})
 	_, _, err = Find(repoDir, t.TempDir(), defaultGlobal(t), NewGit())
 	if err == nil || !strings.Contains(err.Error(), "has no ilot.yaml") || !strings.Contains(err.Error(), "devbox/ilot.yaml is the old place") {
 		t.Errorf("Find in a repo with the old layout = %v, want an error that says where the file goes", err)
@@ -231,12 +231,12 @@ func TestTheNameOfTheWorkspace(t *testing.T) {
 
 func TestTheStackPatternComesFromTheRootRepo(t *testing.T) {
 	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\nstack:\n  pattern: '[A-Z]+-[0-9]+'\n", webFile)
-	webWorktreeDir := addWorktree(t, webDir, "web-retry", "feature/PROJ-12-retry")
+	webWorktreeDir := addWorktree(t, webDir, "web-retry", "feature/TASK-12-retry")
 
 	workspace, worktree := find(t, webWorktreeDir)
 
-	if stackName, err := workspace.DefaultStackName(worktree); err != nil || stackName != "proj-12" {
-		t.Errorf("DefaultStackName = %q, %v; want proj-12, from the pattern of %s", stackName, err, shopDir)
+	if stackName, err := workspace.DefaultStackName(worktree); err != nil || stackName != "task-12" {
+		t.Errorf("DefaultStackName = %q, %v; want task-12, from the pattern of %s", stackName, err, shopDir)
 	}
 }
 
@@ -296,18 +296,18 @@ func TestARepoReachedThroughALinkIsTheSameRepo(t *testing.T) {
 
 func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testing.T) {
 	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\nstack:\n  pattern: '[A-Z]+-[0-9]+'\napps:\n  api: {run: api}\n", webFile)
-	shopWorktreeDir := addWorktree(t, shopDir, "shop-retry", "PROJ-1-retry")
+	shopWorktreeDir := addWorktree(t, shopDir, "shop-retry", "TASK-1-retry")
 	if err := os.WriteFile(filepath.Join(shopWorktreeDir, "ilot.yaml"), []byte("apps:\n  api: {run: api --retry}\n  jobs: {run: jobs}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	webWorktreeDir := addWorktree(t, webDir, "web-retry", "PROJ-1-retry")
+	webWorktreeDir := addWorktree(t, webDir, "web-retry", "TASK-1-retry")
 	gitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
 	workspace, _ := find(t, shopWorktreeDir)
-	workspace.Bindings = Bindings{"proj-1": {"shop": shopWorktreeDir, "web": webWorktreeDir}}
+	workspace.Bindings = Bindings{"task-1": {"shop": shopWorktreeDir, "web": webWorktreeDir}}
 
-	ticketConfig, err := workspace.ConfigForStack("proj-1")
-	if err != nil || ticketConfig.Apps["api"].Run != "api --retry" || ticketConfig.Apps["jobs"].Repo != "shop" || ticketConfig.Apps["front"].Repo != "web" {
-		t.Errorf("config of proj-1 = %+v, %v; want the apps of the shop worktree, and front from the main checkout of web", ticketConfig.Apps, err)
+	featureConfig, err := workspace.ConfigForStack("task-1")
+	if err != nil || featureConfig.Apps["api"].Run != "api --retry" || featureConfig.Apps["jobs"].Repo != "shop" || featureConfig.Apps["front"].Repo != "web" {
+		t.Errorf("config of task-1 = %+v, %v; want the apps of the shop worktree, and front from the main checkout of web", featureConfig.Apps, err)
 	}
 	baseConfig, err := workspace.ConfigForStack("base")
 	if err != nil || baseConfig.Apps["api"].Run != "api" || len(baseConfig.Apps) != 2 {

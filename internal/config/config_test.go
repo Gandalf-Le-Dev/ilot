@@ -10,11 +10,11 @@ import (
 
 const validConfigYAML = `
 external:
-  keyring: {port: 8200, start_hint: start it by hand}
+  secrets: {port: 8200, start_hint: start it by hand}
 apps:
-  temporal:
+  scheduler:
     scope: base
-    run: temporal server start-dev --ui-port {{.Ports.ui}}
+    run: scheduler server start-dev --ui-port {{.Ports.ui}}
     ports: [grpc, ui]
     fixed_ports: {grpc: 7233, ui: 10012}
     route: ui
@@ -28,18 +28,18 @@ apps:
     fixed_ports: {http: 10003}
     route: http
     watch: {paths: [lib, main.pl], exts: [pl, pm]}
-  gateway:
-    run: gatewayd -listen-addr :{{.Ports.http}}
+  router:
+    run: routerd -listen-addr :{{.Ports.http}}
     ports: [http]
     fixed_ports: {http: 9090}
   internalapi:
-    build: go build -o {{.BinDir}}/platform ./cmd/platformv2
-    run: "{{.BinDir}}/platform api internalapi --port={{.Ports.http}}"
+    build: go build -o {{.BinDir}}/payments ./cmd/paymentsv2
+    run: "{{.BinDir}}/payments api internalapi --port={{.Ports.http}}"
     env: {DEBUG: "1"}
     ports: [http, monitoring]
     route: http
     ready: {port: monitoring, path: /health}
-    depends_on: [gateway, temporal]
+    depends_on: [router, scheduler]
 `
 
 var defaultPorts = PortRange{First: DefaultFirstPort, Last: DefaultLastPort}
@@ -67,12 +67,12 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if config.External["keyring"].Port != 8200 {
-		t.Errorf("keyring port = %d", config.External["keyring"].Port)
+	if config.External["secrets"].Port != 8200 {
+		t.Errorf("secrets port = %d", config.External["secrets"].Port)
 	}
-	temporal := config.Apps["temporal"]
-	if temporal.Scope != ScopeBase || temporal.FixedPorts["ui"] != 10012 {
-		t.Errorf("temporal = %+v", temporal)
+	scheduler := config.Apps["scheduler"]
+	if scheduler.Scope != ScopeBase || scheduler.FixedPorts["ui"] != 10012 {
+		t.Errorf("scheduler = %+v", scheduler)
 	}
 	restapi := config.Apps["restapi"]
 	if restapi.Stop != "perl main.pl stop" {
@@ -110,7 +110,7 @@ func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
 		{yaml: "apps:\n  web: {run: x, temporal_namespace: true}\n", wantErrorSubstr: "temporal_namespace: it is gone"},
 		{yaml: "gateway_base_file: gw.json\n", wantErrorSubstr: "gateway_base_file: it is gone"},
 		{yaml: "apps:\n  db:\n    container: {image: x, links: {a: b}}\n", wantErrorSubstr: "links: it is gone: use the host and port templates"},
-		{yaml: "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\n", wantErrorSubstr: "portal: ../portal"},
+		{yaml: "repos:\n  studio: {path: ~/studio, config: ilot.yaml}\n", wantErrorSubstr: "studio: ../studio"},
 		{yaml: "apps:\n  web: {run: x, shared: true}\n", wantErrorSubstr: "shared: write scope: base"},
 		{yaml: "apps:\n  web: {run: x, per_stack: true}\n", wantErrorSubstr: "per_stack: write scope: stack"},
 		{yaml: "apps:\n  web: {run: x, autostart: true}\n", wantErrorSubstr: "autostart: it is gone: ilot start with no app"},
@@ -149,7 +149,7 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 		{
 			name: "duplicate fixed port between external services",
 			config: Config{External: map[string]ExternalService{
-				"keyring": {Port: 7233},
+				"secrets": {Port: 7233},
 				"other":   {Port: 7233},
 			}},
 			wantErrorSubstr: "port 7233",
@@ -157,14 +157,14 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 		{
 			name: "duplicate fixed port between an app and an external service",
 			config: Config{
-				External: map[string]ExternalService{"keyring": {Port: 9090}},
-				Apps:     map[string]App{"gateway": {Run: "gw", Ports: []string{"http"}, FixedPorts: map[string]int{"http": 9090}}},
+				External: map[string]ExternalService{"secrets": {Port: 9090}},
+				Apps:     map[string]App{"router": {Run: "gw", Ports: []string{"http"}, FixedPorts: map[string]int{"http": 9090}}},
 			},
 			wantErrorSubstr: "port 9090",
 		},
 		{
 			name:            "external port inside the reserved range",
-			config:          Config{External: map[string]ExternalService{"keyring": {Port: 20500}}},
+			config:          Config{External: map[string]ExternalService{"secrets": {Port: 20500}}},
 			wantErrorSubstr: "inside the range 20000-29999",
 		},
 		{
@@ -179,8 +179,8 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 		},
 		{
 			name:            "a scope that does not exist",
-			config:          Config{Apps: map[string]App{"temporal": {Run: "temporal", Scope: "shared"}}},
-			wantErrorSubstr: `app "temporal": scope "shared" is not base or stack`,
+			config:          Config{Apps: map[string]App{"scheduler": {Run: "scheduler", Scope: "shared"}}},
+			wantErrorSubstr: `app "scheduler": scope "shared" is not base or stack`,
 		},
 		{
 			name:            "stop command on a container app",
@@ -228,10 +228,10 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 		{
 			name: "app and external service share a name",
 			config: Config{
-				External: map[string]ExternalService{"temporal": {Port: 7233}},
-				Apps:     map[string]App{"temporal": {Run: "temporal"}},
+				External: map[string]ExternalService{"scheduler": {Port: 7233}},
+				Apps:     map[string]App{"scheduler": {Run: "scheduler"}},
 			},
-			wantErrorSubstr: `"temporal" is both`,
+			wantErrorSubstr: `"scheduler" is both`,
 		},
 		{
 			name:            "app name is not a DNS label",
@@ -272,37 +272,37 @@ func TestAnAppWithTheScopeBaseNeedsNoFixedPort(t *testing.T) {
 }
 
 func TestParseReadsTheRepoListAndRepoEnv(t *testing.T) {
-	config, err := Parse(writeConfigFile(t, "name: shop\nrepos:\n  portal: ../portal\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
+	config, err := Parse(writeConfigFile(t, "name: shop\nrepos:\n  studio: ../studio\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if config.Name != "shop" || config.Repos["portal"] != "../portal" || config.Env["LOG_LEVEL"] != "info" {
+	if config.Name != "shop" || config.Repos["studio"] != "../studio" || config.Env["LOG_LEVEL"] != "info" {
 		t.Errorf("config = %+v", config)
 	}
 }
 
 func TestMergeSetsTheRepoOfEachApp(t *testing.T) {
 	merged, err := Merge(map[string]Config{
-		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
-		"portal":   {Env: map[string]string{"LOG_LEVEL": "info"}, Apps: map[string]App{"portal-api": {Run: "api"}}},
+		"payments": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
+		"studio":   {Env: map[string]string{"LOG_LEVEL": "info"}, Apps: map[string]App{"studio-api": {Run: "api"}}},
 	}, defaultPorts)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if merged.Apps["publicapi"].Repo != "platform" || merged.Apps["portal-api"].Repo != "portal" {
+	if merged.Apps["publicapi"].Repo != "payments" || merged.Apps["studio-api"].Repo != "studio" {
 		t.Errorf("apps = %+v", merged.Apps)
 	}
-	if merged.RepoEnv["portal"]["LOG_LEVEL"] != "info" {
+	if merged.RepoEnv["studio"]["LOG_LEVEL"] != "info" {
 		t.Errorf("merged = %+v", merged)
 	}
 }
 
 func TestMergeRefusesAnAppDeclaredByTwoRepos(t *testing.T) {
 	_, err := Merge(map[string]Config{
-		"platform": {Apps: map[string]App{"api": {Run: "api"}}},
-		"portal":   {Apps: map[string]App{"api": {Run: "api"}}},
+		"payments": {Apps: map[string]App{"api": {Run: "api"}}},
+		"studio":   {Apps: map[string]App{"api": {Run: "api"}}},
 	}, defaultPorts)
-	if err == nil || !strings.Contains(err.Error(), `"api"`) || !strings.Contains(err.Error(), "portal") {
+	if err == nil || !strings.Contains(err.Error(), `"api"`) || !strings.Contains(err.Error(), "studio") {
 		t.Fatalf("err = %v, want an error naming the app and both repos", err)
 	}
 }
@@ -375,14 +375,14 @@ func TestParseReadsTheContainerBlockAndRefusesTheOldLinks(t *testing.T) {
 
 func TestMergeKeepsTheWrapOfEachRepo(t *testing.T) {
 	merged, err := Merge(map[string]Config{
-		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
-		"portal":   {Wrap: "mise exec --", Apps: map[string]App{"front": {Run: "npm run dev"}}},
+		"payments": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
+		"studio":   {Wrap: "mise exec --", Apps: map[string]App{"front": {Run: "npm run dev"}}},
 	}, defaultPorts)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
-	if len(merged.RepoWrap) != 1 || merged.RepoWrap["portal"] != "mise exec --" {
-		t.Errorf("RepoWrap = %v, want the prefix of portal only", merged.RepoWrap)
+	if len(merged.RepoWrap) != 1 || merged.RepoWrap["studio"] != "mise exec --" {
+		t.Errorf("RepoWrap = %v, want the prefix of studio only", merged.RepoWrap)
 	}
 }
 

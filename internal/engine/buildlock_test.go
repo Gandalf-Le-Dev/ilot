@@ -74,7 +74,7 @@ func TestASecondBuildOfAStackWaitsForTheBuildLock(t *testing.T) {
 
 func TestABuildInAnotherStackDoesNotWait(t *testing.T) {
 	environment := newTestEnvironment(t)
-	releaseOtherStack, err := environment.executor.lockBuilds(t.Context(), "proj-1234")
+	releaseOtherStack, err := environment.executor.lockBuilds(t.Context(), "task-1234")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	close(releaseBuild)
 
 	if err != nil {
-		t.Fatalf("a start in proj-1234 while base builds = %v, want it to finish: the state lock is free during a build", err)
+		t.Fatalf("a start in task-1234 while base builds = %v, want it to finish: the state lock is free during a build", err)
 	}
 	if err := <-blockedStart; err != nil {
 		t.Fatalf("the start in base after its build: %v", err)
@@ -134,7 +134,7 @@ func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !current.App("shop", "base", "publicapi").Wanted || !current.App("shop", "proj-1234", "standalone").Wanted {
+	if !current.App("shop", "base", "publicapi").Wanted || !current.App("shop", "task-1234", "standalone").Wanted {
 		t.Error("one of the two starts lost its membership to the other one")
 	}
 }

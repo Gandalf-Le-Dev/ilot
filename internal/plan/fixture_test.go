@@ -4,17 +4,17 @@ import "github.com/Gandalf-Le-Dev/ilot/internal/config"
 
 // testConfig is a workspace with every kind of app: fixed ports, the scopes, containers, watchers and a second repo.
 func testConfig() config.Config {
-	const buildPlatform = "go build -o {{.BinDir}}/platform ./cmd/platformv2"
-	const gatewayAddress = `http://localhost:{{port "gateway" "http"}}`
+	const buildPayments = "go build -o {{.BinDir}}/payments ./cmd/paymentsv2"
+	const routerAddress = `http://localhost:{{port "router" "http"}}`
 	return config.Config{
 		External: map[string]config.ExternalService{
-			"keyring":   {Port: 8200, StartHint: "restart base"},
+			"secrets":   {Port: 8200, StartHint: "restart base"},
 			"legacyapi": {Port: 10004, StartHint: "start it by hand"},
 		},
 		Apps: map[string]config.App{
-			"temporal": {
+			"scheduler": {
 				Scope:      "base",
-				Run:        "temporal server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
+				Run:        "scheduler server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
 				Ports:      []string{"grpc", "ui"},
 				FixedPorts: map[string]int{"grpc": 7233, "ui": 10012},
 				Route:      "ui",
@@ -36,27 +36,27 @@ func testConfig() config.Config {
 				FixedPorts: map[string]int{"http": 10007},
 				Route:      "http",
 			},
-			"gateway": {
+			"router": {
 				Scope:      "stack",
-				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
+				Run:        "routerd -listen-addr :{{.Ports.http}}",
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 9090},
 			},
 			"internalapi": {
-				Build:     buildPlatform,
-				Run:       "{{.BinDir}}/platform api internalapi --port={{.Ports.http}}",
-				Env:       map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},
+				Build:     buildPayments,
+				Run:       "{{.BinDir}}/payments api internalapi --port={{.Ports.http}}",
+				Env:       map[string]string{"ROUTER_URL": routerAddress, "SCHEDULER_ADDRESS": `localhost:{{port "scheduler" "grpc"}}`},
 				Ports:     []string{"http"},
 				Route:     "http",
-				DependsOn: []string{"gateway", "temporal"},
+				DependsOn: []string{"router", "scheduler"},
 			},
 			"publicapi": {
-				Build:     buildPlatform,
-				Run:       "{{.BinDir}}/platform api publicapi --port={{.Ports.http}}",
-				Env:       map[string]string{"GATEWAY_URL": gatewayAddress},
+				Build:     buildPayments,
+				Run:       "{{.BinDir}}/payments api publicapi --port={{.Ports.http}}",
+				Env:       map[string]string{"ROUTER_URL": routerAddress},
 				Ports:     []string{"http"},
 				Route:     "http",
-				DependsOn: []string{"gateway", "internalapi", "temporal", "keyring"},
+				DependsOn: []string{"router", "internalapi", "scheduler", "secrets"},
 			},
 			"standalone": {
 				Run:   "standalone --port={{.Ports.http}}",
@@ -66,15 +66,15 @@ func testConfig() config.Config {
 				Scope: "stack",
 				Route: "http",
 				Env: map[string]string{
-					"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`,
-					"CACHE_URL":   `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
-					"REGION":      "DEV1",
+					"ROUTER_URL": `http://{{host "router"}}:{{port "router" "http"}}`,
+					"CACHE_URL":  `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
+					"REGION":     "DEV1",
 				},
-				DependsOn: []string{"search-cache", "gateway"},
+				DependsOn: []string{"search-cache", "router"},
 				Container: config.Container{
 					Image:    "registry/search:latest",
 					Ports:    map[string]int{"http": 16271},
-					Mounts:   map[string]string{`{{repo "portal"}}/schemas`: "/src/schemas"},
+					Mounts:   map[string]string{`{{repo "studio"}}/schemas`: "/src/schemas"},
 					EnvFiles: []string{"/etc/acme.conf.d/search.conf"},
 					Args:     []string{"--shm-size=1g", "--label=stack={{.Stack}}"},
 				},
@@ -85,12 +85,12 @@ func testConfig() config.Config {
 				Container: config.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
 			},
 			"front-like": {
-				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"gateway\"}}",
+				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"router\"}}",
 				Ports:     []string{"http"},
 				DependsOn: []string{"search"},
 			},
-			"portal-standalone": {
-				Repo:  "portal",
+			"studio-standalone": {
+				Repo:  "studio",
 				Build: "go build ./cmd/api",
 				Run:   "api --port={{.Ports.http}} --from={{.WorktreeDir}}",
 				Ports: []string{"http"},

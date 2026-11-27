@@ -14,23 +14,23 @@ import (
 func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
-	portOfRemovedStack := environment.appPort(t, "proj-1234", "internalapi")
+	portOfRemovedStack := environment.appPort(t, "task-1234", "internalapi")
 
-	if err := environment.executor.Remove(t.Context(), "proj-1234"); err != nil {
+	if err := environment.executor.Remove(t.Context(), "task-1234"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
 	for processName := range environment.supervisor.runningSpecs {
-		if strings.HasSuffix(processName, ".proj-1234") {
+		if strings.HasSuffix(processName, ".task-1234") {
 			t.Errorf("%s still runs", processName)
 		}
 	}
 	for _, route := range environment.supervisor.routes {
-		if strings.Contains(route.Host, ".proj-1234.") {
+		if strings.Contains(route.Host, ".task-1234.") {
 			t.Errorf("the removed stack keeps the route %s", route.Host)
 		}
 	}
-	if _, err := os.Stat(environment.executor.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(environment.executor.StackDir("task-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)
 	}
 	otherStack := "retry-jobs"
@@ -58,9 +58,9 @@ func TestRemoveRefusesTheBaseStack(t *testing.T) {
 func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	err := environment.executor.Remove(t.Context(), "proj-4040")
+	err := environment.executor.Remove(t.Context(), "task-4040")
 
-	if err == nil || !strings.Contains(err.Error(), `no stack "proj-4040"`) {
+	if err == nil || !strings.Contains(err.Error(), `no stack "task-4040"`) {
 		t.Fatalf("Remove = %v, want an error naming the unknown stack", err)
 	}
 }
@@ -85,8 +85,8 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 	deletedWorktreeDir := filepath.Join(t.TempDir(), "deleted")
 	boundWorktreesByStack := map[string]map[string]string{
 		"base":         nil,
-		"all-deleted":  {"shop": deletedWorktreeDir, "portal": deletedWorktreeDir + "-portal"},
-		"one-deleted":  {"shop": deletedWorktreeDir, "portal": existingWorktreeDir},
+		"all-deleted":  {"shop": deletedWorktreeDir, "studio": deletedWorktreeDir + "-studio"},
+		"one-deleted":  {"shop": deletedWorktreeDir, "studio": existingWorktreeDir},
 		"none-deleted": {"shop": otherExistingWorktreeDir},
 		"moved-away":   nil,
 	}
@@ -101,18 +101,18 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 
 func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveStacks(t, environment.executor, map[string]map[string]string{"base": nil, "proj-1234": nil})
+	saveStacks(t, environment.executor, map[string]map[string]string{"base": nil, "task-1234": nil})
 
 	checkoutsByStack, err := environment.executor.StackCheckouts()
 
 	if err != nil {
 		t.Fatalf("StackCheckouts: %v", err)
 	}
-	if dir := checkoutsByStack["proj-1234"]["shop"].Dir; dir != "/worktrees/proj-1234" {
-		t.Errorf("shop checkout of proj-1234 = %q", dir)
+	if dir := checkoutsByStack["task-1234"]["shop"].Dir; dir != "/worktrees/task-1234" {
+		t.Errorf("shop checkout of task-1234 = %q", dir)
 	}
-	if dir := checkoutsByStack["proj-1234"]["portal"].Dir; dir != "/src/portal" {
-		t.Errorf("portal checkout of proj-1234 = %q", dir)
+	if dir := checkoutsByStack["task-1234"]["studio"].Dir; dir != "/src/studio" {
+		t.Errorf("studio checkout of task-1234 = %q", dir)
 	}
 	if _, isListed := checkoutsByStack["base"]; !isListed {
 		t.Error("base missing")

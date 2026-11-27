@@ -12,11 +12,11 @@ func TestLsJSONOutputIsOneObjectWithHomeAppsExternalServicesAndCheckouts(t *test
 	output := lsJSONOutput{
 		Home: "http://home.dev.example.net:18080",
 		Listing: engine.Listing{
-			Apps:             []engine.AppRow{{Stack: "proj-0001", App: "publicapi", Status: "Running", Ports: map[string]int{"http": 10003}, URL: "http://publicapi.proj-0001.dev.example.net:18080"}},
-			ExternalServices: []engine.ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}},
+			Apps:             []engine.AppRow{{Stack: "task-0001", App: "publicapi", Status: "Running", Ports: map[string]int{"http": 10003}, URL: "http://publicapi.task-0001.dev.example.net:18080"}},
+			ExternalServices: []engine.ExternalServiceRow{{Name: "secrets", Status: "up", Port: 8200}},
 		},
 		CheckoutsByStack: map[string]map[string]workspace.Worktree{
-			"proj-0001": {"portal": {Repo: "portal", Dir: "/home/user/worktrees-portal-0001", Branch: "PROJ-0001-x", IsMain: false}},
+			"task-0001": {"studio": {Repo: "studio", Dir: "/home/user/worktrees-studio-0001", Branch: "TASK-0001-x", IsMain: false}},
 		},
 	}
 
@@ -26,9 +26,9 @@ func TestLsJSONOutputIsOneObjectWithHomeAppsExternalServicesAndCheckouts(t *test
 		t.Fatal(err)
 	}
 	want := `{"home":"http://home.dev.example.net:18080",` +
-		`"apps":[{"stack":"proj-0001","app":"publicapi","status":"Running","ports":{"http":10003},"url":"http://publicapi.proj-0001.dev.example.net:18080"}],` +
-		`"external_services":[{"name":"keyring","status":"up","port":8200}],` +
-		`"checkouts":{"proj-0001":{"portal":{"repo":"portal","dir":"/home/user/worktrees-portal-0001","branch":"PROJ-0001-x","is_main_checkout":false}}}}`
+		`"apps":[{"stack":"task-0001","app":"publicapi","status":"Running","ports":{"http":10003},"url":"http://publicapi.task-0001.dev.example.net:18080"}],` +
+		`"external_services":[{"name":"secrets","status":"up","port":8200}],` +
+		`"checkouts":{"task-0001":{"studio":{"repo":"studio","dir":"/home/user/worktrees-studio-0001","branch":"TASK-0001-x","is_main_checkout":false}}}}`
 	if string(encoded) != want {
 		t.Errorf("JSON =\n%s\nwant\n%s", encoded, want)
 	}

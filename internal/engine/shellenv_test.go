@@ -30,7 +30,7 @@ func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
 		}
 	}
-	processEnv := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env
+	processEnv := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env
 	if processEnv["GOPROXY"] != "https://proxy" || processEnv["LOG_LEVEL"] != "debug" || processEnv["REGION"] != "EU1" {
 		t.Errorf("the process spec has the environment %v, want every source in it: the daemon adds nothing", processEnv)
 	}
@@ -47,7 +47,7 @@ func TestAChangeOfTheShellReachesAnAppAtItsNextStart(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["GOPROXY"]; got != "https://new" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY of the process = %q, want the value of the shell files now, with no restart of the daemon", got)
 	}
 }
@@ -68,11 +68,11 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"API_TOKEN": "secret"})
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	command := environment.supervisor.runningSpecs["search.proj-1234.shop"].Command
+	command := environment.supervisor.runningSpecs["search.task-1234.shop"].Command
 	if strings.Contains(command, "API_TOKEN") {
 		t.Errorf("command %q passes a shell variable to the image", command)
 	}
-	if got := environment.supervisor.runningSpecs["search.proj-1234.shop"].Env["API_TOKEN"]; got != "secret" {
+	if got := environment.supervisor.runningSpecs["search.task-1234.shop"].Env["API_TOKEN"]; got != "secret" {
 		t.Errorf("API_TOKEN of the docker command = %q, want the shell value: docker itself needs PATH and HOME", got)
 	}
 	if !strings.Contains(command, "-e 'REGION'") {
@@ -95,10 +95,10 @@ func TestStartAllAfterAShutdownGivesTheMembersTheShellOfTheCommand(t *testing.T)
 	}
 
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	if want := []string{"standalone.proj-1234.shop"}; !slices.Equal(running, want) {
+	if want := []string{"standalone.task-1234.shop"}; !slices.Equal(running, want) {
 		t.Errorf("running after restart %v, want %v: the members of the stacks", running, want)
 	}
-	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["GOPROXY"]; got != "https://new" {
+	if got := environment.supervisor.runningSpecs["standalone.task-1234.shop"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY after the restart = %q, want the shell of the restart", got)
 	}
 }

@@ -21,13 +21,13 @@ func writeConfigFile(t *testing.T, content string) string {
 }
 
 func TestCheckConfigFileFindsAnAppDeclaredInTwoFiles(t *testing.T) {
-	platformFile := writeConfigFile(t, "apps:\n  shared-name: {run: one}\n")
-	portalFile := writeConfigFile(t, "apps:\n  shared-name: {run: two}\n")
+	paymentsFile := writeConfigFile(t, "apps:\n  shared-name: {run: one}\n")
+	studioFile := writeConfigFile(t, "apps:\n  shared-name: {run: two}\n")
 
-	problems, _ := checkConfigFile("platform", []string{"platform", "portal"}, testGlobal.Ports, "portal", portalFile, map[string]string{"platform": platformFile})
+	problems, _ := checkConfigFile("payments", []string{"payments", "studio"}, testGlobal.Ports, "studio", studioFile, map[string]string{"payments": paymentsFile})
 
 	joined := errors.Join(problems...)
-	if joined == nil || !strings.Contains(joined.Error(), "platform") || !strings.Contains(joined.Error(), "portal") {
+	if joined == nil || !strings.Contains(joined.Error(), "payments") || !strings.Contains(joined.Error(), "studio") {
 		t.Fatalf("checkConfigFile = %v, want a problem naming both repos", joined)
 	}
 }
@@ -97,14 +97,14 @@ func TestCheckOfARequestedFileKeepsThatFile(t *testing.T) {
 }
 
 func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
-	platformFile := writeConfigFile(t, "apps:\n  gateway: {run: gw, ports: [http]}\n")
-	portalFile := writeConfigFile(t, "apps:\n  portal-api: {run: 'api --port={{port \"gateway\" \"htp\"}}'}\n")
+	paymentsFile := writeConfigFile(t, "apps:\n  router: {run: gw, ports: [http]}\n")
+	studioFile := writeConfigFile(t, "apps:\n  studio-api: {run: 'api --port={{port \"router\" \"htp\"}}'}\n")
 
-	problems, _ := checkConfigFile("platform", []string{"platform", "portal"}, testGlobal.Ports, "platform", platformFile, map[string]string{"portal": portalFile})
+	problems, _ := checkConfigFile("payments", []string{"payments", "studio"}, testGlobal.Ports, "payments", paymentsFile, map[string]string{"studio": studioFile})
 
 	joined := errors.Join(problems...)
-	if joined == nil || !strings.Contains(joined.Error(), portalFile) || strings.Contains(joined.Error(), platformFile) {
-		t.Fatalf("checkConfigFile = %v, want the problem on %s only", joined, portalFile)
+	if joined == nil || !strings.Contains(joined.Error(), studioFile) || strings.Contains(joined.Error(), paymentsFile) {
+		t.Fatalf("checkConfigFile = %v, want the problem on %s only", joined, studioFile)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
 		"  first: {run: one, ports: [http], route: no-such-port}\n"+
 		"  second: {run: 'two --port={{port \"ghost\" \"http\"}}', ports: [http], route: http}\n")
 
-	problems, _ := checkConfigFile("platform", []string{"platform"}, testGlobal.Ports, "platform", configFile, nil)
+	problems, _ := checkConfigFile("payments", []string{"payments"}, testGlobal.Ports, "payments", configFile, nil)
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "no-such-port") || !strings.Contains(joined.Error(), "ghost") {
