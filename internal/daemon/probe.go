@@ -32,13 +32,12 @@ func (probe Probe) Validate() error {
 }
 
 func (probe Probe) address() string {
-	// The name and not 127.0.0.1, because some servers listen on ::1 only.
-	return net.JoinHostPort(cmp.Or(probe.Host, "localhost"), strconv.Itoa(probe.Port))
+	return net.JoinHostPort(cmp.Or(probe.Host, loopbackName), strconv.Itoa(probe.Port))
 }
 
 // The proxy settings of the environment must not send a loopback probe to another machine.
 var probeHTTPClient = &http.Client{
-	Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true},
+	Transport: &http.Transport{Proxy: nil, DialContext: dialLoopback, DisableKeepAlives: true},
 	CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
@@ -63,8 +62,7 @@ func (probe Probe) check(ctx context.Context, spec Spec) error {
 		}
 		return nil
 	default:
-		var dialer net.Dialer
-		connection, err := dialer.DialContext(ctx, "tcp", probe.address())
+		connection, err := dialLoopback(ctx, "tcp", probe.address())
 		if err != nil {
 			return err
 		}

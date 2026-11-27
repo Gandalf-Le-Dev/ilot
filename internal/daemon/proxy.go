@@ -30,8 +30,7 @@ func NewProxy(routes *RouteTable, logger *slog.Logger) *Proxy {
 	proxy.forward = &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			route := request.In.Context().Value(routeContextKey{}).(Route)
-			// The name and not 127.0.0.1, because some dev servers listen on ::1 only.
-			request.SetURL(&url.URL{Scheme: "http", Host: net.JoinHostPort("localhost", strconv.Itoa(route.Port))})
+			request.SetURL(&url.URL{Scheme: "http", Host: net.JoinHostPort(loopbackName, strconv.Itoa(route.Port))})
 			// The app sees the host that the browser asked for, so its redirects and its host checks stay right.
 			request.Out.Host = request.In.Host
 			request.SetXForwarded()
@@ -39,7 +38,7 @@ func NewProxy(routes *RouteTable, logger *slog.Logger) *Proxy {
 		Transport: &http.Transport{
 			// The proxy settings of the environment must not send a loopback request to another machine.
 			Proxy:               nil,
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+			DialContext:         dialLoopback,
 			MaxIdleConnsPerHost: 16,
 			IdleConnTimeout:     30 * time.Second,
 		},

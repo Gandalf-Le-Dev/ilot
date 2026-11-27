@@ -219,3 +219,30 @@ func TestAProbeWithNoTargetIsRefused(t *testing.T) {
 		t.Fatal("a probe with a path and no port is accepted")
 	}
 }
+
+func TestDialLoopbackReachesAServerOnEitherAddress(t *testing.T) {
+	for _, address := range []string{"[::1]:0", "127.0.0.1:0"} {
+		listener, err := net.Listen("tcp", address)
+		if err != nil {
+			t.Logf("this machine cannot listen on %s: %v", address, err)
+			continue
+		}
+		defer listener.Close()
+		_, port, _ := net.SplitHostPort(listener.Addr().String())
+
+		connection, err := dialLoopback(t.Context(), "tcp", net.JoinHostPort("localhost", port))
+		if err != nil {
+			t.Errorf("a server on %s is not reached: %v", listener.Addr(), err)
+			continue
+		}
+		if got := connection.RemoteAddr().String(); got != listener.Addr().String() {
+			t.Errorf("the connection goes to %s, want %s", got, listener.Addr())
+		}
+		connection.Close()
+	}
+
+	_, err := dialLoopback(t.Context(), "tcp", net.JoinHostPort("localhost", strconv.Itoa(freeLoopbackPort(t))))
+	if opError, isOpError := errors.AsType[*net.OpError](err); !isOpError || opError.Op != "dial" {
+		t.Errorf("a port with no server gives %v, want a dial error that the proxy can tell", err)
+	}
+}
