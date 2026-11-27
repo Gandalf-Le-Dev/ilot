@@ -30,14 +30,11 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
 	current.RemoveStack(controller.Workspace, stackName)
-	snapshot, problems := controller.snapshotOf(current, plan.BaseStack)
-	if err := errors.Join(problems...); err != nil {
+	snapshot, dropped, err := controller.complete(current, plan.BaseStack)
+	if err != nil {
 		return err
 	}
-	if err := controller.deriveCheckouts(snapshot); err != nil {
-		return err
-	}
-	controller.prepareStacks(snapshot)
+	controller.warnAboutUndeclared(snapshot, dropped)
 	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}

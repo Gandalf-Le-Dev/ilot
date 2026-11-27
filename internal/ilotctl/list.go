@@ -49,7 +49,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
 			appInstance := plan.Instance{Stack: stackName, App: appName}
 			status := "stopped"
-			if process, isKnown := processByName[controller.processName(appInstance)]; isKnown {
+			if process, isKnown := processByName[plan.ProcessName(controller.Workspace, appInstance)]; isKnown {
 				status = statusOf(process)
 			}
 			listing.Apps = append(listing.Apps, AppRow{
@@ -57,7 +57,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 				App:    appName,
 				Status: status,
 				Ports:  stacks[stackName].Apps[appName].Ports,
-				URL:    controller.publicURL(snapshot, appInstance),
+				URL:    snapshot.URL(appInstance),
 			})
 		}
 	}
@@ -95,38 +95,10 @@ func (controller *Controller) StackCheckouts() (map[string]map[string]workspace.
 	return checkoutsByStack, nil
 }
 
-func (controller *Controller) publicURL(snapshot plan.Snapshot, appInstance plan.Instance) string {
-	if snapshot.App(appInstance).Route == "" {
-		return ""
-	}
-	return controller.publicBaseURL(appInstance) + snapshot.App(appInstance).HomePath
-}
-
-func (controller *Controller) publicHost(appInstance plan.Instance) string {
-	return appInstance.App + "." + appInstance.Stack + "." + controller.Workspace + "." + controller.Domain
-}
-
-func (controller *Controller) publicBaseURL(appInstance plan.Instance) string {
-	return controller.proxyURL(controller.publicHost(appInstance))
-}
-
-func (controller *Controller) proxyURL(host string) string {
-	url := "http://" + host
-	if controller.ProxyPort != "" {
-		url += ":" + controller.ProxyPort
-	}
-	return url
-}
-
 func (controller *Controller) printURLs(snapshot plan.Snapshot, requestedInstances []plan.Instance) {
 	for _, appInstance := range requestedInstances {
-		if url := controller.publicURL(snapshot, appInstance); url != "" && snapshot.IsWanted(appInstance) {
-			fmt.Fprintf(controller.Output, "%s: %s\n", controller.processName(appInstance), url)
+		if url := snapshot.URL(appInstance); url != "" && snapshot.IsWanted(appInstance) {
+			fmt.Fprintf(controller.Output, "%s: %s\n", plan.ProcessName(controller.Workspace, appInstance), url)
 		}
 	}
-}
-
-// The proxy answers a host that is no app with the list of every route.
-func (controller *Controller) HomeURL() string {
-	return controller.proxyURL(controller.Domain)
 }

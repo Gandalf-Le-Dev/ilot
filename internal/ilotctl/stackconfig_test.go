@@ -86,6 +86,28 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 	}
 }
 
+func TestEnvironmentPrintsNoWarningForAnAppThatNoConfigDeclares(t *testing.T) {
+	environment := newTestEnvironment(t)
+	baseConfig := testConfig()
+	configByStack := map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": configWithApps(baseConfig, ticketOnlyApps)}
+	useConfigPerStack(environment, configByStack)
+	environment.controller.Config = configByStack["proj-1234"]
+	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search")
+	configByStack["proj-1234"] = baseConfig
+	environment.controller.Config = baseConfig
+	environment.output.Reset()
+	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin"})
+
+	entries, err := environment.controller.Environment(environment.featureStack, "standalone")
+
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("Environment = %v, %v", entries, err)
+	}
+	if environment.output.Len() != 0 {
+		t.Errorf("ilot env printed %q, want nothing: it changes nothing", environment.output.String())
+	}
+}
+
 func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")

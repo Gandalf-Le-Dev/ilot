@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -81,8 +81,8 @@ func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts co
 		mergedFiles := slices.Sorted(maps.Values(fileByRepo))
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
 	}
-	for _, problem := range ilotctl.CheckRendering(workspaceName, repoNames, merged) {
-		var renderProblem ilotctl.RenderProblem
+	for _, problem := range plan.CheckRendering(workspaceName, repoNames, merged) {
+		var renderProblem plan.RenderProblem
 		if errors.As(problem, &renderProblem) {
 			problem = fmt.Errorf("%s: %w", fileByRepo[renderProblem.Repo], problem)
 		}

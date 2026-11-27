@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
 // supervisorUnderContract gives the contract test one supervisor and three processes:
@@ -86,7 +87,7 @@ func TestTheDaemonSupervisorKeepsTheContract(t *testing.T) {
 	startsFile := func(processName string) string { return filepath.Join(workDir, processName+".starts") }
 	spec := func(name, command string, ready *daemon.Probe) ProcessSpec {
 		return ProcessSpec{Name: name, Spec: daemon.Spec{
-			Command: "echo start >> " + shellQuote(startsFile(name)) + "; " + command,
+			Command: "echo start >> " + plan.ShellQuote(startsFile(name)) + "; " + command,
 			Dir:     workDir,
 			Env:     map[string]string{"PATH": os.Getenv("PATH")},
 			LogFile: filepath.Join(workDir, name+".log"),

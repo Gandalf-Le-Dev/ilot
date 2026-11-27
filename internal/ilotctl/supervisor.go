@@ -7,18 +7,15 @@ import (
 	"io"
 	"maps"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
-type ProcessSpec struct {
-	Name string
-	daemon.Spec
-}
+type ProcessSpec = plan.ProcessSpec
 
 type ProcessSupervisor interface {
 	// Apply starts each process that is new or that changed, and removes each process that specs does not name.
@@ -190,10 +187,6 @@ func (supervisor *DaemonSupervisor) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	return err
-}
-
-func shellQuote(word string) string {
-	return "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
 }
 
 func environ(valueByKey map[string]string) []string {

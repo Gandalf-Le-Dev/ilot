@@ -1,7 +1,6 @@
 package ilotctl
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,7 +28,7 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 func (controller *Controller) allocatePorts(snapshot plan.Snapshot, start plan.Start) error {
 	for _, fixedPort := range start.FixedPorts {
 		if !snapshot.IsWanted(fixedPort.Instance) && !controller.IsPortFreeOnHost(fixedPort.Port) {
-			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, controller.processName(fixedPort.Instance))
+			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, plan.ProcessName(controller.Workspace, fixedPort.Instance))
 		}
 		snapshot.SetPort(fixedPort.Instance, fixedPort.PortName, fixedPort.Port)
 	}
@@ -49,7 +48,7 @@ func (controller *Controller) checkEveryProcessRenders(snapshot plan.Snapshot, s
 		stacksWithPlanRunning.SetWanted(appInstance, true)
 	}
 	for _, appInstance := range startOrder {
-		if _, err := controller.processSpec(stacksWithPlanRunning, appInstance); err != nil {
+		if _, err := stacksWithPlanRunning.Spec(appInstance); err != nil {
 			return err
 		}
 	}
@@ -67,36 +66,32 @@ func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snaps
 		if app.Build == "" || !needsBuild(appInstance) {
 			continue
 		}
-		buildCommand, err := controller.renderTemplate(snapshot, appInstance, app.Build)
+		buildCommand, err := snapshot.Render(appInstance, app.Build)
 		if err != nil {
 			return err
 		}
-		workingDir, err := controller.checkoutDir(snapshot, appInstance)
+		workingDir, err := snapshot.CheckoutDir(appInstance)
 		if err != nil {
 			return err
 		}
-		build := buildInWorktree{workingDir: workingDir, command: controller.wrapped(snapshot, appInstance, buildCommand)}
+		build := buildInWorktree{workingDir: workingDir, command: snapshot.Wrapped(appInstance, buildCommand)}
 		if isBuilt[build] {
 			continue
 		}
 		isBuilt[build] = true
-		if err := os.MkdirAll(controller.binDir(appInstance.Stack), 0o755); err != nil {
-			return err
-		}
-		environ, err := controller.shellEnviron()
-		if err != nil {
+		if err := os.MkdirAll(snapshot.BinDir(appInstance.Stack), 0o755); err != nil {
 			return err
 		}
 		releaseBuilds, err := controller.lockBuilds(ctx, appInstance.Stack)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(controller.Output, "building %s in %s\n", controller.processName(appInstance), workingDir)
-		stopProgress := controller.printProgressUntilStopped("building " + controller.processName(appInstance))
-		err = controller.RunBuild(ctx, workingDir, build.command, environ)
+		fmt.Fprintf(controller.Output, "building %s in %s\n", plan.ProcessName(controller.Workspace, appInstance), workingDir)
+		stopProgress := controller.printProgressUntilStopped("building " + plan.ProcessName(controller.Workspace, appInstance))
+		err = controller.RunBuild(ctx, workingDir, build.command, environ(snapshot.Machine.ShellEnv))
 		stopProgress()
 		if err := errors.Join(err, releaseBuilds()); err != nil {
-			return fmt.Errorf("build %s: %w", controller.processName(appInstance), err)
+			return fmt.Errorf("build %s: %w", plan.ProcessName(controller.Workspace, appInstance), err)
 		}
 	}
 	return nil
@@ -140,47 +135,17 @@ func (controller *Controller) loadState() (state.State, error) {
 	return controller.Store.Load()
 }
 
-// loadStacks gives the snapshot of a command of a stack: the state, the configuration of each stack, and the checkouts that the bindings give.
+// loadStacks gives the snapshot of a command of a stack, and warns about each app that no config declares any more.
 func (controller *Controller) loadStacks(stackName string) (plan.Snapshot, error) {
-	current, err := controller.loadState()
-	if err != nil {
-		return plan.Snapshot{}, err
-	}
-	current.Stack(controller.Workspace, plan.BaseStack)
-	current.Stack(controller.Workspace, stackName)
-	snapshot, problems := controller.snapshotOf(current, stackName)
-	if err := errors.Join(problems...); err != nil {
-		return plan.Snapshot{}, err
-	}
-	if err := controller.deriveCheckouts(snapshot); err != nil {
-		return plan.Snapshot{}, err
-	}
-	controller.prepareStacks(snapshot)
-	return snapshot, nil
+	snapshot, dropped, err := controller.Snapshot(stackName)
+	controller.warnAboutUndeclared(snapshot, dropped)
+	return snapshot, err
 }
 
-// A bound worktree that is deleted gives its repo back to the main checkout.
-func (controller *Controller) deriveCheckouts(snapshot plan.Snapshot) error {
-	for stackName := range snapshot.State.Stacks(controller.Workspace) {
-		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
-		if err != nil {
-			return err
-		}
-		snapshot.Checkouts[stackName] = map[string]string{}
-		for repoName, checkout := range checkoutByRepo {
-			snapshot.Checkouts[stackName][repoName] = checkout.Dir
-		}
+func (controller *Controller) warnAboutUndeclared(snapshot plan.Snapshot, dropped []plan.Instance) {
+	for _, droppedInstance := range dropped {
+		fmt.Fprintf(controller.Output, "warning: %s stopped: no ilot.yaml of stack %s declares it any more\n", snapshot.ProcessName(droppedInstance), droppedInstance.Stack)
 	}
-	return nil
-}
-
-func (controller *Controller) checkoutDir(snapshot plan.Snapshot, appInstance plan.Instance) (string, error) {
-	repoName := cmp.Or(snapshot.App(appInstance).Repo, controller.Workspace)
-	checkoutDir := snapshot.Checkouts[appInstance.Stack][repoName]
-	if checkoutDir == "" {
-		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, snapshot.RepoPathKey(repoName))
-	}
-	return checkoutDir, nil
 }
 
 func (controller *Controller) saveStacks(snapshot plan.Snapshot) error {
@@ -188,9 +153,4 @@ func (controller *Controller) saveStacks(snapshot plan.Snapshot) error {
 		return err
 	}
 	return controller.Store.Save(snapshot.State)
-}
-
-// StackDir holds the logs and the binaries of a stack.
-func (controller *Controller) StackDir(stackName string) string {
-	return controller.Store.StackDir(controller.Workspace, stackName)
 }
