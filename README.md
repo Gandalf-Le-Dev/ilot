@@ -99,10 +99,27 @@ ilot start front              # builds and starts api in base, then front
 curl http://front.base.shop.localhost:4580
 ```
 
-## Quick start
+To work on a branch, add a worktree and start the apps that you change in it.
+The `ilot.yaml` of `shop` sets `stack.pattern`, so the branch `feature/SHOP-12-cart` belongs to the stack `shop-12`:
 
-1. Clone the two repos of this example side by side: `~/code/shop` and `~/code/web`.
-2. Write `ilot.yaml` at the root of the shop repo. It is the root repo, so this file also lists the other repos:
+```bash
+git -C ~/code/shop worktree add ~/code/shop-cart -b feature/SHOP-12-cart
+cd ~/code/shop-cart
+ilot start api front
+curl http://front.shop-12.shop.localhost:4580
+ilot ls
+```
+
+`api` now runs twice: in `base` from the main checkout, and in `shop-12` from the worktree.
+`front` runs in `shop-12` from the main checkout of the web repo, and its `API_URL` points to the `api` of `shop-12`.
+
+## Set up your own repos
+
+The files below are an example to adapt, not a sample that runs: they describe a Go API that needs a Postgres database, and an npm front that a tool manager, mise, gives its tools.
+Replace the commands, the paths and the services with the ones of your repos.
+
+1. Choose the root repo of the workspace, for example `~/code/shop`, and its member repos, for example `~/code/web`.
+2. Write `ilot.yaml` at the root of the root repo. This file also lists the other repos:
 
    ```yaml
    name: shop                # optional: the default is the folder name of the main checkout
@@ -124,7 +141,7 @@ curl http://front.base.shop.localhost:4580
        depends_on: [postgres]
    ```
 
-3. Write `ilot.yaml` at the root of the web repo. It is a member repo, so it names the root:
+3. Write `ilot.yaml` at the root of each member repo. It names the root:
 
    ```yaml
    member_of: ../shop
@@ -141,19 +158,8 @@ curl http://front.base.shop.localhost:4580
    ```
 
 4. Run `ilot check` in each repo. It merges the file with the files of the other repos and renders every template. It warns about an entry under `workspaces.<name>.apps` of the global file that names an app that no `ilot.yaml` of the stack declares.
-5. Run `ilot start api` in `~/code/shop`. `ilot` builds `api`, starts it, and waits until `/health` answers.
+5. Run `ilot start api` in the root repo. `ilot` builds `api`, starts it, and waits until `/health` answers.
 6. Run `ilot ls` to see the status and the URL of each app.
-
-To work on a branch, add a worktree and start the apps that you change in it:
-
-```bash
-git -C ~/code/shop worktree add ~/code/shop-retry -b retry-jobs
-cd ~/code/shop-retry
-ilot start api front
-```
-
-`api` now runs twice: in `base` from the main checkout, and in `retry-jobs` from the worktree.
-`front` runs in `retry-jobs` from the main checkout of the web repo, and its `API_URL` points to the `api` of `retry-jobs`.
 
 ## Commands
 
