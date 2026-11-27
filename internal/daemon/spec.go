@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 type Spec struct {
@@ -29,6 +30,17 @@ func (spec Spec) Validate() error {
 	}
 	if spec.Ready != nil {
 		return spec.Ready.Validate()
+	}
+	return nil
+}
+
+func validateName(name string) error {
+	switch name {
+	case "":
+		return errors.New("the process has no name")
+	case ".", "..":
+		// The HTTP router reads these as folders of the path, so no call would reach the process.
+		return fmt.Errorf("the process name %q is not allowed", name)
 	}
 	return nil
 }

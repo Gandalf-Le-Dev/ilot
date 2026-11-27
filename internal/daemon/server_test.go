@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -192,6 +193,19 @@ func TestClientErrors(t *testing.T) {
 	err = client.SetRoutes(ctx, []Route{{Host: "a.localhost", Port: 1}, {Host: "A.localhost", Port: 2}})
 	if apiError, isAPIError := errors.AsType[*APIError](err); !isAPIError || apiError.StatusCode != http.StatusBadRequest {
 		t.Errorf("two routes for one host give %v", err)
+	}
+
+	for _, name := range []string{"", ".", ".."} {
+		spec := Spec{Command: "true", LogFile: filepath.Join(t.TempDir(), "app.log")}
+		if _, err := client.Put(ctx, name, spec); err == nil || !strings.Contains(err.Error(), "name") {
+			t.Errorf("the client: a process with the name %q gives %v", name, err)
+		}
+		if _, err := served.supervisor.Put(name, spec); err == nil || !strings.Contains(err.Error(), "name") {
+			t.Errorf("the supervisor: a process with the name %q gives %v", name, err)
+		}
+	}
+	if processes := served.supervisor.List(); len(processes) != 0 {
+		t.Errorf("a refused name left %+v", processes)
 	}
 
 	exitingSpec := Spec{Command: "exit 9", LogFile: filepath.Join(t.TempDir(), "app.log"), Ready: &Probe{Command: "false"}}

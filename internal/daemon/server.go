@@ -54,6 +54,10 @@ func (server *Server) Handler() http.Handler {
 		writeJSON(writer, http.StatusOK, processList{Processes: server.Supervisor.List()})
 	})
 	mux.HandleFunc("PUT /v1/processes/{name}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateName(request.PathValue("name")); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
 		var spec Spec
 		if err := decodeBody(request, &spec); err != nil {
 			writeError(writer, http.StatusBadRequest, err)
