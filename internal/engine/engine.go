@@ -105,7 +105,8 @@ func (executor *Executor) processesOfALiveDaemon(ctx context.Context) (map[strin
 	return executor.Supervisor.Processes(ctx)
 }
 
-// underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a daemon call.
+// underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a call that starts or stops a process.
+// A step can read the process list, so that it sees what the commands before it started.
 func (executor *Executor) underLock(ctx context.Context, step func() error) (err error) {
 	release, err := executor.Store.Lock(ctx)
 	if err != nil {
@@ -372,6 +373,15 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 	}
 	process, isHeld := processByName[spec.Name]
 	isRunning := isHeld && process.State != daemon.StateExited
+	if isRunning && !isRequested {
+		return executor.waitReady(ctx, snapshot, appInstance)
+	}
+	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
+		if err == nil {
+			fmt.Fprintf(executor.Output, "%s does not start: another ilot command stopped it\n", spec.Name)
+		}
+		return err
+	}
 	switch {
 	case !isRunning:
 		if err := executor.put(ctx, spec); err != nil {
@@ -388,12 +398,28 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 			return err
 		}
 	}
-	if !isRunning || isRequested {
-		if err := executor.putWatcher(ctx, snapshot, appInstance, processByName); err != nil {
-			return err
+	if err := executor.putWatcher(ctx, snapshot, appInstance, processByName); err != nil {
+		return err
+	}
+	// A stop between the test above and the start found no process to stop, so this command stops it.
+	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
+		if err == nil {
+			fmt.Fprintf(executor.Output, "%s stops again: another ilot command stopped it while it started\n", spec.Name)
+			err = executor.deleteProcesses(ctx, snapshot, []plan.Instance{appInstance})
 		}
+		return err
 	}
 	return executor.waitReady(ctx, snapshot, appInstance)
+}
+
+// isStillWanted reads the state again: an ilot stop or an ilot rm can have taken the membership away while this command built.
+func (executor *Executor) isStillWanted(ctx context.Context, appInstance plan.Instance) (isWanted bool, err error) {
+	err = executor.underLock(ctx, func() error {
+		current, err := executor.loadState()
+		isWanted = current.App(executor.Workspace, appInstance.Stack, appInstance.App).Wanted
+		return err
+	})
+	return isWanted, err
 }
 
 func (executor *Executor) put(ctx context.Context, spec plan.ProcessSpec) error {
@@ -484,8 +510,12 @@ func (writer *linePrefixWriter) Write(content []byte) (int, error) {
 func (executor *Executor) Stop(ctx context.Context, stackName string, appNames []string) error {
 	var snapshot plan.Snapshot
 	var stopped []plan.Instance
-	err := executor.underLock(ctx, func() (err error) {
-		snapshot, stopped, err = executor.planStop(stackName, appNames)
+	err := executor.underLock(ctx, func() error {
+		processByName, err := executor.Supervisor.Processes(ctx)
+		if err != nil {
+			return err
+		}
+		snapshot, stopped, err = executor.planStop(stackName, appNames, processByName)
 		return err
 	})
 	if err != nil {
@@ -498,8 +528,9 @@ func (executor *Executor) Stop(ctx context.Context, stackName string, appNames [
 }
 
 // planStop takes the membership away from the stopped instances. An app that no ilot.yaml declares any more leaves the state, and gives its ports back.
+// An instance that is no member but that the daemon holds is stopped too: a start that raced an earlier stop can have left it.
 // The snapshot that it gives is the state before the stop, which still names the container of each instance.
-func (executor *Executor) planStop(stackName string, appNames []string) (plan.Snapshot, []plan.Instance, error) {
+func (executor *Executor) planStop(stackName string, appNames []string, processByName map[string]daemon.Process) (plan.Snapshot, []plan.Instance, error) {
 	current, err := executor.loadState()
 	if err != nil {
 		return plan.Snapshot{}, nil, err
@@ -523,7 +554,11 @@ func (executor *Executor) planStop(stackName string, appNames []string) (plan.Sn
 			continue
 		}
 		if !snapshot.IsWanted(stoppedInstance) {
-			fmt.Fprintf(executor.Output, "%s is not running\n", snapshot.ProcessName(stoppedInstance))
+			if _, isHeld := processByName[snapshot.ProcessName(stoppedInstance)]; isHeld {
+				stopped = append(stopped, stoppedInstance)
+			} else {
+				fmt.Fprintf(executor.Output, "%s is not running\n", snapshot.ProcessName(stoppedInstance))
+			}
 			continue
 		}
 		snapshot.SetWanted(stoppedInstance, false)
