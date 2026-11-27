@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -232,6 +234,36 @@ func TestStopRunsTheStopCommandInsteadOfSIGTERM(t *testing.T) {
 	output, _ := os.ReadFile(logFile)
 	if !strings.Contains(string(output), "stop-command-ran") {
 		t.Errorf("the output of the stop command is not in the log file: %q", output)
+	}
+}
+
+func TestAStopCommandWritesToTheLogAfterTheProcessExited(t *testing.T) {
+	var daemonLog bytes.Buffer
+	supervisor := newTestSupervisor(t, SupervisorOptions{Logger: slog.New(slog.NewTextHandler(&daemonLog, nil))})
+	workingDir := t.TempDir()
+	logFile := filepath.Join(workingDir, "app.log")
+
+	_, err := supervisor.Put("app", Spec{
+		Command: `while [ ! -f "$FLAG" ]; do sleep 0.05; done; exit 7`,
+		Stop:    `touch "$FLAG"; sleep 0.5; echo late-output`,
+		Dir:     workingDir,
+		Env:     map[string]string{"PATH": "/usr/bin:/bin", "FLAG": "stop.flag"},
+		LogFile: logFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	supervisor.Shutdown()
+	if stopped := processNamed(t, supervisor, "app"); stopped.ExitCode != 7 {
+		t.Fatalf("got exit code %d, want 7", stopped.ExitCode)
+	}
+	output, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(output), "late-output") {
+		t.Errorf("the late output of the stop command is not in the log file: %q", output)
+	}
+	if strings.Contains(daemonLog.String(), "the stop command failed") {
+		t.Errorf("a stop command that worked is reported as failed:\n%s", daemonLog.String())
 	}
 }
 
