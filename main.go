@@ -171,7 +171,8 @@ type rmCommand struct {
 type cleanCommand struct{}
 
 type startCommand struct {
-	Apps    []string      `arg:"" help:"Apps declared in an ilot.yaml."`
+	Apps    []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml."`
+	All     bool          `help:"Start every app that a stack of the workspace owns and that does not run, for example after the daemon crashed."`
 	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
 	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
 }
@@ -234,6 +235,9 @@ func (command *lsCommand) Run(ctx context.Context) error {
 	if err := table.Flush(); err != nil {
 		return err
 	}
+	if listing.Restore != "" {
+		fmt.Printf("\napps that a stack owns are down: %s starts them again\n", listing.Restore)
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -293,6 +297,18 @@ func (command *cleanCommand) Run(ctx context.Context) error {
 }
 
 func (command *startCommand) Run(ctx context.Context) error {
+	switch {
+	case command.All && len(command.Apps) > 0:
+		return errors.New("--all starts every app that a stack owns: name no app with it")
+	case command.All:
+		controller, _, err := newControllerForCurrentWorktree(ctx, command.Timeout, baseStack)
+		if err != nil {
+			return err
+		}
+		return controller.StartAll(ctx)
+	case len(command.Apps) == 0:
+		return errors.New("name the apps to start, or give --all to start every app that a stack owns")
+	}
 	controller, stackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err

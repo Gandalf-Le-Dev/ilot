@@ -14,7 +14,12 @@ import (
 type Listing struct {
 	Apps             []AppRow             `json:"apps"`
 	ExternalServices []ExternalServiceRow `json:"external_services"`
+	// The command that starts again the members that the daemon does not run, or nothing when every member runs.
+	Restore string `json:"restore,omitempty"`
 }
+
+// The status of a member that the daemon does not hold, after a crash or a restart of the daemon.
+const statusDown = "down"
 
 type AppRow struct {
 	Stack  string         `json:"stack"`
@@ -46,8 +51,13 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
 			appInstance := plan.Instance{Stack: stackName, App: appName}
 			status := "stopped"
-			if process, isKnown := processByName[snapshot.ProcessName(appInstance)]; isKnown {
+			process, isKnown := processByName[snapshot.ProcessName(appInstance)]
+			switch {
+			case isKnown:
 				status = statusOf(process)
+			case stacks[stackName].Apps[appName].Wanted:
+				status = statusDown
+				listing.Restore = "ilot start --all"
 			}
 			listing.Apps = append(listing.Apps, AppRow{
 				Stack:  stackName,

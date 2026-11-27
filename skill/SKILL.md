@@ -42,6 +42,7 @@ ilot apps                       # every app and external service that the ilot.y
 ilot apps --json                # the same as one JSON object
 ilot start front                # build, then start the app after its dependencies, in this folder's stack
 ilot start api --no-deps        # start only this app
+ilot start --all                # start every app that a stack owns and that does not run, after a crash of the daemon
 ilot stop api                   # stop the app in this folder's stack
 ilot logs api                   # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line
 ilot logs --json api            # the app's own lines, as they are: use this to read logs
