@@ -20,13 +20,12 @@ const (
 )
 
 type Config struct {
-	Domain          string                       `yaml:"domain"`
-	GatewayBaseFile string                       `yaml:"gateway_base_file"`
-	Repos           map[string]RepoConfig        `yaml:"repos"`
-	Env             map[string]string            `yaml:"env"`
-	External        map[string]ExternalService   `yaml:"external"`
-	Apps            map[string]App               `yaml:"apps"`
-	RepoEnv         map[string]map[string]string `yaml:"-"`
+	Domain   string                       `yaml:"domain"`
+	Repos    map[string]RepoConfig        `yaml:"repos"`
+	Env      map[string]string            `yaml:"env"`
+	External map[string]ExternalService   `yaml:"external"`
+	Apps     map[string]App               `yaml:"apps"`
+	RepoEnv  map[string]map[string]string `yaml:"-"`
 }
 
 type RepoConfig struct {
@@ -35,30 +34,27 @@ type RepoConfig struct {
 }
 
 type ExternalService struct {
-	Port           int      `yaml:"port"`
-	StartHint      string   `yaml:"start_hint"`
-	GatewayAliases []string `yaml:"gateway_aliases"`
+	Port      int    `yaml:"port"`
+	StartHint string `yaml:"start_hint"`
 }
 
 type App struct {
-	Build          string            `yaml:"build"`
-	Run            string            `yaml:"run"`
-	Env            map[string]string `yaml:"env"`
-	Ports          []string          `yaml:"ports"`
-	Route          string            `yaml:"route"`
-	Ready          ReadyCheck        `yaml:"ready"`
-	DependsOn      []string          `yaml:"depends_on"`
-	GatewayAliases []string          `yaml:"gateway_aliases"`
-	Gateway        bool              `yaml:"gateway"`
-	Shared         bool              `yaml:"shared"`
-	Autostart      bool              `yaml:"autostart"`
-	FixedPorts     map[string]int    `yaml:"fixed_ports"`
-	Dir            string            `yaml:"dir"`
-	Watch          Watch             `yaml:"watch"`
-	HomePath       string            `yaml:"home_path"`
-	Repo           string            `yaml:"-"`
-	Container      Container         `yaml:"container"`
-	PerStack       bool              `yaml:"per_stack"`
+	Build      string            `yaml:"build"`
+	Run        string            `yaml:"run"`
+	Env        map[string]string `yaml:"env"`
+	Ports      []string          `yaml:"ports"`
+	Route      string            `yaml:"route"`
+	Ready      ReadyCheck        `yaml:"ready"`
+	DependsOn  []string          `yaml:"depends_on"`
+	Shared     bool              `yaml:"shared"`
+	Autostart  bool              `yaml:"autostart"`
+	FixedPorts map[string]int    `yaml:"fixed_ports"`
+	Dir        string            `yaml:"dir"`
+	Watch      Watch             `yaml:"watch"`
+	HomePath   string            `yaml:"home_path"`
+	Repo       string            `yaml:"-"`
+	Container  Container         `yaml:"container"`
+	PerStack   bool              `yaml:"per_stack"`
 }
 
 type Container struct {
@@ -122,17 +118,16 @@ func isUnknownFieldError(err error) bool {
 	return slices.ContainsFunc(typeError.Errors, func(message string) bool { return strings.Contains(message, "not found in type") })
 }
 
-// The repo list, the domain and the gateway base file come from platform's config only.
+// The repo list and the domain come from platform's config only.
 func Merge(configByRepo map[string]Config) (Config, error) {
 	rootConfig := configByRepo[DefaultRepo]
 	merged := Config{
-		Domain:          rootConfig.Domain,
-		GatewayBaseFile: rootConfig.GatewayBaseFile,
-		Repos:           rootConfig.Repos,
-		Env:             nil,
-		External:        map[string]ExternalService{},
-		Apps:            map[string]App{},
-		RepoEnv:         map[string]map[string]string{},
+		Domain:   rootConfig.Domain,
+		Repos:    rootConfig.Repos,
+		Env:      nil,
+		External: map[string]ExternalService{},
+		Apps:     map[string]App{},
+		RepoEnv:  map[string]map[string]string{},
 	}
 	var problems []error
 	repoByApp := map[string]string{}
@@ -167,7 +162,6 @@ func (config Config) Validate() error {
 		config.validateNames(),
 		config.validateFixedPorts(),
 		config.validateApps(),
-		config.validateGateway(),
 		config.validateDependencyGraph(),
 	)
 }
@@ -242,15 +236,6 @@ func (config Config) validateContainer(name string, app App) []error {
 
 func (config Config) validateApps() error {
 	var problems []error
-	appByGatewayAlias := map[string]string{}
-	for _, name := range slices.Sorted(maps.Keys(config.External)) {
-		for _, alias := range config.External[name].GatewayAliases {
-			if otherName, isTaken := appByGatewayAlias[alias]; isTaken {
-				problems = append(problems, fmt.Errorf("gateway alias %q is claimed by both %q and %q", alias, otherName, name))
-			}
-			appByGatewayAlias[alias] = name
-		}
-	}
 	for _, name := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[name]
 		if app.Run == "" && app.Container.IsZero() {
@@ -278,37 +263,6 @@ func (config Config) validateApps() error {
 				problems = append(problems, fmt.Errorf("app %q: unknown dependency %q", name, dependency))
 			}
 		}
-		if len(app.GatewayAliases) > 0 && app.Route == "" {
-			problems = append(problems, fmt.Errorf("app %q: gateway_aliases need a route port to point at", name))
-		}
-		for _, alias := range app.GatewayAliases {
-			if otherName, isTaken := appByGatewayAlias[alias]; isTaken {
-				problems = append(problems, fmt.Errorf("gateway alias %q is claimed by both %q and %q", alias, otherName, name))
-			}
-			appByGatewayAlias[alias] = name
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func (config Config) validateGateway() error {
-	var problems []error
-	var gatewayApps []string
-	for _, name := range slices.Sorted(maps.Keys(config.Apps)) {
-		app := config.Apps[name]
-		if !app.Gateway {
-			continue
-		}
-		gatewayApps = append(gatewayApps, name)
-		if len(app.Ports) == 0 {
-			problems = append(problems, fmt.Errorf("gateway app %q needs a port", name))
-		}
-		if app.Shared {
-			problems = append(problems, fmt.Errorf("gateway app %q cannot be shared: each stack runs its own", name))
-		}
-	}
-	if len(gatewayApps) > 1 {
-		problems = append(problems, fmt.Errorf("only one gateway app is allowed, found %v", gatewayApps))
 	}
 	return errors.Join(problems...)
 }
@@ -345,13 +299,4 @@ func (config Config) validateDependencyGraph() error {
 		}
 	}
 	return nil
-}
-
-func (config Config) GatewayAppName() string {
-	for _, name := range slices.Sorted(maps.Keys(config.Apps)) {
-		if config.Apps[name].Gateway {
-			return name
-		}
-	}
-	return ""
 }

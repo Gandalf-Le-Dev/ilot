@@ -2,7 +2,6 @@ package proxyfiles
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -66,12 +65,4 @@ func TraefikRoutes(stackName, domain, backendHost string, routedApps []RoutedApp
 		httpConfig["middlewares"] = middlewares
 	}
 	return yaml.Marshal(map[string]any{"http": httpConfig})
-}
-
-func LocalServices(urlByGatewayAlias map[string]string) ([]byte, error) {
-	content, err := json.MarshalIndent(urlByGatewayAlias, "", "    ")
-	if err != nil {
-		return nil, err
-	}
-	return append(content, '\n'), nil
 }

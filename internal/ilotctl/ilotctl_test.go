@@ -3,7 +3,6 @@ package ilotctl
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"maps"
 	"os"
@@ -202,7 +201,7 @@ func testConfig() appconfig.Config {
 		Domain: "dev.example.net",
 		External: map[string]appconfig.ExternalService{
 			"keyring":   {Port: 8200, StartHint: "restart devbox"},
-			"legacyapi": {Port: 10004, StartHint: "start it by hand", GatewayAliases: []string{"acme-legacyapi"}},
+			"legacyapi": {Port: 10004, StartHint: "start it by hand"},
 		},
 		Apps: map[string]appconfig.App{
 			"temporal": {
@@ -215,15 +214,14 @@ func testConfig() appconfig.Config {
 				Ready:      appconfig.ReadyCheck{Port: "grpc", Path: ""},
 			},
 			"restapi": {
-				Shared:         true,
-				Autostart:      true,
-				Dir:            "/legacy/restapi",
-				Run:            "perl main.pl prefork",
-				Ports:          []string{"http"},
-				FixedPorts:     map[string]int{"http": 10003},
-				Route:          "http",
-				Watch:          appconfig.Watch{Paths: []string{"."}, Exts: []string{"pl", "pm"}},
-				GatewayAliases: []string{"acme-restapi"},
+				Shared:     true,
+				Autostart:  true,
+				Dir:        "/legacy/restapi",
+				Run:        "perl main.pl prefork",
+				Ports:      []string{"http"},
+				FixedPorts: map[string]int{"http": 10003},
+				Route:      "http",
+				Watch:      appconfig.Watch{Paths: []string{"."}, Exts: []string{"pl", "pm"}},
 			},
 			"doc": {
 				Shared:     true,
@@ -233,44 +231,40 @@ func testConfig() appconfig.Config {
 				Route:      "http",
 			},
 			"gateway": {
-				Gateway:    true,
+				PerStack:   true,
 				Autostart:  true,
 				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
-				Env:        map[string]string{"GATEWAY_SERVICES": "{{.StackDir}}/services.json"},
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 9090},
 			},
 			"internalapi": {
-				Autostart:      true,
-				Build:          buildPlatform,
-				Run:            "{{.BinDir}}/platform api internalapi --port={{.Ports.http}}",
-				Env:            map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},
-				Ports:          []string{"http"},
-				Route:          "http",
-				DependsOn:      []string{"gateway", "temporal"},
-				GatewayAliases: []string{"acme-internalapi"},
+				Autostart: true,
+				Build:     buildPlatform,
+				Run:       "{{.BinDir}}/platform api internalapi --port={{.Ports.http}}",
+				Env:       map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},
+				Ports:     []string{"http"},
+				Route:     "http",
+				DependsOn: []string{"gateway", "temporal"},
 			},
 			"publicapi": {
-				Build:          buildPlatform,
-				Run:            "{{.BinDir}}/platform api publicapi --port={{.Ports.http}}",
-				Env:            map[string]string{"GATEWAY_URL": gatewayAddress},
-				Ports:          []string{"http"},
-				Route:          "http",
-				DependsOn:      []string{"gateway", "internalapi", "temporal", "keyring"},
-				GatewayAliases: []string{"acme-publicapi"},
+				Build:     buildPlatform,
+				Run:       "{{.BinDir}}/platform api publicapi --port={{.Ports.http}}",
+				Env:       map[string]string{"GATEWAY_URL": gatewayAddress},
+				Ports:     []string{"http"},
+				Route:     "http",
+				DependsOn: []string{"gateway", "internalapi", "temporal", "keyring"},
 			},
 			"standalone": {
 				Run:   "standalone --port={{.Ports.http}}",
 				Ports: []string{"http"},
 			},
 			"search": {
-				PerStack:       true,
-				Ports:          []string{"http"},
-				FixedPorts:     map[string]int{"http": 16271},
-				Route:          "http",
-				Env:            map[string]string{"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`, "REGION": "DEV1"},
-				DependsOn:      []string{"search-cache", "gateway"},
-				GatewayAliases: []string{"acme-search"},
+				PerStack:   true,
+				Ports:      []string{"http"},
+				FixedPorts: map[string]int{"http": 16271},
+				Route:      "http",
+				Env:        map[string]string{"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`, "REGION": "DEV1"},
+				DependsOn:  []string{"search-cache", "gateway"},
 				Container: appconfig.Container{
 					Image:         "registry/search:latest",
 					Mounts:        map[string]string{"/src/schemas": `{{repo "portal"}}/schemas`},
@@ -365,19 +359,6 @@ func (environment testEnvironment) start(t *testing.T, worktree stack.Worktree, 
 	}
 }
 
-func (environment testEnvironment) localServices(t *testing.T, stackName string) map[string]string {
-	t.Helper()
-	content, err := os.ReadFile(filepath.Join(environment.controller.Store.StackDir(stackName), "services.json"))
-	if err != nil {
-		t.Fatalf("read services.json of %s: %v", stackName, err)
-	}
-	var urlByAlias map[string]string
-	if err := json.Unmarshal(content, &urlByAlias); err != nil {
-		t.Fatal(err)
-	}
-	return urlByAlias
-}
-
 func (environment testEnvironment) isStoredAsRunning(t *testing.T, stackName, appName string) bool {
 	t.Helper()
 	stackState, err := environment.controller.Store.Load(stackName)
@@ -431,92 +412,6 @@ func TestStartBuildsEachStackOnceInItsOwnWorktree(t *testing.T) {
 	slices.Sort(buildDirs)
 	if want := []string{"/src/platform", "/worktrees/proj-1234"}; !slices.Equal(buildDirs, want) {
 		t.Errorf("builds ran in %v, want %v", buildDirs, want)
-	}
-}
-
-func TestWorktreeGatewaySendsAliasesToItsOwnAppsAndTheRestToMaster(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-
-	urlByAlias := environment.localServices(t, "proj-1234")
-
-	if want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "master", "internalapi")); urlByAlias["acme-internalapi"] != want {
-		t.Errorf("acme-internalapi -> %q, want master's %q", urlByAlias["acme-internalapi"], want)
-	}
-	if want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "publicapi")); urlByAlias["acme-publicapi"] != want {
-		t.Errorf("acme-publicapi -> %q, want the worktree's %q", urlByAlias["acme-publicapi"], want)
-	}
-	if _, isPresent := environment.localServices(t, "master")["acme-publicapi"]; isPresent {
-		t.Error("master's gateway routes to the worktree's publicapi")
-	}
-}
-
-func TestEveryGatewaySendsExternalServiceAliasesToTheirFixedPort(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-
-	for _, stackName := range []string{"master", "proj-1234"} {
-		if got := environment.localServices(t, stackName)["acme-legacyapi"]; got != "http://localhost:10004" {
-			t.Errorf("%s: acme-legacyapi -> %q, want http://localhost:10004", stackName, got)
-		}
-	}
-}
-
-func TestGatewayFilesStartFromTheBaseFileAndOverrideItWithRunningApps(t *testing.T) {
-	environment := newTestEnvironment(t)
-	baseFile := filepath.Join(t.TempDir(), "services.json")
-	baseContent := `{"legacy-light": "https://devbox:18443", "acme-internalapi": "http://localhost:10002"}`
-	if err := os.WriteFile(baseFile, []byte(baseContent), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	environment.controller.Config.GatewayBaseFile = baseFile
-
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone", "gateway")
-
-	urlByAlias := environment.localServices(t, "proj-1234")
-	if urlByAlias["legacy-light"] != "https://devbox:18443" || urlByAlias["acme-internalapi"] != "http://localhost:10002" {
-		t.Errorf("base aliases lost: %v", urlByAlias)
-	}
-
-	environment.start(t, environment.master, StartOptions{}, "internalapi")
-
-	want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "master", "internalapi"))
-	if got := environment.localServices(t, "proj-1234")["acme-internalapi"]; got != want {
-		t.Errorf("acme-internalapi -> %q, want master's ilot instance %q over the base file", got, want)
-	}
-}
-
-func TestAGatewayRestartedForNewAliasesIsReadyBeforeTheAppStarts(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "gateway")
-	environment.supervisor.events = nil
-
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone", "publicapi")
-
-	events := environment.supervisor.events
-	publicapiStartIndex := slices.Index(events, "start publicapi.proj-1234")
-	wantJustBefore := []string{"restart gateway.proj-1234", "ready gateway.proj-1234"}
-	if publicapiStartIndex < len(wantJustBefore) || !slices.Equal(events[publicapiStartIndex-len(wantJustBefore):publicapiStartIndex], wantJustBefore) {
-		t.Errorf("events %v: want %v right before publicapi starts", events, wantJustBefore)
-	}
-}
-
-func TestStartingADependencyInTheWorktreeSwitchesItsGateway(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-	environment.supervisor.restarted = nil
-
-	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
-
-	want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "internalapi"))
-	if got := environment.localServices(t, "proj-1234")["acme-internalapi"]; got != want {
-		t.Errorf("acme-internalapi -> %q, want the worktree's %q", got, want)
-	}
-	if !slices.Contains(environment.supervisor.restarted, "gateway.proj-1234") {
-		t.Errorf("restarted %v, want the worktree gateway to reload its aliases", environment.supervisor.restarted)
-	}
-	if slices.Contains(environment.supervisor.restarted, "gateway.master") {
-		t.Error("master's gateway restarted although its aliases did not change")
 	}
 }
 
@@ -1002,9 +897,6 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	}
 	if !strings.Contains(environment.output.String(), "publicapi.proj-1234") {
 		t.Errorf("output %q does not warn about publicapi.proj-1234", environment.output.String())
-	}
-	if _, isPresent := environment.localServices(t, "proj-1234")["acme-internalapi"]; isPresent {
-		t.Error("the worktree gateway still routes to the stopped internalapi")
 	}
 }
 
@@ -1524,13 +1416,10 @@ func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
 	}
 }
 
-func TestContainerRouteAndAliasUseTheContainerName(t *testing.T) {
+func TestContainerRouteUsesTheContainerName(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.localServices(t, "proj-1234")["acme-search"]; got != "http://ilot-proj-1234-search:16271" {
-		t.Errorf("acme-search -> %q", got)
-	}
 	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
 	if err != nil {
 		t.Fatal(err)
