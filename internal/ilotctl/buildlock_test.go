@@ -101,3 +101,40 @@ func TestACancelEndsTheWaitForTheBuildLock(t *testing.T) {
 		t.Fatalf("lockBuilds = %v, want the end of the context", err)
 	}
 }
+
+func TestAStartInAnotherStackFinishesWhileABuildRuns(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.controller.Store.LockTimeout = 2 * time.Second
+	buildStarted, releaseBuild := make(chan struct{}), make(chan struct{})
+	blocked := environment.controllerOfANewCommand()
+	blocked.Output = &lockedOutput{}
+	blocked.RunBuild = func(context.Context, string, string, []string) error {
+		close(buildStarted)
+		<-releaseBuild
+		return nil
+	}
+	blockedStart := make(chan error, 1)
+	go func() {
+		blockedStart <- blocked.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{SkipDependencies: true})
+	}()
+	<-buildStarted
+
+	other := environment.controllerOfANewCommand()
+	other.Supervisor = &fakeSupervisor{runningSpecs: map[string]ProcessSpec{}}
+	err := other.Start(t.Context(), environment.featureStack, []string{"standalone"}, StartOptions{})
+	close(releaseBuild)
+
+	if err != nil {
+		t.Fatalf("a start in proj-1234 while base builds = %v, want it to finish: the state lock is free during a build", err)
+	}
+	if err := <-blockedStart; err != nil {
+		t.Fatalf("the start in base after its build: %v", err)
+	}
+	current, err := environment.controller.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !current.App("platform", "base", "publicapi").Wanted || !current.App("platform", "proj-1234", "standalone").Wanted {
+		t.Error("one of the two starts lost its membership to the other one")
+	}
+}

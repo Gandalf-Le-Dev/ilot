@@ -12,37 +12,36 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
-func (controller *Controller) Remove(ctx context.Context, stackName string) (err error) {
+func (controller *Controller) Remove(ctx context.Context, stackName string) error {
 	if stackName == plan.BaseStack {
 		return fmt.Errorf("cannot remove stack %s: ilot needs it, stop its apps with ilot stop", stackName)
 	}
-	release, err := controller.Store.Lock(ctx)
+	var snapshot plan.Snapshot
+	var removedInstances []plan.Instance
+	err := controller.underLock(ctx, func() error {
+		current, err := controller.loadState()
+		if err != nil {
+			return err
+		}
+		if _, isKnown := current.Stacks(controller.Workspace)[stackName]; !isKnown {
+			return fmt.Errorf("no stack %q, see ilot ls", stackName)
+		}
+		// The state alone names the processes of the stack, so a stack whose ilot.yaml is broken or gone can be removed.
+		removed := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current.Clone(), Machine: controller.Machine}
+		for _, appName := range slices.Sorted(maps.Keys(current.Stacks(controller.Workspace)[stackName].Apps)) {
+			removedInstances = append(removedInstances, plan.Instance{Stack: stackName, App: appName})
+		}
+		snapshot = removed
+		current.RemoveStack(controller.Workspace, stackName)
+		return controller.saveStacks(plan.Snapshot{Workspace: controller.Workspace, State: current})
+	})
 	if err != nil {
 		return err
-	}
-	defer func() { err = errors.Join(err, release()) }()
-
-	current, err := controller.loadState()
-	if err != nil {
-		return err
-	}
-	if _, isKnown := current.Stacks(controller.Workspace)[stackName]; !isKnown {
-		return fmt.Errorf("no stack %q, see ilot ls", stackName)
-	}
-	// The state alone names the processes of the stack, so a stack whose ilot.yaml is broken or gone can be removed.
-	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current, Machine: controller.Machine}
-	removedInstances := []plan.Instance{}
-	for _, appName := range slices.Sorted(maps.Keys(current.Stacks(controller.Workspace)[stackName].Apps)) {
-		removedInstances = append(removedInstances, plan.Instance{Stack: stackName, App: appName})
 	}
 	if err := controller.deleteProcesses(ctx, snapshot, removedInstances); err != nil {
 		return err
 	}
-	current.RemoveStack(controller.Workspace, stackName)
-	if err := controller.saveStacks(snapshot); err != nil {
-		return err
-	}
-	if err := controller.Supervisor.SetRoutes(ctx, snapshot.Routes()); err != nil {
+	if err := controller.sendRoutes(ctx); err != nil {
 		return err
 	}
 	return os.RemoveAll(controller.StackDir(stackName))

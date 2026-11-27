@@ -123,14 +123,14 @@ func (controller *Controller) loadState() (state.State, error) {
 	return controller.Store.Load()
 }
 
-// loadStacks gives the snapshot of a command of a stack, and stops each app that its config no longer declares.
-func (controller *Controller) loadStacks(ctx context.Context, stackName string) (plan.Snapshot, error) {
+// loadStacks gives the snapshot of a command of a stack, and the apps that its config no longer declares, which the command stops.
+func (controller *Controller) loadStacks(stackName string) (plan.Snapshot, []plan.Instance, error) {
 	snapshot, dropped, err := controller.Snapshot(stackName)
 	if err != nil {
-		return plan.Snapshot{}, err
+		return plan.Snapshot{}, nil, err
 	}
 	controller.warnAboutUndeclared(snapshot, dropped)
-	return snapshot, controller.deleteProcesses(ctx, snapshot, dropped)
+	return snapshot, dropped, nil
 }
 
 func (controller *Controller) warnAboutUndeclared(snapshot plan.Snapshot, dropped []plan.Instance) {
