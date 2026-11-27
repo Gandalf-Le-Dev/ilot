@@ -26,13 +26,19 @@ The other dependencies come from the `master` stack. If one of them does not run
 An app marked `per_stack` is the exception: an app that depends on it always gets the copy of its own stack.
 A shared app runs once, in the `devbox` stack, for every worktree.
 
-`ilot` knows several repos.
+A workspace is the set of repos that share stacks, ports and one name.
+One repo is the root repo: the `ilot.yaml` at its root names the workspace and lists the other repos.
+Each other repo is a member: its `ilot.yaml` names the root with `member_of`.
+`ilot` finds the workspace from the repo of the folder that you are in, so it needs no registry.
+This version keeps the state of one workspace on a machine. A second workspace gets an error that names the first one.
+
 For each repo, a stack takes the worktree for its ticket. If the repo has no such worktree, the stack takes the main checkout of the repo.
 Each stack reads the `ilot.yaml` files of its own checkouts, so a change in one stack does not change the apps of another.
+A checkout with no `ilot.yaml` reads the file of the main checkout. An untracked `ilot.yaml` in the main checkout therefore works in a repo where you cannot commit one.
 Two worktrees of one repo for the same ticket make `ilot` refuse that stack, and the error names both folders.
 
 Each app gets its ports in the range 20000-29999 and keeps them.
-Its URL, `http://<app>.<stack>.localhost:4580`, therefore stays the same.
+Its URL, `http://<app>.<stack>.<workspace>.localhost:4580`, therefore stays the same.
 One daemon supervises the apps of every stack. It is the `ilot` binary itself, and `ilot` starts it when a command needs it.
 The same daemon holds the proxy: it listens on `127.0.0.1:4580` and sends each URL to its app.
 Every name under `localhost` points to this machine, so the URLs need no DNS setup.
@@ -56,12 +62,13 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
 
 ## Quick start
 
-1. Clone your main repo, the platform repo, at `~/src/platform`. If you clone it at another path, set that path in your personal file (see "Personal settings").
-2. Write `devbox/ilot.yaml` in the platform repo. This file also lists the other repos:
+1. Clone the two repos of this example side by side: `~/code/shop` and `~/code/web`.
+2. Write `ilot.yaml` at the root of the shop repo. It is the root repo, so this file also lists the other repos:
 
    ```yaml
+   name: shop                # optional: the default is the folder name of the main checkout
    repos:
-     web: {path: ~/src/web, config: ilot.yaml}
+     web: ../web             # relative to the main checkout of this repo
    external:
      postgres:
        port: 5432
@@ -78,9 +85,10 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
        depends_on: [postgres]
    ```
 
-3. Write `ilot.yaml` at the root of the web repo:
+3. Write `ilot.yaml` at the root of the web repo. It is a member repo, so it names the root:
 
    ```yaml
+   member_of: ../shop
    wrap: mise exec --
    apps:
      front:
@@ -94,14 +102,14 @@ The binary goes to `$(go env GOPATH)/bin`. Make sure that this folder is on your
    ```
 
 4. Run `ilot check` in each repo. It merges the file with the files of the other repos and renders every template.
-5. Run `ilot start api` in `~/src/platform`. `ilot` builds `api`, starts it, and waits until `/health` answers.
+5. Run `ilot start api` in `~/code/shop`. `ilot` builds `api`, starts it, and waits until `/health` answers.
 6. Run `ilot ls` to see the status and the URL of each app.
 
 To work on a ticket, add a worktree and start the apps that you change in it:
 
 ```bash
-git -C ~/src/platform worktree add ~/worktrees/platform-1234 -b PROJ-1234-retry-jobs
-cd ~/worktrees/platform-1234
+git -C ~/code/shop worktree add ~/code/shop-1234 -b PROJ-1234-retry-jobs
+cd ~/code/shop-1234
 ilot start api front
 ```
 
@@ -110,9 +118,9 @@ ilot start api front
 
 ## Commands
 
-`ilot start`, `stop`, `logs`, `apps` and `env` act on the stack of the folder that you are in.
-Outside any checkout, they act on the `master` stack and say so.
-`ilot ls`, `rm` and `clean` work from any folder.
+Every command finds the workspace from the repo of the folder that you are in, so run `ilot` inside a repo of the workspace.
+`ilot start`, `stop`, `logs`, `apps` and `env` act on the stack of that folder.
+`ilot ls`, `rm` and `clean` act on every stack.
 
 ```bash
 ilot ls                       # every app of every stack: status, ports, URL; then the worktrees of each ticket stack
@@ -132,7 +140,7 @@ ilot rm proj-1234             # stop a stack and delete its state, its logs and 
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
 ilot restart                  # with no app: stop every app and the daemon, start a new daemon, then start the apps that ran
-ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login
+ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login, with the main checkout of a repo of the workspace
 ilot --version
 ilot skill print              # print the skill for AI agents
 ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
@@ -149,10 +157,21 @@ When the timeout passes while the app still runs, `ilot` keeps the app and says 
 
 ## The ilot.yaml files
 
-The root file is `devbox/ilot.yaml` in the main checkout of the platform repo.
-Only this file sets `repos` and `domain`.
+The file of a repo is `ilot.yaml` at the root of the repo. Its name and its place are fixed.
+
+Three keys describe the workspace. `ilot` reads them from the main checkout of a repo only:
+
+| Key | In | Meaning |
+|---|---|---|
+| `name` | the root | The name of the workspace, and of the root repo. It is in every URL. The default is the folder name of the main checkout. |
+| `repos` | the root | The member repos: a name and a path for each one. A relative path starts at the main checkout of the root repo. A path can start with `~/`. |
+| `member_of` | a member | The path of the root repo, relative to the main checkout of the member. |
+
+The link goes both ways. A member that the root does not list is an error, and a listed repo whose file does not name the root is an error. Each message names both files.
+A listed repo with no `ilot.yaml` declares no app. A listed repo that is not cloned is left out.
+
+Only the file of the root sets `domain`.
 `domain` is optional, and its default is `localhost`. With another domain, for example `localtest.me`, every name under it must point to this machine.
-Each entry of `repos` gives the default path of a repo and, for a repo with apps, the name of its file.
 Every repo can declare `env`, `external`, `apps` and `wrap`.
 
 `wrap` is a prefix for every `build`, `run` and `stop` command of the repo of the file.
@@ -193,6 +212,7 @@ The `build`, `run`, `stop` and `env` values can use these templates:
 | `{{.BinDir}}` | The folder for the binaries of the stack. |
 | `{{.StackDir}}` | The folder for the state and the logs of the stack. |
 | `{{.Stack}}` | The name of the stack. |
+| `{{.Workspace}}` | The name of the workspace. |
 | `{{.User}}` | Your user name on this machine. |
 | `{{.Domain}}` | The domain of the proxy URLs. |
 | `{{.ProxyPort}}` | The port of the proxy. |
@@ -204,7 +224,7 @@ An external service is a service that `ilot` does not start. It has a `port` and
 
 ### Container apps
 
-An app with a `container` block runs as a Docker container named `ilot-<app>-<stack>`.
+An app with a `container` block runs as a Docker container named `ilot-<app>-<stack>-<workspace>`.
 It needs no `run`. If the app has a `build`, it runs before the container starts.
 Docker is needed only for these apps.
 
@@ -254,9 +274,10 @@ apps:                     # one app only
   front:
     API_TOKEN: <token>
 repos:
-  platform: {path: ~/code/platform}            # a repo cloned at another path
-  mytool: {path: ~/mytool, config: ilot.yaml}  # a personal repo, on this machine only
+  web: {path: ~/elsewhere/web}   # a member repo that is cloned at another path
 ```
+
+The `ilot.yaml` of that clone still names the root with `member_of`.
 
 `ilot` builds the environment of an app in this order, and the last value wins:
 

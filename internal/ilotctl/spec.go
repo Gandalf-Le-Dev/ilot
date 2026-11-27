@@ -89,7 +89,7 @@ func (controller *Controller) processCommand(stacks stackSet, appInstance instan
 
 func (controller *Controller) shutdownCommand(stacks stackSet, appInstance instance) (string, error) {
 	if controller.isContainer(appInstance) {
-		return containerStopCommand(appInstance), nil
+		return controller.containerStopCommand(appInstance), nil
 	}
 	stop := controller.app(appInstance).Stop
 	if stop == "" {
@@ -106,7 +106,7 @@ func (controller *Controller) shutdownCommand(stacks stackSet, appInstance insta
 // The command goes to a shell as one word, because it can hold pipes and variables.
 func (controller *Controller) wrapped(appInstance instance, shellCommand string) string {
 	config, _ := controller.declaringConfig(appInstance)
-	wrap := config.RepoWrap[cmp.Or(controller.app(appInstance).Repo, appconfig.DefaultRepo)]
+	wrap := config.RepoWrap[cmp.Or(controller.app(appInstance).Repo, controller.Workspace)]
 	if wrap == "" {
 		return shellCommand
 	}
@@ -127,7 +127,7 @@ func (controller *Controller) workingDir(stacks stackSet, appInstance instance) 
 
 // The watcher runs ilot restart, so a change of a file goes through the same build lock and the same steps as a command of the user.
 // It names the stack, because the folder of an app does not always tell it: a ticket stack can run an app from a main checkout.
-func (controller *Controller) watcherSpec(watchedInstance instance, workingDir string) (ProcessSpec, bool, error) {
+func (controller *Controller) watcherSpec(watchedInstance instance, workingDir, checkoutDir string) (ProcessSpec, bool, error) {
 	watch := controller.app(watchedInstance).Watch
 	if len(watch.Paths) == 0 {
 		return ProcessSpec{}, false, nil
@@ -139,7 +139,8 @@ func (controller *Controller) watcherSpec(watchedInstance instance, workingDir s
 	if len(watch.Exts) > 0 {
 		commandParts = append(commandParts, "--exts "+strings.Join(watch.Exts, ","))
 	}
-	onChange := shellQuote(controller.IlotBinary) + " restart --stack " + shellQuote(watchedInstance.stackName) + " " + shellQuote(watchedInstance.appName)
+	// ilot finds the workspace from the repo of its folder, and the working folder of an app can be outside every repo.
+	onChange := "cd " + shellQuote(checkoutDir) + " && " + shellQuote(controller.IlotBinary) + " restart --stack " + shellQuote(watchedInstance.stackName) + " " + shellQuote(watchedInstance.appName)
 	commandParts = append(commandParts, "--", shellQuote(onChange))
 	shellEnv, err := controller.shellEnvironment()
 	if err != nil {
@@ -182,6 +183,7 @@ func readyPortName(app appconfig.App) string {
 }
 
 type templateData struct {
+	Workspace   string
 	Stack       string
 	Domain      string
 	ProxyPort   string
@@ -242,6 +244,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		return "", err
 	}
 	err = parsed.Execute(&rendered, templateData{
+		Workspace:   controller.Workspace,
 		Stack:       appInstance.stackName,
 		Domain:      controller.Config.Domain,
 		ProxyPort:   controller.ProxyPort,

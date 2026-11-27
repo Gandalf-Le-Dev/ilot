@@ -9,14 +9,17 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 type Settings struct {
-	Env   map[string]string               `yaml:"env"`
-	Apps  map[string]map[string]string    `yaml:"apps"`
-	Repos map[string]appconfig.RepoConfig `yaml:"repos"`
+	Env   map[string]string            `yaml:"env"`
+	Apps  map[string]map[string]string `yaml:"apps"`
+	Repos map[string]Repo              `yaml:"repos"`
+}
+
+// Repo gives the path of a repo that is cloned at another place than the one that the root repo declares.
+type Repo struct {
+	Path string `yaml:"path"`
 }
 
 func Load(settingsPath string) (Settings, error) {

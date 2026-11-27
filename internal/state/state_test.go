@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -80,29 +81,10 @@ func TestLockCanBeTakenAgainAfterRelease(t *testing.T) {
 	}
 }
 
-func TestLoadMapsALegacyWorktreeDir(t *testing.T) {
-	store := Store{RootDir: t.TempDir()}
-	if err := os.MkdirAll(store.StackDir("proj-1234"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	legacyState := `{"name": "proj-1234", "worktree_dir": "/worktrees/proj-1234", "apps": {}}`
-	if err := os.WriteFile(filepath.Join(store.StackDir("proj-1234"), "state.json"), []byte(legacyState), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := store.Load("proj-1234")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if loaded.CheckoutDirs["platform"] != "/worktrees/proj-1234" {
-		t.Errorf("CheckoutDirs = %v", loaded.CheckoutDirs)
-	}
-}
-
 func TestSaveKeepsTheStateReadableByItsOwnerOnly(t *testing.T) {
 	store := Store{RootDir: t.TempDir()}
 
-	if err := store.Save(StackState{Name: "proj-1234", CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]AppState{}}); err != nil {
+	if err := store.Save(StackState{Name: "proj-1234", CheckoutDirs: map[string]string{}, Apps: map[string]AppState{}}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
@@ -114,5 +96,39 @@ func TestSaveKeepsTheStateReadableByItsOwnerOnly(t *testing.T) {
 		if info.Mode().Perm() != wantMode {
 			t.Errorf("%s mode = %o, want %o", path, info.Mode().Perm(), wantMode)
 		}
+	}
+}
+
+func TestClaimKeepsTheStateForOneWorkspace(t *testing.T) {
+	store := Store{RootDir: filepath.Join(t.TempDir(), "ilot")}
+	shopDir, otherShopDir, blogDir := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := store.Claim("shop", shopDir); err != nil {
+		t.Fatalf("the first claim: %v", err)
+	}
+	if err := store.Claim("shop", shopDir); err != nil {
+		t.Fatalf("the same workspace again: %v", err)
+	}
+
+	err := store.Claim("shop", otherShopDir)
+	if err == nil || !strings.Contains(err.Error(), "Set name") || !strings.Contains(err.Error(), shopDir) || !strings.Contains(err.Error(), otherShopDir) {
+		t.Errorf("a second workspace of the same name = %v, want an error that names both folders and the name key", err)
+	}
+	err = store.Claim("blog", blogDir)
+	if err == nil || !strings.Contains(err.Error(), `"shop"`) || !strings.Contains(err.Error(), "XDG_STATE_HOME") {
+		t.Errorf("another workspace = %v, want an error that names the owner and the way out", err)
+	}
+	if err := store.Claim("store", shopDir); err != nil {
+		t.Errorf("the same root with a new name = %v, want the new name recorded", err)
+	}
+}
+
+func TestClaimTakesTheStateOfAWorkspaceWhoseFolderIsGone(t *testing.T) {
+	store := Store{RootDir: t.TempDir()}
+	if err := store.Claim("shop", filepath.Join(t.TempDir(), "deleted")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Claim("blog", t.TempDir()); err != nil {
+		t.Errorf("Claim after the owner was deleted = %v, want none", err)
 	}
 }

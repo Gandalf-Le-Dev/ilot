@@ -126,7 +126,7 @@ func (machine *e2eMachine) daemonLog() string {
 
 func (machine *e2eMachine) copySampleWorkspace(sampleDir string) (mainCheckout string) {
 	machine.t.Helper()
-	mainCheckout = filepath.Join(machine.homeDir, "src", "platform")
+	mainCheckout = filepath.Join(machine.homeDir, "src", "shop")
 	if err := os.CopyFS(mainCheckout, os.DirFS(sampleDir)); err != nil {
 		machine.t.Fatal(err)
 	}
@@ -216,10 +216,10 @@ func (machine *e2eMachine) appPIDs() map[string]int {
 	return pidByName
 }
 
-func (machine *e2eMachine) statusByApp() map[string]string {
+func (machine *e2eMachine) statusByApp(dirInWorkspace string) map[string]string {
 	machine.t.Helper()
 	command := exec.Command(machine.ilotBinary, "ls", "--json")
-	command.Dir = machine.homeDir
+	command.Dir = dirInWorkspace
 	command.Env = machine.environ
 	output, err := command.Output()
 	if err != nil {
@@ -238,22 +238,22 @@ func (machine *e2eMachine) statusByApp() map[string]string {
 
 func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	machine := newE2EMachine(t)
-	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "platform"))
+	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "shop"))
 
 	startOutput := machine.ilot(mainCheckout, "start", "hello")
 	_, proxyPort, _ := net.SplitHostPort(machine.proxyAddress)
-	if wantURL := "http://hello.master.localhost:" + proxyPort; !strings.Contains(startOutput, wantURL) {
+	if wantURL := "http://hello.master.shop.localhost:" + proxyPort; !strings.Contains(startOutput, wantURL) {
 		t.Errorf("ilot start printed %q, want the URL %s", startOutput, wantURL)
 	}
-	machine.wantBody("hello.master.localhost", "hello from master\n")
+	machine.wantBody("hello.master.shop.localhost", "hello from master\n")
 
-	worktree := filepath.Join(machine.homeDir, "src", "platform-retry")
+	worktree := filepath.Join(machine.homeDir, "src", "shop-retry")
 	machine.git(mainCheckout, "worktree", "add", "--quiet", worktree, "-b", "PROJ-1-retry-jobs")
 	machine.ilot(worktree, "start", "hello")
-	machine.wantBody("hello.proj-1.localhost", "hello from proj-1\n")
-	machine.wantBody("hello.master.localhost", "hello from master\n")
+	machine.wantBody("hello.proj-1.shop.localhost", "hello from proj-1\n")
+	machine.wantBody("hello.master.shop.localhost", "hello from master\n")
 
-	if status, body, err := machine.get("unknown.localhost"); err != nil || status != http.StatusNotFound || !strings.Contains(body, "hello.proj-1.localhost") {
+	if status, body, err := machine.get("unknown.localhost"); err != nil || status != http.StatusNotFound || !strings.Contains(body, "hello.proj-1.shop.localhost") {
 		t.Errorf("GET of an unknown host = %d %q, %v; want the 404 page that lists the routes", status, body, err)
 	}
 
@@ -267,7 +267,7 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitUntilGone(t, "the killed daemon", killedDaemon.PID)
-	if _, _, err := machine.get("hello.master.localhost"); err == nil {
+	if _, _, err := machine.get("hello.master.shop.localhost"); err == nil {
 		t.Fatal("the proxy still answers after the daemon was killed")
 	}
 
@@ -275,19 +275,19 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	machine.ilot(worktree, "start", "hello")
 
 	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.master"], pidsBeforeTheKill["hello.proj-1"])
-	machine.wantBody("hello.master.localhost", "hello from master\n")
-	machine.wantBody("hello.proj-1.localhost", "hello from proj-1\n")
-	if statusByApp := machine.statusByApp(); statusByApp["hello.master"] != "ready" || statusByApp["hello.proj-1"] != "ready" {
+	machine.wantBody("hello.master.shop.localhost", "hello from master\n")
+	machine.wantBody("hello.proj-1.shop.localhost", "hello from proj-1\n")
+	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.master"] != "ready" || statusByApp["hello.proj-1"] != "ready" {
 		t.Errorf("ilot ls = %v, want both apps ready", statusByApp)
 	}
 
 	pidByName := machine.appPIDs()
 	machine.ilot(worktree, "stop", "hello")
 	waitUntilGone(t, "the stopped app", pidByName["hello.proj-1"])
-	if status, body, err := machine.get("hello.proj-1.localhost"); err != nil || status != http.StatusServiceUnavailable || !strings.Contains(body, "ilot start hello") {
+	if status, body, err := machine.get("hello.proj-1.shop.localhost"); err != nil || status != http.StatusServiceUnavailable || !strings.Contains(body, "ilot start hello") {
 		t.Errorf("GET of the stopped app = %d %q, %v; want the 503 page with the command that starts it", status, body, err)
 	}
-	machine.wantBody("hello.master.localhost", "hello from master\n")
+	machine.wantBody("hello.master.shop.localhost", "hello from master\n")
 
 	daemonStatus, err := machine.daemonClient().Status(t.Context())
 	if err != nil {
@@ -316,13 +316,13 @@ func requireDocker(t *testing.T) {
 func TestEndToEndAContainerAppAnswersBehindTheProxy(t *testing.T) {
 	requireDocker(t)
 	machine := newE2EMachine(t)
-	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "platform"))
-	const containerName = "ilot-web-master"
+	mainCheckout := machine.copySampleWorkspace(filepath.Join("testdata", "e2e", "shop"))
+	const containerName = "ilot-web-master-shop"
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "--force", containerName).Run() })
 
 	machine.ilot(mainCheckout, "start", "--timeout", "5m", "web")
 
-	if status, body, err := machine.get("web.master.localhost"); err != nil || status != http.StatusOK || !strings.Contains(body, "nginx") {
+	if status, body, err := machine.get("web.master.shop.localhost"); err != nil || status != http.StatusOK || !strings.Contains(body, "nginx") {
 		t.Fatalf("GET of the container through the proxy = %d %q, %v; want the page of nginx\n%s", status, body, err, machine.daemonLog())
 	}
 	published, err := exec.Command("docker", "port", containerName, "80/tcp").Output()

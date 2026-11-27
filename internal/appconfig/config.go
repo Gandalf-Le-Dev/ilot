@@ -17,15 +17,21 @@ import (
 const (
 	ReservedPortFirst = 20000
 	ReservedPortLast  = 29999
-	DefaultRepo       = "platform"
+	// The file of a repo. Its name and its place, the root of the repo, are fixed.
+	FileName = "ilot.yaml"
 	// Every name under localhost points to this machine, with no DNS setup.
 	DefaultDomain = "localhost"
 )
 
 type Config struct {
-	Domain string                `yaml:"domain"`
-	Repos  map[string]RepoConfig `yaml:"repos"`
-	Env    map[string]string     `yaml:"env"`
+	Domain string `yaml:"domain"`
+	// The three keys of the workspace. ilot reads them from the main checkout of a repo only.
+	// Name and Repos belong to the root repo of the workspace. The default name is the folder name of the root.
+	Name  string    `yaml:"name"`
+	Repos RepoPaths `yaml:"repos"`
+	// The path of the root repo, in the file of a member repo. The root must list the member in its repos.
+	MemberOf string            `yaml:"member_of"`
+	Env      map[string]string `yaml:"env"`
 	// The prefix of every build, run and stop command of the repo of this file, for example "mise exec --".
 	Wrap     string                       `yaml:"wrap"`
 	External map[string]ExternalService   `yaml:"external"`
@@ -34,9 +40,23 @@ type Config struct {
 	RepoWrap map[string]string            `yaml:"-"`
 }
 
-type RepoConfig struct {
-	Path   string `yaml:"path"`
-	Config string `yaml:"config"`
+// RepoPaths gives the path of each member repo, relative to the main checkout of the root repo.
+type RepoPaths map[string]string
+
+func (repoPaths *RepoPaths) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: repos is a map from the name of a repo to its path, for example {web: ../web}", node.Line)
+	}
+	paths := RepoPaths{}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		name, path := node.Content[index], node.Content[index+1]
+		if path.Kind != yaml.ScalarNode {
+			return fmt.Errorf("line %d: repos.%s is now the path of the repo, relative to this repo, for example %s: ../%s. The keys path and config are gone: the file of a repo is always %s at its root", path.Line, name.Value, name.Value, name.Value, FileName)
+		}
+		paths[name.Value] = path.Value
+	}
+	*repoPaths = paths
+	return nil
 }
 
 type ExternalService struct {
@@ -120,28 +140,63 @@ func Parse(configPath string) (Config, error) {
 	decoder.KnownFields(true)
 	var config Config
 	if err := decoder.Decode(&config); err != nil {
-		if isUnknownFieldError(err) {
-			return Config{}, fmt.Errorf("parse %s: %w\nyour platform main checkout can be older than this file: pull it", configPath, err)
-		}
-		return Config{}, fmt.Errorf("parse %s: %w", configPath, err)
+		return Config{}, fmt.Errorf("parse %s: %w", configPath, errors.Join(append([]error{err}, hintsForUnknownKeys(err)...)...))
 	}
 	return config, nil
 }
 
-func isUnknownFieldError(err error) bool {
-	var typeError *yaml.TypeError
-	if !errors.As(err, &typeError) {
-		return false
-	}
-	return slices.ContainsFunc(typeError.Errors, func(message string) bool { return strings.Contains(message, "not found in type") })
+var unknownKeyPattern = regexp.MustCompile(`field (\S+) not found in type \w+\.(\w+)`)
+
+// What replaced a key that an older ilot.yaml can still hold, by the type that held it.
+var replacementOfRemovedKey = map[string]map[string]string{
+	"App": {
+		"gateway":            "it is gone: the port and url templates give the address of an app",
+		"gateway_aliases":    "it is gone: the port and url templates give the address of an app",
+		"temporal_namespace": "it is gone, with no replacement",
+	},
+	"Config": {
+		"gateway_base_file": "it is gone: the port and url templates give the address of an app",
+	},
+	"ExternalService": {
+		"gateway_aliases": "it is gone: the port template gives the port of an external service",
+	},
+	"Container": {
+		"links":          "it is gone: use the host and port templates for the address of another app",
+		"external_links": "it is gone: use the host and port templates for the address of another app",
+	},
 }
 
-// The repo list and the domain come from platform's config only.
-func Merge(configByRepo map[string]Config) (Config, error) {
-	rootConfig := configByRepo[DefaultRepo]
+// The usual cause of an unknown key is a key that a newer ilot removed or renamed, so each one gets its replacement.
+func hintsForUnknownKeys(err error) []error {
+	typeError, isTypeError := errors.AsType[*yaml.TypeError](err)
+	if !isTypeError {
+		return nil
+	}
+	var hints []error
+	hasUnknownKey := false
+	for _, message := range typeError.Errors {
+		match := unknownKeyPattern.FindStringSubmatch(message)
+		if match == nil {
+			continue
+		}
+		hasUnknownKey = true
+		if replacement, isRemoved := replacementOfRemovedKey[match[2]][match[1]]; isRemoved {
+			hints = append(hints, fmt.Errorf("%s: %s", match[1], replacement))
+		}
+	}
+	if hasUnknownKey && len(hints) == 0 {
+		hints = append(hints, errors.New("the README of ilot lists the keys of this file"))
+	}
+	return hints
+}
+
+// The domain comes from the file of the root repo only.
+func Merge(rootRepo string, configByRepo map[string]Config) (Config, error) {
 	merged := Config{
-		Domain:   cmp.Or(rootConfig.Domain, DefaultDomain),
-		Repos:    rootConfig.Repos,
+		Domain:   cmp.Or(configByRepo[rootRepo].Domain, DefaultDomain),
+		Name:     "",
+		Repos:    nil,
+		MemberOf: "",
 		Env:      nil,
 		External: map[string]ExternalService{},
 		Apps:     map[string]App{},

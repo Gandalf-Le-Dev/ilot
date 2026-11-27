@@ -3,8 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -21,30 +19,26 @@ type checkCommand struct {
 }
 
 func (command *checkCommand) Run() error {
-	currentDir, err := os.Getwd()
+	checkedDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	var currentWorkspace *workspace.Workspace
-	loadedWorkspace, err := loadCurrentWorkspace()
-	switch {
-	case err == nil:
-		currentWorkspace = &loadedWorkspace
-	case command.Path == "":
-		return err
-	}
-	checkedRepo, checkedFile, err := configFileToCheck(currentWorkspace, currentDir, command.Path)
-	if err != nil {
-		return err
-	}
-	otherFileByRepo := map[string]string{}
-	if currentWorkspace != nil {
-		otherFileByRepo, err = otherConfigFiles(*currentWorkspace, currentDir, checkedRepo)
-		if err != nil {
+	requestedFile := ""
+	if command.Path != "" {
+		if requestedFile, err = workspace.Canonical(command.Path); err != nil {
 			return err
 		}
+		checkedDir = filepath.Dir(requestedFile)
 	}
-	problems := checkConfigFile(checkedRepo, checkedFile, otherFileByRepo)
+	currentWorkspace, checkout, err := findWorkspaceOf(checkedDir)
+	if err != nil {
+		return err
+	}
+	checkedFile, otherFileByRepo, err := configFilesToCheck(currentWorkspace, checkout, requestedFile)
+	if err != nil {
+		return err
+	}
+	problems := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), checkout.Repo, checkedFile, otherFileByRepo)
 	for _, problem := range problems {
 		fmt.Fprintln(os.Stderr, problem)
 	}
@@ -58,7 +52,7 @@ func (command *checkCommand) Run() error {
 	return nil
 }
 
-func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
+func checkConfigFile(workspaceName string, repoNames []string, checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
 	fileByRepo := map[string]string{checkedRepo: checkedFile}
 	for repoName, configFile := range otherFileByRepo {
 		if repoName != checkedRepo {
@@ -78,12 +72,12 @@ func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string
 	if len(problems) > 0 {
 		return problems
 	}
-	merged, err := appconfig.Merge(configByRepo)
+	merged, err := appconfig.Merge(workspaceName, configByRepo)
 	if err != nil {
 		mergedFiles := slices.Sorted(maps.Values(fileByRepo))
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
 	}
-	for _, problem := range ilotctl.CheckRendering(merged) {
+	for _, problem := range ilotctl.CheckRendering(workspaceName, repoNames, merged) {
 		var renderProblem ilotctl.RenderProblem
 		if errors.As(problem, &renderProblem) {
 			problem = fmt.Errorf("%s: %w", fileByRepo[renderProblem.Repo], problem)
@@ -93,64 +87,33 @@ func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string
 	return problems
 }
 
-// A nil workspace is CI: no repo layout, so a file is known only by its own repos: list.
-func configFileToCheck(currentWorkspace *workspace.Workspace, currentDir, requestedPath string) (repoName, configFile string, err error) {
-	if requestedPath != "" {
-		return repoOfConfigFile(currentWorkspace, requestedPath)
-	}
-	_, checkout, err := currentWorkspace.StackOf(currentDir, false, io.Discard)
-	if err != nil {
-		return "", "", err
-	}
-	relativeConfigPath := currentWorkspace.RepoConfigs[checkout.Repo].Config
-	if relativeConfigPath == "" {
-		return "", "", fmt.Errorf("repo %s has no config file in the repos: list of %s", checkout.Repo, workspace.PlatformConfigPath)
-	}
-	return checkout.Repo, filepath.Join(checkout.Dir, relativeConfigPath), nil
-}
-
-func repoOfConfigFile(currentWorkspace *workspace.Workspace, requestedPath string) (repoName, configFile string, err error) {
-	configFile, err = workspace.Canonical(requestedPath)
-	if err != nil {
-		return "", "", err
-	}
-	if currentWorkspace != nil {
-		if checkout, err := currentWorkspace.Locate(filepath.Dir(configFile)); err == nil {
-			if repoName, err := currentWorkspace.RepoOf(checkout); err == nil {
-				return repoName, configFile, nil
-			}
+// configFilesToCheck gives the file to check and the files that the stack of its checkout merges it with.
+// With no requested file, the checked file is the one that the checkout reads: its own, else the one of the main checkout.
+func configFilesToCheck(currentWorkspace workspace.Workspace, checkout workspace.Worktree, requestedFile string) (checkedFile string, otherFileByRepo map[string]string, err error) {
+	checkedFile = requestedFile
+	if checkedFile == "" {
+		ownFile, hasFile := workspace.ConfigFileOf(checkout)
+		if !hasFile {
+			return "", nil, fmt.Errorf("the repo %s has no %s in %s", checkout.Repo, appconfig.FileName, checkout.Dir)
 		}
+		checkedFile = ownFile
 	}
-	config, err := appconfig.Parse(configFile)
+	stackName, err := workspace.StackName(checkout)
 	if err != nil {
-		return "", "", err
-	}
-	if len(config.Repos) == 0 {
-		return "", "", fmt.Errorf("%s is in no checkout that ilot knows and has no repos: list, so ilot cannot tell its repo", configFile)
-	}
-	return appconfig.DefaultRepo, configFile, nil
-}
-
-func otherConfigFiles(currentWorkspace workspace.Workspace, currentDir, checkedRepo string) (map[string]string, error) {
-	stackName, _, err := currentWorkspace.StackOf(currentDir, false, io.Discard)
-	if err != nil {
-		stackName = workspace.MasterStackName
+		return "", nil, err
 	}
 	checkoutByRepo, err := currentWorkspace.CheckoutsForStack(stackName)
 	if err != nil && !workspace.IsSeveralWorktrees(err) {
-		return nil, err
+		return "", nil, err
 	}
-	fileByRepo := map[string]string{}
-	for repoName, checkout := range checkoutByRepo {
-		relativeConfigPath := currentWorkspace.RepoConfigs[repoName].Config
-		if repoName == checkedRepo || relativeConfigPath == "" {
+	otherFileByRepo = map[string]string{}
+	for repoName, otherCheckout := range checkoutByRepo {
+		if repoName == checkout.Repo {
 			continue
 		}
-		configFile := filepath.Join(checkout.Dir, relativeConfigPath)
-		if _, err := os.Stat(configFile); errors.Is(err, fs.ErrNotExist) {
-			continue
+		if otherFile, hasFile := workspace.ConfigFileOf(otherCheckout); hasFile {
+			otherFileByRepo[repoName] = otherFile
 		}
-		fileByRepo[repoName] = configFile
 	}
-	return fileByRepo, nil
+	return checkedFile, otherFileByRepo, nil
 }

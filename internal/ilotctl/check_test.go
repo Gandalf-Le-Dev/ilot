@@ -9,7 +9,7 @@ import (
 )
 
 func TestCheckRenderingAcceptsAValidConfig(t *testing.T) {
-	if problems := CheckRendering(testConfig()); len(problems) != 0 {
+	if problems := CheckRendering("platform", []string{"portal"}, testConfig()); len(problems) != 0 {
 		t.Fatalf("CheckRendering = %v, want no problem", errors.Join(problems...))
 	}
 }
@@ -18,7 +18,7 @@ func TestCheckRenderingReportsATemplateTypoWithItsApp(t *testing.T) {
 	config := testConfig()
 	config.Apps["typo-api"] = appconfig.App{Run: `api --port={{port "gateway" "htp"}}`}
 
-	problems := CheckRendering(config)
+	problems := CheckRendering("platform", []string{"portal"}, config)
 
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "typo-api") || !strings.Contains(problems[0].Error(), "htp") {
 		t.Fatalf("CheckRendering = %v, want one problem naming typo-api and htp", errors.Join(problems...))
@@ -29,7 +29,7 @@ func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
 	config := testConfig()
 	config.Apps["stoppable"] = appconfig.App{Run: "docker run --name stoppable nginx", Stop: "docker stop {{.Stak}}"}
 
-	problems := CheckRendering(config)
+	problems := CheckRendering("platform", []string{"portal"}, config)
 
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "stoppable") || !strings.Contains(problems[0].Error(), "Stak") {
 		t.Fatalf("CheckRendering = %v, want one problem naming stoppable and Stak", errors.Join(problems...))
@@ -42,7 +42,7 @@ func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
 		Container: appconfig.Container{Image: "registry/mounting:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{`{{repo "nowhere"}}`: "/src"}},
 	}
 
-	problems := CheckRendering(config)
+	problems := CheckRendering("platform", []string{"portal"}, config)
 
 	if len(problems) == 0 || !strings.Contains(errors.Join(problems...).Error(), "nowhere") {
 		t.Fatalf("CheckRendering = %v, want a problem naming the unknown repo", errors.Join(problems...))
@@ -59,7 +59,7 @@ func TestCheckRenderingReportsEveryBrokenTemplateOfAnApp(t *testing.T) {
 		}, Args: []string{"--label={{.NoSuchField}}"}},
 	}
 
-	problems := CheckRendering(config)
+	problems := CheckRendering("platform", []string{"portal"}, config)
 
 	if len(problems) != 5 {
 		t.Fatalf("CheckRendering = %d problems, want 5 (two env values, two mounts, one flag of docker run):\n%v", len(problems), errors.Join(problems...))
@@ -75,7 +75,7 @@ func TestCheckRenderingTagsEachProblemWithTheRepoOfItsApp(t *testing.T) {
 	config := testConfig()
 	config.Apps["portal-typo"] = appconfig.App{Repo: "portal", Run: `api --port={{port "gateway" "htp"}}`}
 
-	problems := CheckRendering(config)
+	problems := CheckRendering("platform", []string{"portal"}, config)
 
 	var renderProblem RenderProblem
 	if len(problems) != 1 || !errors.As(problems[0], &renderProblem) || renderProblem.Repo != "portal" {

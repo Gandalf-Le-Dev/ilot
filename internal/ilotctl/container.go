@@ -12,8 +12,9 @@ import (
 // The name that Docker gives to this machine, as a container sees it.
 const hostNameInContainer = "host.docker.internal"
 
-func containerName(appInstance instance) string {
-	return "ilot-" + appInstance.appName + "-" + appInstance.stackName
+// The workspace is in the name, because two workspaces can have an app of one name in the base stack.
+func (controller *Controller) containerName(appInstance instance) string {
+	return "ilot-" + appInstance.appName + "-" + appInstance.stackName + "-" + controller.Workspace
 }
 
 func (controller *Controller) isContainer(appInstance instance) bool {
@@ -24,7 +25,7 @@ func (controller *Controller) isContainer(appInstance instance) bool {
 // Each port is published on the loopback address, so the proxy and the other apps reach a container as they reach a process.
 func (controller *Controller) containerCommand(stacks stackSet, appInstance instance, envEntries []EnvEntry) (string, error) {
 	container := controller.app(appInstance).Container
-	name := shellQuote(containerName(appInstance))
+	name := shellQuote(controller.containerName(appInstance))
 	commandParts := []string{
 		"docker rm -f " + name + " >/dev/null 2>&1 || true && exec docker run --rm --name " + name,
 		// Docker Desktop knows this name. Docker on Linux needs the flag.
@@ -62,8 +63,8 @@ func (controller *Controller) containerCommand(stacks stackSet, appInstance inst
 }
 
 // docker run only forwards SIGTERM, and Postgres answers it by waiting for its clients: docker stop kills after 10 s.
-func containerStopCommand(appInstance instance) string {
-	return "docker stop --time 10 " + shellQuote(containerName(appInstance))
+func (controller *Controller) containerStopCommand(appInstance instance) string {
+	return "docker stop --time 10 " + shellQuote(controller.containerName(appInstance))
 }
 
 // Personal top-level env is for processes: it can hold tokens that third-party images have no business reading. The shell is for the docker command, not for the image.
@@ -78,7 +79,7 @@ func (controller *Controller) readyProbe(stacks stackSet, appInstance instance) 
 	app := controller.app(appInstance)
 	probe := daemon.Probe{Host: "", Port: stacks.app(appInstance).Ports[readyPortName(app)], Path: app.Ready.Path, Command: app.Ready.Command}
 	if controller.isContainer(appInstance) && app.Ready.Command != "" {
-		probe.Command = "docker exec " + shellQuote(containerName(appInstance)) + " sh -c " + shellQuote(app.Ready.Command)
+		probe.Command = "docker exec " + shellQuote(controller.containerName(appInstance)) + " sh -c " + shellQuote(app.Ready.Command)
 	}
 	if probe.Validate() != nil {
 		return nil

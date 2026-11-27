@@ -89,17 +89,36 @@ func TestLoadRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
-func TestParseOfAnUnknownFieldAsksForAPull(t *testing.T) {
+func TestParseOfAnUnknownKeyPointsToTheReadme(t *testing.T) {
 	_, err := Parse(writeConfigFile(t, "apps:\n  web: {run: x, newfield: 1}\n"))
-	if err == nil || !strings.Contains(err.Error(), "newfield") || !strings.HasSuffix(err.Error(), "\nyour platform main checkout can be older than this file: pull it") {
-		t.Fatalf("err = %v, want the unknown field and the pull hint", err)
+	if err == nil || !strings.Contains(err.Error(), "newfield") || !strings.Contains(err.Error(), "README") {
+		t.Fatalf("err = %v, want the unknown key and where the keys are listed", err)
 	}
 }
 
-func TestParseOfBrokenYAMLHasNoPullHint(t *testing.T) {
+func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
+	testCases := []struct {
+		yaml            string
+		wantErrorSubstr string
+	}{
+		{yaml: "apps:\n  web: {run: x, gateway: true}\n", wantErrorSubstr: "gateway: it is gone: the port and url templates"},
+		{yaml: "apps:\n  web: {run: x, temporal_namespace: true}\n", wantErrorSubstr: "temporal_namespace: it is gone"},
+		{yaml: "gateway_base_file: gw.json\n", wantErrorSubstr: "gateway_base_file: it is gone"},
+		{yaml: "apps:\n  db:\n    container: {image: x, links: {a: b}}\n", wantErrorSubstr: "links: it is gone: use the host and port templates"},
+		{yaml: "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\n", wantErrorSubstr: "portal: ../portal"},
+	}
+	for _, testCase := range testCases {
+		_, err := Parse(writeConfigFile(t, testCase.yaml))
+		if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) {
+			t.Errorf("Parse(%q) = %v, want an error with %q", testCase.yaml, err, testCase.wantErrorSubstr)
+		}
+	}
+}
+
+func TestParseOfBrokenYAMLHasNoHintAboutKeys(t *testing.T) {
 	_, err := Parse(writeConfigFile(t, "apps: [\n"))
-	if err == nil || strings.Contains(err.Error(), "pull it") {
-		t.Fatalf("err = %v, want a parse error without the pull hint", err)
+	if err == nil || strings.Contains(err.Error(), "README") {
+		t.Fatalf("err = %v, want a parse error without the hint about keys", err)
 	}
 }
 
@@ -225,17 +244,17 @@ func TestValidateAcceptsValidConfig(t *testing.T) {
 }
 
 func TestParseReadsTheRepoListAndRepoEnv(t *testing.T) {
-	config, err := Parse(writeConfigFile(t, "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
+	config, err := Parse(writeConfigFile(t, "name: shop\nrepos:\n  portal: ../portal\nenv:\n  LOG_LEVEL: info\napps:\n  api: {run: api}\n"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if config.Repos["portal"].Path != "~/portal" || config.Repos["portal"].Config != "ilot.yaml" || config.Env["LOG_LEVEL"] != "info" {
+	if config.Name != "shop" || config.Repos["portal"] != "../portal" || config.Env["LOG_LEVEL"] != "info" {
 		t.Errorf("config = %+v", config)
 	}
 }
 
 func TestMergeSetsTheRepoOfEachApp(t *testing.T) {
-	merged, err := Merge(map[string]Config{
+	merged, err := Merge("platform", map[string]Config{
 		"platform": {Domain: "dev.example.net", Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
 		"portal":   {Env: map[string]string{"LOG_LEVEL": "info"}, Apps: map[string]App{"portal-api": {Run: "api"}}},
 	})
@@ -251,7 +270,7 @@ func TestMergeSetsTheRepoOfEachApp(t *testing.T) {
 }
 
 func TestMergeRefusesAnAppDeclaredByTwoRepos(t *testing.T) {
-	_, err := Merge(map[string]Config{
+	_, err := Merge("platform", map[string]Config{
 		"platform": {Apps: map[string]App{"api": {Run: "api"}}},
 		"portal":   {Apps: map[string]App{"api": {Run: "api"}}},
 	})
@@ -327,7 +346,7 @@ func TestParseReadsTheContainerBlockAndRefusesTheOldLinks(t *testing.T) {
 }
 
 func TestMergeGivesTheLocalhostDomainWhenNoFileSetsOne(t *testing.T) {
-	merged, err := Merge(map[string]Config{"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}}})
+	merged, err := Merge("platform", map[string]Config{"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}}})
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -337,7 +356,7 @@ func TestMergeGivesTheLocalhostDomainWhenNoFileSetsOne(t *testing.T) {
 }
 
 func TestMergeKeepsTheWrapOfEachRepo(t *testing.T) {
-	merged, err := Merge(map[string]Config{
+	merged, err := Merge("platform", map[string]Config{
 		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
 		"portal":   {Wrap: "mise exec --", Apps: map[string]App{"front": {Run: "npm run dev"}}},
 	})

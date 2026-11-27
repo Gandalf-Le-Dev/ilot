@@ -16,7 +16,11 @@ func (controller *Controller) applyAll(ctx context.Context, stacks stackSet) err
 			return err
 		}
 		specs = append(specs, spec)
-		watcher, isWatched, err := controller.watcherSpec(runningInstance, spec.Dir)
+		checkoutDir, err := controller.checkoutDir(stacks, runningInstance)
+		if err != nil {
+			return err
+		}
+		watcher, isWatched, err := controller.watcherSpec(runningInstance, spec.Dir, checkoutDir)
 		if err != nil {
 			return err
 		}

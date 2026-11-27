@@ -56,18 +56,6 @@ func gitRepoWithFiles(t *testing.T, contentByPath map[string]string) string {
 	return gitRepoAt(t, canonicalTempDir(t), contentByPath)
 }
 
-func homeWithPersonalFile(t *testing.T, content string) string {
-	t.Helper()
-	homeDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(homeDir, ".config", "ilot"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(homeDir, workspace.PersonalSettingsPath), []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return homeDir
-}
-
 func countingGit() (*workspace.Git, *int) {
 	git := workspace.NewGit()
 	processCount := 0

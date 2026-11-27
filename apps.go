@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type appsCommand struct {
@@ -35,15 +36,11 @@ type declaredExternalService struct {
 }
 
 func (command *appsCommand) Run() error {
-	currentDir, err := os.Getwd()
+	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return err
 	}
-	currentWorkspace, err := loadCurrentWorkspace()
-	if err != nil {
-		return err
-	}
-	stackName, _, err := currentWorkspace.StackOf(currentDir, false, os.Stderr)
+	stackName, err := workspace.StackName(worktree)
 	if err != nil {
 		return err
 	}

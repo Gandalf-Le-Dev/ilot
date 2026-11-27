@@ -23,7 +23,7 @@ func TestCheckConfigFileFindsAnAppDeclaredInTwoFiles(t *testing.T) {
 	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  shared-name: {run: one}\n")
 	portalFile := writeConfigFile(t, "apps:\n  shared-name: {run: two}\n")
 
-	problems := checkConfigFile("portal", portalFile, map[string]string{"platform": platformFile})
+	problems := checkConfigFile("platform", []string{"platform", "portal"}, "portal", portalFile, map[string]string{"platform": platformFile})
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "platform") || !strings.Contains(joined.Error(), "portal") {
@@ -31,31 +31,67 @@ func TestCheckConfigFileFindsAnAppDeclaredInTwoFiles(t *testing.T) {
 	}
 }
 
-func TestCheckWithoutAPathUsesTheRepoOfTheCurrentFolder(t *testing.T) {
-	portalDir := gitRepoWithFiles(t, map[string]string{"ilot.yaml": "apps:\n  portal-api: {run: api}\n"})
-	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/ilot.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: ilot.yaml}\napps:\n  standalone: {run: standalone}\n",
-	})
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  portal: {path: "+portalDir+"}\n")
-	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
+func shopAndWebForCheck(t *testing.T) (shopDir, webDir string) {
+	t.Helper()
+	codeDir := canonicalTempDir(t)
+	shopDir = gitRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\napps:\n  api: {run: api, ports: [http]}\n"})
+	webDir = gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  front: {run: 'front --api={{port \"api\"}}'}\n"})
+	return shopDir, webDir
+}
+
+func TestCheckWithoutAPathChecksTheFileOfTheCheckoutWithTheFilesOfTheOtherRepos(t *testing.T) {
+	shopDir, webDir := shopAndWebForCheck(t)
+	currentWorkspace, checkout, err := workspace.Find(webDir, t.TempDir(), workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	repoName, configFile, err := configFileToCheck(&currentWorkspace, portalDir, "")
+	checkedFile, otherFileByRepo, err := configFilesToCheck(currentWorkspace, checkout, "")
 
-	if err != nil || repoName != "portal" || configFile != filepath.Join(portalDir, "ilot.yaml") {
-		t.Fatalf("configFileToCheck = %q, %q, %v; want portal and its ilot.yaml", repoName, configFile, err)
+	if err != nil || checkedFile != filepath.Join(webDir, "ilot.yaml") || len(otherFileByRepo) != 1 || otherFileByRepo["shop"] != filepath.Join(shopDir, "ilot.yaml") {
+		t.Fatalf("configFilesToCheck = %q, %v, %v; want the file of web with the file of shop", checkedFile, otherFileByRepo, err)
+	}
+	if problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, checkout.Repo, checkedFile, otherFileByRepo); len(problems) != 0 {
+		t.Errorf("checkConfigFile = %v, want no problem", problems)
 	}
 }
 
-func TestCheckOfAFileOutsideAnyCheckoutNeedsARepoList(t *testing.T) {
-	configFile := writeConfigFile(t, "apps:\n  lonely: {run: lonely}\n")
+func TestCheckInAWorktreeWithNoFileChecksTheFileOfTheMainCheckout(t *testing.T) {
+	_, webDir := shopAndWebForCheck(t)
+	webWorktreeDir := filepath.Join(filepath.Dir(webDir), "web-retry")
+	runGitInTest(t, webDir, "worktree", "add", "-q", "-b", "retry", webWorktreeDir)
+	runGitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
+	currentWorkspace, checkout, err := workspace.Find(webWorktreeDir, t.TempDir(), workspace.NewGit())
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, _, err := configFileToCheck(nil, filepath.Dir(configFile), configFile)
+	checkedFile, _, err := configFilesToCheck(currentWorkspace, checkout, "")
 
-	if err == nil || !strings.Contains(err.Error(), "repos:") {
-		t.Fatalf("configFileToCheck = %v, want an error that asks for a repos: list", err)
+	if err != nil || checkedFile != filepath.Join(webDir, "ilot.yaml") {
+		t.Fatalf("configFilesToCheck = %q, %v; want the file of the main checkout of web", checkedFile, err)
+	}
+}
+
+func TestCheckOfARequestedFileKeepsThatFile(t *testing.T) {
+	shopDir, _ := shopAndWebForCheck(t)
+	draftFile := filepath.Join(shopDir, "draft.yaml")
+	if err := os.WriteFile(draftFile, []byte("apps: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	currentWorkspace, checkout, err := workspace.Find(shopDir, t.TempDir(), workspace.NewGit())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkedFile, otherFileByRepo, err := configFilesToCheck(currentWorkspace, checkout, draftFile)
+
+	if err != nil || checkedFile != draftFile || len(otherFileByRepo) != 1 {
+		t.Fatalf("configFilesToCheck = %q, %v, %v; want the draft with the file of web", checkedFile, otherFileByRepo, err)
+	}
+	problems := checkConfigFile(currentWorkspace.Name, []string{"shop", "web"}, checkout.Repo, checkedFile, otherFileByRepo)
+	if joined := errors.Join(problems...); joined == nil || !strings.Contains(joined.Error(), `"api"`) {
+		t.Errorf("checkConfigFile = %v, want the port template of web that lost its app", joined)
 	}
 }
 
@@ -63,7 +99,7 @@ func TestCheckConfigFileNamesTheFileThatHoldsTheProblem(t *testing.T) {
 	platformFile := writeConfigFile(t, "domain: dev.example.net\napps:\n  gateway: {run: gw, ports: [http]}\n")
 	portalFile := writeConfigFile(t, "apps:\n  portal-api: {run: 'api --port={{port \"gateway\" \"htp\"}}'}\n")
 
-	problems := checkConfigFile("platform", platformFile, map[string]string{"portal": portalFile})
+	problems := checkConfigFile("platform", []string{"platform", "portal"}, "platform", platformFile, map[string]string{"portal": portalFile})
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), portalFile) || strings.Contains(joined.Error(), platformFile) {
@@ -76,46 +112,10 @@ func TestCheckConfigFileStillRendersWhenAValidationRuleFails(t *testing.T) {
 		"  first: {run: one, ports: [http], route: no-such-port}\n"+
 		"  second: {run: 'two --port={{port \"ghost\" \"http\"}}', ports: [http], route: http}\n")
 
-	problems := checkConfigFile("platform", configFile, nil)
+	problems := checkConfigFile("platform", []string{"platform"}, "platform", configFile, nil)
 
 	joined := errors.Join(problems...)
 	if joined == nil || !strings.Contains(joined.Error(), "no-such-port") || !strings.Contains(joined.Error(), "ghost") {
 		t.Fatalf("checkConfigFile = %v, want both the route without a port and the template typo", joined)
-	}
-}
-
-func TestCheckWithoutAPathOutsideACheckoutUsesPlatformsMainCheckout(t *testing.T) {
-	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
-	})
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
-	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	repoName, configFile, err := configFileToCheck(&currentWorkspace, t.TempDir(), "")
-
-	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "ilot.yaml") {
-		t.Fatalf("configFileToCheck = %q, %q, %v; want platform's file in its main checkout", repoName, configFile, err)
-	}
-}
-
-func TestCheckWithoutAPathFromAHomeFolderThatIsACheckoutUsesPlatformsMainCheckout(t *testing.T) {
-	platformDir := gitRepoWithFiles(t, map[string]string{
-		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
-	})
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
-	runGitInTest(t, homeDir, "init", "-q", "-b", "main")
-	runGitInTest(t, homeDir, "commit", "-q", "--allow-empty", "-m", "dotfiles")
-	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	repoName, configFile, err := configFileToCheck(&currentWorkspace, homeDir, "")
-
-	if err != nil || repoName != "platform" || configFile != filepath.Join(platformDir, "devbox", "ilot.yaml") {
-		t.Fatalf("configFileToCheck = %q, %q, %v; want platform's file in its main checkout", repoName, configFile, err)
 	}
 }

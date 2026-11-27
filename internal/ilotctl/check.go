@@ -33,8 +33,10 @@ func (problem RenderProblem) Unwrap() error {
 	return problem.Err
 }
 
-func CheckRendering(config appconfig.Config) []error {
+// CheckRendering renders every template of every app, with made-up ports and a made-up folder for each repo.
+func CheckRendering(workspaceName string, repoNames []string, config appconfig.Config) []error {
 	controller := Controller{
+		Workspace:           workspaceName,
 		Config:              config,
 		Store:               state.Store{RootDir: madeUpCheckoutsRoot + "state"},
 		Supervisor:          nil,
@@ -57,11 +59,11 @@ func CheckRendering(config appconfig.Config) []error {
 		configByStack:       nil,
 	}
 
-	stacks := stacksWithEveryAppRunning(config)
+	stacks := stacksWithEveryAppRunning(append([]string{workspaceName}, repoNames...), config)
 	var problems []error
 	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
 		appInstance := instance{stackName: controller.stackOf(checkStackName, appName), appName: appName}
-		repoName := cmp.Or(config.Apps[appName].Repo, appconfig.DefaultRepo)
+		repoName := cmp.Or(config.Apps[appName].Repo, workspaceName)
 		for _, err := range controller.renderEveryTemplateOf(stacks, appInstance) {
 			problems = append(problems, RenderProblem{App: appName, Repo: repoName, Err: err})
 		}
@@ -69,11 +71,7 @@ func CheckRendering(config appconfig.Config) []error {
 	return problems
 }
 
-func stacksWithEveryAppRunning(config appconfig.Config) stackSet {
-	repoNames := []string{appconfig.DefaultRepo}
-	for repoName := range config.Repos {
-		repoNames = append(repoNames, repoName)
-	}
+func stacksWithEveryAppRunning(repoNames []string, config appconfig.Config) stackSet {
 	for _, app := range config.Apps {
 		if app.Repo != "" {
 			repoNames = append(repoNames, app.Repo)
@@ -122,7 +120,7 @@ func (controller *Controller) renderEveryTemplateOf(stacks stackSet, appInstance
 	if app.Stop != "" {
 		templates = append(templates, app.Stop)
 	}
-	repoEnv := controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, appconfig.DefaultRepo)]
+	repoEnv := controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, controller.Workspace)]
 	for _, valueByKey := range []map[string]string{repoEnv, app.Env} {
 		for _, key := range slices.Sorted(maps.Keys(valueByKey)) {
 			if strings.Contains(valueByKey[key], "{{") {
