@@ -62,5 +62,5 @@ func addWorktree(t *testing.T, repoDir, folderName, branch string) string {
 }
 
 func workspaceOfRepos(repoPaths map[string]string) Workspace {
-	return Workspace{Name: "platform", RootDir: repoPaths["platform"], HomeDir: "", RepoPaths: repoPaths, StackPattern: regexp.MustCompile(ticketPattern), git: NewGit()}
+	return Workspace{Name: "shop", RootDir: repoPaths["shop"], HomeDir: "", RepoPaths: repoPaths, StackPattern: regexp.MustCompile(issueKeyPattern), git: NewGit()}
 }

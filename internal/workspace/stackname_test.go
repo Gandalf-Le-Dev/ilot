@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const ticketPattern = `[A-Za-z]+-[0-9]+`
+const issueKeyPattern = `[A-Za-z]+-[0-9]+`
 
 func TestDefaultStackName(t *testing.T) {
 	testCases := []struct {
@@ -16,7 +16,7 @@ func TestDefaultStackName(t *testing.T) {
 		wantName string
 	}{
 		{name: "a main checkout is base on any branch", worktree: Worktree{Dir: "/code/shop", Branch: "retry-jobs", IsMain: true}, wantName: "base"},
-		{name: "a main checkout is base with a pattern too", pattern: ticketPattern, worktree: Worktree{Dir: "/code/shop", Branch: "PROJ-12-x", IsMain: true}, wantName: "base"},
+		{name: "a main checkout is base with a pattern too", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/shop", Branch: "PROJ-12-x", IsMain: true}, wantName: "base"},
 
 		{name: "the slug of the branch", worktree: Worktree{Dir: "/code/wt1", Branch: "retry-jobs"}, wantName: "retry-jobs"},
 		{name: "a slash and capitals", worktree: Worktree{Dir: "/code/wt1", Branch: "feature/PROJ-1234_Retry.jobs"}, wantName: "feature-proj-1234-retry-jobs"},
@@ -24,14 +24,14 @@ func TestDefaultStackName(t *testing.T) {
 		{name: "63 characters at most, with no dash at the end", worktree: Worktree{Dir: "/code/wt1", Branch: "a-name-that-goes-on-and-on-well-past-the-sixty-three-characters-of-a-dns-label"}, wantName: "a-name-that-goes-on-and-on-well-past-the-sixty-three-characters"},
 		{name: "the folder does not count when a branch exists", worktree: Worktree{Dir: "/code/proj-9-folder", Branch: "retry-jobs"}, wantName: "retry-jobs"},
 
-		{name: "the first match of the pattern", pattern: ticketPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "feature/PROJ-1234-retry-jobs"}, wantName: "proj-1234"},
-		{name: "the first of two matches", pattern: ticketPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "OPS-7-after-TASK-9"}, wantName: "ops-7"},
-		{name: "a branch that the pattern does not match", pattern: ticketPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "hotfix"}, wantName: "hotfix"},
-		{name: "the pattern does not read the folder", pattern: ticketPattern, worktree: Worktree{Dir: "/code/proj-9-folder", Branch: "hotfix"}, wantName: "hotfix"},
+		{name: "the first match of the pattern", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "feature/PROJ-1234-retry-jobs"}, wantName: "proj-1234"},
+		{name: "the first of two matches", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "OPS-7-after-TASK-9"}, wantName: "ops-7"},
+		{name: "a branch that the pattern does not match", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/wt1", Branch: "hotfix"}, wantName: "hotfix"},
+		{name: "the pattern does not read the folder", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/proj-9-folder", Branch: "hotfix"}, wantName: "hotfix"},
 		{name: "a match is a slug too", pattern: `[a-z]+/[A-Z]+_[0-9]+`, worktree: Worktree{Dir: "/code/wt1", Branch: "dev/PROJ_12/x"}, wantName: "dev-proj-12"},
 
 		{name: "a detached HEAD takes the folder", worktree: Worktree{Dir: "/code/Shop_Bisect.v2", Branch: ""}, wantName: "shop-bisect-v2"},
-		{name: "a detached HEAD takes the whole folder with a pattern too", pattern: ticketPattern, worktree: Worktree{Dir: "/code/proj-12-bisect", Branch: ""}, wantName: "proj-12-bisect"},
+		{name: "a detached HEAD takes the whole folder with a pattern too", pattern: issueKeyPattern, worktree: Worktree{Dir: "/code/proj-12-bisect", Branch: ""}, wantName: "proj-12-bisect"},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
