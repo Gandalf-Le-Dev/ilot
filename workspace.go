@@ -14,6 +14,7 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
@@ -36,7 +37,7 @@ func loadWorkspace(homeDir string) (workspace, error) {
 	if err != nil {
 		return workspace{}, err
 	}
-	platformPath := expandHome(cmp.Or(settings.Repos[appconfig.DefaultRepo].Path, defaultPlatformPath), homeDir)
+	platformPath := realpath.Of(expandHome(cmp.Or(settings.Repos[appconfig.DefaultRepo].Path, defaultPlatformPath), homeDir))
 	rootConfig, err := appconfig.Parse(filepath.Join(platformPath, platformConfigPath))
 	if errors.Is(err, fs.ErrNotExist) {
 		return workspace{}, fmt.Errorf("%w: if platform is cloned elsewhere, set repos.platform.path in ~/%s", err, personalSettingsPath)
@@ -57,7 +58,7 @@ func loadWorkspace(homeDir string) (workspace, error) {
 	}
 	repoPaths := map[string]string{}
 	for repoName, repoConfig := range repoConfigs {
-		repoPaths[repoName] = expandHome(cmp.Or(settings.Repos[repoName].Path, repoConfig.Path), homeDir)
+		repoPaths[repoName] = realpath.Of(expandHome(cmp.Or(settings.Repos[repoName].Path, repoConfig.Path), homeDir))
 	}
 	return workspace{homeDir: homeDir, settings: settings, repoPaths: repoPaths, repoConfigs: repoConfigs}, nil
 }
@@ -161,4 +162,12 @@ func platformMainCheckout(currentWorkspace workspace) (stack.Worktree, error) {
 		return platformCheckout, nil
 	}
 	return stack.Locate(platformCheckout.MainCheckoutDir)
+}
+
+func currentFolder() (string, error) {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return realpath.Of(workingDir), nil
 }

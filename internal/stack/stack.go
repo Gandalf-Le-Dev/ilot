@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 )
 
 const (
@@ -81,7 +83,7 @@ func Locate(dirInsideWorktree string) (Worktree, error) {
 	if len(lines) != 4 {
 		return Worktree{}, fmt.Errorf("unexpected git rev-parse output %q", output)
 	}
-	worktreeDir, gitDir, commonGitDir, branch := lines[0], lines[1], lines[2], lines[3]
+	worktreeDir, gitDir, commonGitDir, branch := realpath.Of(lines[0]), realpath.Of(lines[1]), realpath.Of(lines[2]), lines[3]
 	isMainCheckout := gitDir == commonGitDir
 	name, err := NameForCheckout(worktreeDir, branch, isMainCheckout)
 	if err != nil {

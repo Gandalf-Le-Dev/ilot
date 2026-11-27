@@ -13,6 +13,7 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
@@ -21,7 +22,7 @@ type checkCommand struct {
 }
 
 func (command *checkCommand) Run() error {
-	currentDir, err := os.Getwd()
+	currentDir, err := currentFolder()
 	if err != nil {
 		return err
 	}
@@ -121,10 +122,7 @@ func configFileToCheck(currentWorkspace *workspace, currentDir, requestedPath st
 }
 
 func repoOfConfigFile(currentWorkspace *workspace, requestedPath string) (repoName, configFile string, err error) {
-	configFile, err = filepath.Abs(requestedPath)
-	if err != nil {
-		return "", "", err
-	}
+	configFile = realpath.Of(requestedPath)
 	if currentWorkspace != nil {
 		if repoName, err := checkouts.RepoOf(currentWorkspace.repoPaths, filepath.Dir(configFile)); err == nil {
 			return repoName, configFile, nil

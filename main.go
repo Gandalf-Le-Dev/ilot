@@ -283,7 +283,7 @@ func (command *stopCommand) Run(ctx context.Context) error {
 }
 
 func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, stack.Worktree, error) {
-	currentDir, err := os.Getwd()
+	currentDir, err := currentFolder()
 	if err != nil {
 		return nil, stack.Worktree{}, err
 	}

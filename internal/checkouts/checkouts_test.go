@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 )
 
 func runGit(t *testing.T, dir string, arguments ...string) {
@@ -21,7 +23,7 @@ func runGit(t *testing.T, dir string, arguments ...string) {
 
 func newRepo(t *testing.T, name string) string {
 	t.Helper()
-	repoDir := filepath.Join(t.TempDir(), name)
+	repoDir := filepath.Join(realpath.Of(t.TempDir()), name)
 	runGit(t, filepath.Dir(repoDir), "init", "-q", repoDir)
 	runGit(t, repoDir, "commit", "-q", "--allow-empty", "-m", "initial")
 	return repoDir
@@ -29,7 +31,7 @@ func newRepo(t *testing.T, name string) string {
 
 func addWorktree(t *testing.T, repoDir, folderName, branch string) string {
 	t.Helper()
-	worktreeDir := filepath.Join(t.TempDir(), folderName)
+	worktreeDir := filepath.Join(realpath.Of(t.TempDir()), folderName)
 	runGit(t, repoDir, "worktree", "add", "-q", "-b", branch, worktreeDir)
 	return worktreeDir
 }

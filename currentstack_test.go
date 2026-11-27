@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 )
 
 func runGitInTest(t *testing.T, dir string, arguments ...string) {
@@ -129,5 +131,27 @@ func TestStartFromAHomeCheckoutReachedThroughALinkUsesMaster(t *testing.T) {
 
 	if err != nil || worktree.Name != "master" || worktree.WorktreeDir != platformDir {
 		t.Fatalf("worktreeForCommand = %+v, %v; want the master stack of %s", worktree, err, platformDir)
+	}
+}
+
+func TestARepoReachedThroughASymbolicLinkIsTheSameRepo(t *testing.T) {
+	platformDir := platformRepoForTest(t)
+	linkedPlatformDir := filepath.Join(realpath.Of(t.TempDir()), "platform-link")
+	if err := os.Symlink(platformDir, linkedPlatformDir); err != nil {
+		t.Fatal(err)
+	}
+	currentWorkspace := workspaceWithPlatform(t, linkedPlatformDir)
+	var notes bytes.Buffer
+
+	if got := currentWorkspace.repoPaths["platform"]; got != platformDir {
+		t.Errorf("repoPaths[platform] = %q, want the canonical %q", got, platformDir)
+	}
+	worktree, err := worktreeForCommand(currentWorkspace, linkedPlatformDir, false, &notes)
+
+	if err != nil || worktree.Name != "master" || worktree.WorktreeDir != platformDir || worktree.MainCheckoutDir != platformDir {
+		t.Fatalf("worktreeForCommand through a link = %+v, %v; want the master stack of %s", worktree, err, platformDir)
+	}
+	if notes.Len() != 0 {
+		t.Errorf("notes = %q, want none inside a known repo", notes.String())
 	}
 }

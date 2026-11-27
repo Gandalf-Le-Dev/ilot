@@ -7,11 +7,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 )
 
 func gitRepoWithFiles(t *testing.T, contentByPath map[string]string) string {
 	t.Helper()
-	repoDir := t.TempDir()
+	repoDir := realpath.Of(t.TempDir())
 	for relativePath, content := range contentByPath {
 		filePath := filepath.Join(repoDir, relativePath)
 		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {

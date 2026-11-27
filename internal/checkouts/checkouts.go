@@ -6,10 +6,10 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
@@ -89,7 +89,7 @@ func list(repoName, repoPath string) ([]Checkout, error) {
 		checkout.Repo = repoName
 		for _, line := range strings.Split(entry, "\n") {
 			if worktreeDir, isWorktreeLine := strings.CutPrefix(line, "worktree "); isWorktreeLine {
-				checkout.Dir = worktreeDir
+				checkout.Dir = realpath.Of(worktreeDir)
 			}
 			if branchRef, isBranchLine := strings.CutPrefix(line, "branch "); isBranchLine {
 				checkout.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
@@ -132,7 +132,7 @@ func commonGitDirOf(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Clean(strings.TrimSpace(output)), nil
+	return realpath.Of(strings.TrimSpace(output)), nil
 }
 
 func IsSeveralWorktrees(err error) bool {
