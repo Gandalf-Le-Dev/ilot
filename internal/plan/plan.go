@@ -136,7 +136,7 @@ func (snapshot Snapshot) reposNotClonedHint() error {
 
 // RepoPathKey is where the user gives the path of a repo that is cloned at another place.
 func (snapshot Snapshot) RepoPathKey(repoName string) string {
-	return fmt.Sprintf("workspaces.%s.repos.%s in ~/%s", snapshot.Workspace, repoName, config.GlobalFilePath)
+	return fmt.Sprintf("workspaces.%s.repos.%s in %s", snapshot.Workspace, repoName, config.GlobalFileShown())
 }
 
 // IsWanted tells if a stack owns an app: from ilot start until ilot stop or ilot rm. A crash does not change it.

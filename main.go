@@ -462,8 +462,10 @@ func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store 
 		auditLog.Info("state lock wait", "workspace", currentWorkspace.Name, "stack", stackName, "holder", holder)
 	}
 	ilotEnv := map[string]string{}
-	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
-		ilotEnv["XDG_STATE_HOME"] = value
+	for _, key := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
+		if value, isSet := os.LookupEnv(key); isSet {
+			ilotEnv[key] = value
+		}
 	}
 	return engine.Source{
 		Workspace:         currentWorkspace.Name,

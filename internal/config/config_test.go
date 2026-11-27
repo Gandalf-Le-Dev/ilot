@@ -114,7 +114,7 @@ func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
 		{yaml: "apps:\n  web: {run: x, shared: true}\n", wantErrorSubstr: "shared: write scope: base"},
 		{yaml: "apps:\n  web: {run: x, per_stack: true}\n", wantErrorSubstr: "per_stack: write scope: stack"},
 		{yaml: "apps:\n  web: {run: x, autostart: true}\n", wantErrorSubstr: "autostart: it is gone: ilot start with no app"},
-		{yaml: "domain: dev.example.net\n", wantErrorSubstr: "domain: it moved to proxy.domain in ~/.config/ilot/config.yaml"},
+		{yaml: "domain: dev.example.net\n", wantErrorSubstr: "domain: it moved to proxy.domain in the global file, ~/.config/ilot/config.yaml"},
 	}
 	for _, testCase := range testCases {
 		_, err := Parse(writeConfigFile(t, testCase.yaml))

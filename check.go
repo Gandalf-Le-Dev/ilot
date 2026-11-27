@@ -108,7 +108,7 @@ func unknownAppsOfTheGlobalFile(workspaceName string, settings config.WorkspaceS
 	var warnings []string
 	for _, appName := range slices.Sorted(maps.Keys(settings.Apps)) {
 		if !isDeclared[appName] {
-			warnings = append(warnings, fmt.Sprintf("~/%s: workspaces.%s.apps.%s gives env to an app that no %s of this stack declares", config.GlobalFilePath, workspaceName, appName, config.FileName))
+			warnings = append(warnings, fmt.Sprintf("%s: workspaces.%s.apps.%s gives env to an app that no %s of this stack declares", config.GlobalFileShown(), workspaceName, appName, config.FileName))
 		}
 	}
 	return warnings

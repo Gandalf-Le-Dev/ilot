@@ -10,6 +10,7 @@ import (
 
 func homeWithFile(t *testing.T, relativePath, content string) string {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", "")
 	homeDir := t.TempDir()
 	filePath := filepath.Join(homeDir, relativePath)
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
@@ -33,7 +34,7 @@ func TestLoadGlobalWithoutAFileGivesTheDefaults(t *testing.T) {
 }
 
 func TestLoadGlobalReadsTheProxyThePortsTheShellAndTheWorkspaces(t *testing.T) {
-	homeDir := homeWithFile(t, GlobalFilePath, `
+	homeDir := homeWithFile(t, ".config/"+GlobalFilePath, `
 proxy:
   listen: 127.0.0.1:4581
   domain: localtest.me
@@ -74,7 +75,7 @@ workspaces:
 }
 
 func TestLoadGlobalKeepsTheDefaultOfAKeyThatTheFileDoesNotSet(t *testing.T) {
-	global, err := LoadGlobal(homeWithFile(t, GlobalFilePath, "proxy:\n  listen: 127.0.0.1:4581\nports:\n  first: 21000\n"))
+	global, err := LoadGlobal(homeWithFile(t, ".config/"+GlobalFilePath, "proxy:\n  listen: 127.0.0.1:4581\nports:\n  first: 21000\n"))
 
 	if err != nil {
 		t.Fatalf("LoadGlobal: %v", err)
@@ -85,7 +86,7 @@ func TestLoadGlobalKeepsTheDefaultOfAKeyThatTheFileDoesNotSet(t *testing.T) {
 }
 
 func TestLoadGlobalOfAnEmptyFileGivesTheDefaults(t *testing.T) {
-	global, err := LoadGlobal(homeWithFile(t, GlobalFilePath, ""))
+	global, err := LoadGlobal(homeWithFile(t, ".config/"+GlobalFilePath, ""))
 	if err != nil || global.Proxy.Listen != DefaultProxyListen {
 		t.Errorf("LoadGlobal = %+v, %v; want the defaults", global, err)
 	}
@@ -118,9 +119,26 @@ func TestLoadGlobalRejectsWrongValuesAndOldKeys(t *testing.T) {
 		{yaml: "prxy: {}\n", wantErrorSubstr: "prxy"},
 	}
 	for _, testCase := range testCases {
-		_, err := LoadGlobal(homeWithFile(t, GlobalFilePath, testCase.yaml))
+		_, err := LoadGlobal(homeWithFile(t, ".config/"+GlobalFilePath, testCase.yaml))
 		if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) || !strings.Contains(err.Error(), "config.yaml") {
 			t.Errorf("LoadGlobal(%q) = %v, want an error with %q that names the file", testCase.yaml, err, testCase.wantErrorSubstr)
 		}
+	}
+}
+
+func TestLoadGlobalReadsTheFileUnderXDGConfigHome(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	if err := os.MkdirAll(filepath.Join(configHome, "ilot"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configHome, "ilot", "config.yaml"), []byte("proxy:\n  listen: 127.0.0.1:4590\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	global, err := LoadGlobal(t.TempDir())
+
+	if err != nil || global.Proxy.Listen != "127.0.0.1:4590" {
+		t.Errorf("LoadGlobal = %+v, %v; want the proxy of $XDG_CONFIG_HOME/ilot/config.yaml", global.Proxy, err)
 	}
 }

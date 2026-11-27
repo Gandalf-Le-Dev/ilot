@@ -25,7 +25,7 @@ type Machine struct {
 	ShellEnv map[string]string
 	// The variables of the terminal of the command that no shell file gives, such as SSH_AUTH_SOCK. A process gets them, and its hash leaves them out.
 	SessionEnv map[string]string
-	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
+	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state, the same global file and the same daemon.
 	IlotBinary string
 	IlotEnv    map[string]string
 }

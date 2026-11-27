@@ -88,7 +88,7 @@ func Find(dir, homeDir string, global config.Global, git *Git) (Workspace, Workt
 	settings := global.Workspaces[name]
 	for repoName := range settings.Repos {
 		if _, isDeclared := rootConfig.Repos[repoName]; !isDeclared {
-			return Workspace{}, Worktree{}, fmt.Errorf("~/%s: workspaces.%s.repos.%s gives a path to a repo that %s does not list under repos", config.GlobalFilePath, name, repoName, rootFile)
+			return Workspace{}, Worktree{}, fmt.Errorf("%s: workspaces.%s.repos.%s gives a path to a repo that %s does not list under repos", config.GlobalFileShown(), name, repoName, rootFile)
 		}
 	}
 	repoPaths := map[string]string{name: rootDir}
