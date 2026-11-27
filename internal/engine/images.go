@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"context"
@@ -42,7 +42,7 @@ func imagePullError(image, pullOutput string, pullErr error) error {
 }
 
 // An image shared by several apps is checked once, and its failure is reported for each of them.
-func (controller *Controller) ensureImages(snapshot plan.Snapshot, ctx context.Context, startOrder []plan.Instance, needsImage func(plan.Instance) bool, stopAtFirstFailure bool) []imageFailure {
+func (executor *Executor) ensureImages(snapshot plan.Snapshot, ctx context.Context, startOrder []plan.Instance, needsImage func(plan.Instance) bool, stopAtFirstFailure bool) []imageFailure {
 	errByImage := map[string]error{}
 	var failures []imageFailure
 	for _, appInstance := range startOrder {
@@ -55,7 +55,7 @@ func (controller *Controller) ensureImages(snapshot plan.Snapshot, ctx context.C
 		image := snapshot.App(appInstance).Container.Image
 		imageErr, isChecked := errByImage[image]
 		if !isChecked {
-			pullOutput, err := controller.EnsureImage(ctx, image)
+			pullOutput, err := executor.EnsureImage(ctx, image)
 			if err != nil {
 				imageErr = imagePullError(image, pullOutput, err)
 			}

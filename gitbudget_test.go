@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -18,7 +18,7 @@ type readySupervisor struct {
 	dirs    map[string]string
 }
 
-func (supervisor *readySupervisor) Put(_ context.Context, spec ilotctl.ProcessSpec) error {
+func (supervisor *readySupervisor) Put(_ context.Context, spec engine.ProcessSpec) error {
 	supervisor.started[spec.Name] = true
 	if supervisor.dirs != nil {
 		supervisor.dirs[spec.Name] = spec.Dir
@@ -68,17 +68,17 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	if err != nil || stackName != "proj-1" {
 		t.Fatalf("stackOfWorktree = %q, %v; want proj-1", stackName, err)
 	}
-	controller, err := newController(t.Context(), currentWorkspace, store, stackName, time.Second)
+	executor, err := newExecutor(t.Context(), currentWorkspace, store, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	supervisor := &readySupervisor{started: map[string]bool{}}
-	controller.Supervisor = supervisor
-	controller.ShellEnv = func() (map[string]string, map[string]string, error) {
+	executor.Supervisor = supervisor
+	executor.ShellEnv = func() (map[string]string, map[string]string, error) {
 		return map[string]string{}, map[string]string{}, nil
 	}
-	controller.Output = io.Discard
-	if err := controller.Start(t.Context(), stackName, []string{"front"}, ilotctl.StartOptions{SkipDependencies: false}); err != nil {
+	executor.Output = io.Discard
+	if err := executor.Start(t.Context(), stackName, []string{"front"}, engine.StartOptions{SkipDependencies: false}); err != nil {
 		t.Fatal(err)
 	}
 

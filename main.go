@@ -27,7 +27,7 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
@@ -127,11 +127,11 @@ func (command *restartCommand) Run(ctx context.Context) error {
 	case len(command.Apps) == 0 && command.Stack != "":
 		return errors.New("--stack needs the apps to restart")
 	case len(command.Apps) == 0:
-		controller, baseStackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, baseStack)
+		executor, baseStackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, baseStack)
 		if err != nil {
 			return err
 		}
-		return controller.Restart(ctx, baseStackName)
+		return executor.Restart(ctx, baseStackName)
 	case command.Stack != "":
 		currentWorkspace, _, err := findCurrentWorkspace()
 		if err != nil {
@@ -141,17 +141,17 @@ func (command *restartCommand) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		controller, err := newController(ctx, currentWorkspace, store, command.Stack, command.Timeout)
+		executor, err := newExecutor(ctx, currentWorkspace, store, command.Stack, command.Timeout)
 		if err != nil {
 			return err
 		}
-		return controller.RestartApps(ctx, command.Stack, command.Apps)
+		return executor.RestartApps(ctx, command.Stack, command.Apps)
 	}
-	controller, stackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
+	executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
-	return controller.RestartApps(ctx, stackName, command.Apps)
+	return executor.RestartApps(ctx, stackName, command.Apps)
 }
 
 type lsCommand struct {
@@ -160,7 +160,7 @@ type lsCommand struct {
 
 type lsJSONOutput struct {
 	Home string `json:"home"`
-	ilotctl.Listing
+	engine.Listing
 	CheckoutsByStack map[string]map[string]workspace.Worktree `json:"checkouts"`
 }
 
@@ -193,33 +193,33 @@ func (command *bootCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	controller, err := newController(ctx, currentWorkspace, store, workspace.BaseStackName, command.Timeout)
+	executor, err := newExecutor(ctx, currentWorkspace, store, workspace.BaseStackName, command.Timeout)
 	if err != nil {
 		return err
 	}
-	return controller.Boot(ctx, workspace.BaseStackName)
+	return executor.Boot(ctx, workspace.BaseStackName)
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
+	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
 	if command.JSON {
-		controller.Output = os.Stderr
+		executor.Output = os.Stderr
 	}
-	listing, err := controller.List(ctx)
+	listing, err := executor.List(ctx)
 	if err != nil {
 		return err
 	}
-	checkoutsByStack, err := controller.StackCheckouts()
+	checkoutsByStack, err := executor.StackCheckouts()
 	if err != nil {
 		return err
 	}
 	if command.JSON {
-		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: controller.Machine.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
+		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: executor.Machine.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
 	}
-	fmt.Printf("every URL: %s\n\n", controller.Machine.HomeURL())
+	fmt.Printf("every URL: %s\n\n", executor.Machine.HomeURL())
 	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "STACK\tAPP\tSTATUS\tPORTS\tURL")
 	hasUndeclared := false
@@ -280,24 +280,24 @@ func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[st
 }
 
 func (command *rmCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
+	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
-	return controller.Remove(ctx, command.Stack)
+	return executor.Remove(ctx, command.Stack)
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
+	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
-	stacksWithoutWorktrees, err := controller.StacksWithoutWorktrees()
+	stacksWithoutWorktrees, err := executor.StacksWithoutWorktrees()
 	if err != nil {
 		return err
 	}
 	for _, stackName := range stacksWithoutWorktrees {
-		if err := controller.Remove(ctx, stackName); err != nil {
+		if err := executor.Remove(ctx, stackName); err != nil {
 			return err
 		}
 		fmt.Printf("removed %s\n", stackName)
@@ -310,27 +310,27 @@ func (command *startCommand) Run(ctx context.Context) error {
 	case command.All && len(command.Apps) > 0:
 		return errors.New("--all starts every app that a stack owns: name no app with it")
 	case command.All:
-		controller, _, err := newControllerForCurrentWorktree(ctx, command.Timeout, baseStack)
+		executor, _, err := newExecutorForCurrentWorktree(ctx, command.Timeout, baseStack)
 		if err != nil {
 			return err
 		}
-		return controller.StartAll(ctx)
+		return executor.StartAll(ctx)
 	case len(command.Apps) == 0:
 		return errors.New("name the apps to start, or give --all to start every app that a stack owns")
 	}
-	controller, stackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
+	executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err
 	}
-	return controller.Start(ctx, stackName, command.Apps, ilotctl.StartOptions{SkipDependencies: command.NoDeps})
+	return executor.Start(ctx, stackName, command.Apps, engine.StartOptions{SkipDependencies: command.NoDeps})
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
+	executor, stackName, err := newExecutorForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
-	return controller.Stop(ctx, stackName, command.Apps)
+	return executor.Stop(ctx, stackName, command.Apps)
 }
 
 // Which stack a command works on.
@@ -344,7 +344,7 @@ const (
 	stackOfCurrentFolderWithBinding
 )
 
-func newControllerForCurrentWorktree(ctx context.Context, readyTimeout time.Duration, choice stackChoice) (*ilotctl.Controller, string, error) {
+func newExecutorForCurrentWorktree(ctx context.Context, readyTimeout time.Duration, choice stackChoice) (*engine.Executor, string, error) {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return nil, "", err
@@ -360,23 +360,23 @@ func newControllerForCurrentWorktree(ctx context.Context, readyTimeout time.Dura
 			return nil, "", err
 		}
 	}
-	controller, err := newController(ctx, currentWorkspace, store, stackName, readyTimeout)
-	return controller, stackName, err
+	executor, err := newExecutor(ctx, currentWorkspace, store, stackName, readyTimeout)
+	return executor, stackName, err
 }
 
 // sourceForCurrentWorktree is for a command that only reads: it records no binding.
-func sourceForCurrentWorktree(ctx context.Context) (ilotctl.Source, string, error) {
+func sourceForCurrentWorktree(ctx context.Context) (engine.Source, string, error) {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
-		return ilotctl.Source{}, "", err
+		return engine.Source{}, "", err
 	}
 	currentWorkspace, store, err := withBindings(currentWorkspace)
 	if err != nil {
-		return ilotctl.Source{}, "", err
+		return engine.Source{}, "", err
 	}
 	currentWorkspace, stackName, err := stackOfWorktree(ctx, store, currentWorkspace, worktree, false, os.Stderr)
 	if err != nil {
-		return ilotctl.Source{}, "", err
+		return engine.Source{}, "", err
 	}
 	source, err := newSource(ctx, currentWorkspace, store, stackName)
 	return source, stackName, err
@@ -408,7 +408,7 @@ func stateDirOf(homeDir string) string {
 
 // newSource gives what a command of a stack reads: the state, the files of its checkouts and the login shell.
 // A configuration that cannot be read is an error for a command that renders, and the Source keeps it for the others.
-func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string) (ilotctl.Source, error) {
+func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string) (engine.Source, error) {
 	stackConfig, configErr := currentWorkspace.ConfigForStack(stackName)
 	global := currentWorkspace.Global
 	captureShell := sync.OnceValues(func() (map[string]string, error) {
@@ -416,21 +416,21 @@ func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store 
 	})
 	_, proxyPort, err := net.SplitHostPort(global.Proxy.Listen)
 	if err != nil {
-		return ilotctl.Source{}, err
+		return engine.Source{}, err
 	}
 	currentUser, err := user.Current()
 	if err != nil {
-		return ilotctl.Source{}, fmt.Errorf("find the name of the current user, for the User template: %w", err)
+		return engine.Source{}, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	ilotBinary, err := os.Executable()
 	if err != nil {
-		return ilotctl.Source{}, fmt.Errorf("find the ilot binary, which the watcher of an app runs: %w", err)
+		return engine.Source{}, fmt.Errorf("find the ilot binary, which the watcher of an app runs: %w", err)
 	}
 	ilotEnv := map[string]string{}
 	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
 		ilotEnv["XDG_STATE_HOME"] = value
 	}
-	return ilotctl.Source{
+	return engine.Source{
 		Workspace:         currentWorkspace.Name,
 		Root:              currentWorkspace.RootDir,
 		Config:            stackConfig,
@@ -452,7 +452,7 @@ func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store 
 	}, nil
 }
 
-func newController(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*engine.Executor, error) {
 	source, err := newSource(ctx, currentWorkspace, store, stackName)
 	if err != nil {
 		return nil, err
@@ -464,9 +464,9 @@ func newController(ctx context.Context, currentWorkspace workspace.Workspace, st
 		_, err := daemon.Launch{Binary: source.Machine.IlotBinary, Args: []string{"daemon", "run", "--state-dir", store.RootDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
 		return err
 	}
-	return &ilotctl.Controller{
+	return &engine.Executor{
 		Source:              source,
-		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
+		Supervisor:          &engine.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		RemoveContainer:     removeContainer,

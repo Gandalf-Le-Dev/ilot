@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -24,16 +24,16 @@ func startInFolder(t *testing.T, dir string, supervisor *readySupervisor, appNam
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller, err := newController(t.Context(), currentWorkspace, store, stackName, time.Second)
+	executor, err := newExecutor(t.Context(), currentWorkspace, store, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller.Supervisor = supervisor
-	controller.ShellEnv = func() (map[string]string, map[string]string, error) {
+	executor.Supervisor = supervisor
+	executor.ShellEnv = func() (map[string]string, map[string]string, error) {
 		return map[string]string{}, map[string]string{}, nil
 	}
-	controller.Output = io.Discard
-	return controller.Start(t.Context(), stackName, appNames, ilotctl.StartOptions{SkipDependencies: false})
+	executor.Output = io.Discard
+	return executor.Start(t.Context(), stackName, appNames, engine.StartOptions{SkipDependencies: false})
 }
 
 // The daemon cannot start a process in a folder that is gone: "fork/exec /bin/sh: no such file or directory".

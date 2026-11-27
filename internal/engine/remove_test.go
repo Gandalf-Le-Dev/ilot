@@ -1,4 +1,4 @@
-package ilotctl
+package engine
 
 import (
 	"errors"
@@ -16,7 +16,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi")
 	portOfRemovedStack := environment.appPort(t, "proj-1234", "internalapi")
 
-	if err := environment.controller.Remove(t.Context(), "proj-1234"); err != nil {
+	if err := environment.executor.Remove(t.Context(), "proj-1234"); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
@@ -30,7 +30,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 			t.Errorf("the removed stack keeps the route %s", route.Host)
 		}
 	}
-	if _, err := os.Stat(environment.controller.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(environment.executor.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)
 	}
 	otherStack := "proj-5678"
@@ -45,7 +45,7 @@ func TestRemoveRefusesTheBaseStack(t *testing.T) {
 	environment.start(t, environment.base, StartOptions{}, "internalapi")
 
 	for _, stackName := range []string{workspace.BaseStackName} {
-		err := environment.controller.Remove(t.Context(), stackName)
+		err := environment.executor.Remove(t.Context(), stackName)
 		if err == nil || !strings.Contains(err.Error(), "cannot remove") {
 			t.Errorf("Remove(%s) = %v, want a refusal", stackName, err)
 		}
@@ -58,23 +58,23 @@ func TestRemoveRefusesTheBaseStack(t *testing.T) {
 func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 
-	err := environment.controller.Remove(t.Context(), "proj-4040")
+	err := environment.executor.Remove(t.Context(), "proj-4040")
 
 	if err == nil || !strings.Contains(err.Error(), `no stack "proj-4040"`) {
 		t.Fatalf("Remove = %v, want an error naming the unknown stack", err)
 	}
 }
 
-func saveStacks(t *testing.T, controller *Controller, bindingByStack map[string]map[string]string) {
+func saveStacks(t *testing.T, executor *Executor, bindingByStack map[string]map[string]string) {
 	t.Helper()
-	current, err := controller.Store.Load()
+	current, err := executor.Store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for stackName, binding := range bindingByStack {
-		current.Stack(controller.Workspace, stackName).Checkouts = binding
+		current.Stack(executor.Workspace, stackName).Checkouts = binding
 	}
-	if err := controller.Store.Save(current); err != nil {
+	if err := executor.Store.Save(current); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -90,9 +90,9 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 		"none-deleted": {"platform": otherExistingWorktreeDir},
 		"moved-away":   nil,
 	}
-	saveStacks(t, environment.controller, boundWorktreesByStack)
+	saveStacks(t, environment.executor, boundWorktreesByStack)
 
-	removable, err := environment.controller.StacksWithoutWorktrees()
+	removable, err := environment.executor.StacksWithoutWorktrees()
 
 	if want := []string{"all-deleted", "moved-away"}; err != nil || !slices.Equal(removable, want) {
 		t.Errorf("StacksWithoutWorktrees = %v, %v; want %v", removable, err, want)
@@ -101,9 +101,9 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 
 func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveStacks(t, environment.controller, map[string]map[string]string{"base": nil, "proj-1234": nil})
+	saveStacks(t, environment.executor, map[string]map[string]string{"base": nil, "proj-1234": nil})
 
-	checkoutsByStack, err := environment.controller.StackCheckouts()
+	checkoutsByStack, err := environment.executor.StackCheckouts()
 
 	if err != nil {
 		t.Fatalf("StackCheckouts: %v", err)
