@@ -85,11 +85,10 @@ func (command *envCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	for _, entry := range entries {
-		fmt.Fprintf(table, "%s=%s\t(%s)\n", entry.Key, entry.Value, entry.Source)
+		fmt.Fprintf(os.Stdout, "%s=%s  (%s)\n", entry.Key, entry.Value, entry.Source)
 	}
-	return table.Flush()
+	return nil
 }
 
 type logsCommand struct {
