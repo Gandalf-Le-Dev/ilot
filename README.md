@@ -159,6 +159,7 @@ ilot logs --workspace shop --stack retry-jobs api  # the log of api in the stack
 ilot stack show               # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs    # put this worktree in the stack retry-jobs
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
+ilot doctor                   # test git, the state folder, the daemon, the proxy address, the name lookup, the login shell, and watchexec and docker when an app needs them
 ilot daemon status            # the version, the process ID and the proxy address of the daemon
 ilot daemon stop              # stop every app of every stack, then the daemon; the stacks keep their apps
 ilot daemon restart           # stop every app and the daemon, start a new daemon, then start the apps that the stacks of this workspace own

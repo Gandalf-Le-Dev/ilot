@@ -50,6 +50,7 @@ type cli struct {
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Stack   stackCommand   `cmd:"" help:"Print the stack of the current worktree, or put the worktree in another stack."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
+	Doctor  doctorCommand  `cmd:"" help:"Test what ilot needs on this machine: git, the state folder, the daemon, the proxy address, the name lookup, the login shell, and watchexec and docker when an app needs them. Report what an older ilot left behind."`
 	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
 	Daemon  daemonCommand  `cmd:"" help:"Show, stop or restart the ilot daemon, which supervises the apps of every stack and holds the proxy. ilot starts it when it needs it."`
 }

@@ -66,7 +66,8 @@ type WorkspaceSettings struct {
 	Apps map[string]map[string]string `yaml:"apps"`
 }
 
-func defaultGlobal() Global {
+// DefaultGlobal is the global file of a machine that has none.
+func DefaultGlobal() Global {
 	return Global{
 		Proxy:      Proxy{Listen: DefaultProxyListen, Domain: DefaultDomain},
 		Ports:      PortRange{First: DefaultFirstPort, Last: DefaultLastPort},
@@ -75,14 +76,26 @@ func defaultGlobal() Global {
 	}
 }
 
+// OldPersonalFile gives the personal file of an older ilot, when the home folder still has one.
+func OldPersonalFile(homeDir string) (path string, exists bool) {
+	path = filepath.Join(homeDir, oldPersonalFilePath)
+	_, err := os.Stat(path)
+	return path, err == nil
+}
+
 // LoadGlobal reads the global file of a home folder. A missing file gives the defaults, and a missing key keeps its default.
+// The personal file of an older ilot is an error, so that its values do not go missing without a word.
 func LoadGlobal(homeDir string) (Global, error) {
-	globalFile := filepath.Join(homeDir, GlobalFilePath)
-	oldPersonalFile := filepath.Join(homeDir, oldPersonalFilePath)
-	if _, err := os.Stat(oldPersonalFile); err == nil {
-		return Global{}, fmt.Errorf("%s is the personal file of an older ilot, and ilot no longer reads it: move its content to %s, under workspaces.<name of the workspace> (env, apps, and repos as <name>: <path>), then delete it", oldPersonalFile, globalFile)
+	if oldPersonalFile, exists := OldPersonalFile(homeDir); exists {
+		return Global{}, fmt.Errorf("%s is the personal file of an older ilot, and ilot no longer reads it: move its content to %s, under workspaces.<name of the workspace> (env, apps, and repos as <name>: <path>), then delete it", oldPersonalFile, filepath.Join(homeDir, GlobalFilePath))
 	}
-	global := defaultGlobal()
+	return ReadGlobal(homeDir)
+}
+
+// ReadGlobal is LoadGlobal with no test of the personal file of an older ilot.
+func ReadGlobal(homeDir string) (Global, error) {
+	globalFile := filepath.Join(homeDir, GlobalFilePath)
+	global := DefaultGlobal()
 	content, err := os.ReadFile(globalFile)
 	if errors.Is(err, fs.ErrNotExist) {
 		return global, nil
