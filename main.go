@@ -35,8 +35,10 @@ import (
 )
 
 const (
-	devboxMarkerFile       = "/etc/devhost.env"
-	traefikRoutesMountPath = "/etc/traefik/routes"
+	devboxMarkerFile = "/etc/devhost.env"
+	// The address of the proxy in the daemon. ILOT_PROXY_LISTEN moves it when another program has the port.
+	defaultProxyListen  = "127.0.0.1:4580"
+	proxyListenVariable = "ILOT_PROXY_LISTEN"
 )
 
 type cli struct {
@@ -50,7 +52,7 @@ type cli struct {
 	Restart restartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
-	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs and routes."`
+	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
 	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
@@ -62,11 +64,12 @@ type daemonCommand struct {
 }
 
 type daemonRunCommand struct {
-	StateDir string `required:"" help:"State folder of ilot, which holds the lock, the socket and the log of the daemon."`
+	StateDir    string `required:"" help:"State folder of ilot, which holds the lock, the socket and the log of the daemon."`
+	ProxyListen string `help:"Address of the proxy, for example 127.0.0.1:4580. Without it, the daemon runs no proxy."`
 }
 
 func (command *daemonRunCommand) Run(ctx context.Context) error {
-	return daemon.Run(ctx, daemon.Options{Paths: daemon.Paths{StateDir: command.StateDir}, Version: versionOfThisBinary()})
+	return daemon.Run(ctx, daemon.Options{Paths: daemon.Paths{StateDir: command.StateDir}, Version: versionOfThisBinary(), ProxyListen: command.ProxyListen})
 }
 
 type envCommand struct {
@@ -193,7 +196,7 @@ func (command *lsCommand) Run(ctx context.Context) error {
 	if command.JSON {
 		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: controller.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
 	}
-	fmt.Printf("home: %s\n\n", controller.HomeURL())
+	fmt.Printf("every URL: %s\n\n", controller.HomeURL())
 	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "STACK\tAPP\tSTATUS\tPORTS\tURL")
 	for _, app := range listing.Apps {
@@ -335,9 +338,10 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	if err != nil {
 		return nil, err
 	}
-	routesDir, err := findRoutesDir()
+	proxyListen := cmp.Or(os.Getenv(proxyListenVariable), defaultProxyListen)
+	_, proxyPort, err := net.SplitHostPort(proxyListen)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s=%q is not an address such as %s: %w", proxyListenVariable, proxyListen, defaultProxyListen, err)
 	}
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
@@ -347,13 +351,13 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	}
 	daemonPaths := daemon.Paths{StateDir: stateDir}
 	startDaemon := func() error {
-		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
+		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
 		return err
 	}
 	controller := &ilotctl.Controller{
 		Config:              config,
 		Store:               state.Store{RootDir: stateDir},
-		Supervisor:          ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), Warnings: os.Stderr},
+		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		IsPortFreeOnHost:    ports.IsFreeOnHost,
@@ -365,42 +369,13 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		Personal:            currentWorkspace.settings,
 		ShellEnv:            shellEnv,
 		Login:               os.Getenv("LC_DEVBOX_LOGIN"),
-		RoutesDir:           routesDir,
 		BackendHost:         "devbox",
-		ProxyPort:           cmp.Or(os.Getenv("ILOT_PROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
+		ProxyPort:           proxyPort,
 		ReadyTimeout:        readyTimeout,
 		ProgressInterval:    10 * time.Second,
 		Output:              os.Stdout,
 	}
 	return controller, nil
-}
-
-func findRoutesDir() (string, error) {
-	if routesDir := os.Getenv("ILOT_ROUTES_DIR"); routesDir != "" {
-		return routesDir, nil
-	}
-	proxyContainer := "ilotproxy_" + os.Getenv("LC_DEVBOX_LOGIN")
-	mountsJSON, err := exec.Command("docker", "inspect", "--format", "{{json .Mounts}}", proxyContainer).Output()
-	if err != nil {
-		return "", fmt.Errorf("find the routes folder of %s (set ILOT_ROUTES_DIR to skip this): %w", proxyContainer, err)
-	}
-	return routesDirFromMounts(mountsJSON)
-}
-
-func routesDirFromMounts(mountsJSON []byte) (string, error) {
-	var mounts []struct {
-		Source      string `json:"Source"`
-		Destination string `json:"Destination"`
-	}
-	if err := json.Unmarshal(mountsJSON, &mounts); err != nil {
-		return "", fmt.Errorf("read proxy mounts: %w", err)
-	}
-	for _, mount := range mounts {
-		if mount.Destination == traefikRoutesMountPath {
-			return mount.Source, nil
-		}
-	}
-	return "", fmt.Errorf("the proxy container mounts nothing at %s", traefikRoutesMountPath)
 }
 
 func runBuild(ctx context.Context, workingDir, shellCommand string, environ []string) error {

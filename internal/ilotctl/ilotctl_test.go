@@ -36,6 +36,7 @@ type fakeSupervisor struct {
 	behaviorByProcess map[string]processBehavior
 	onWaitReady       func(processName string)
 	applyError        error
+	routes            []daemon.Route
 	events            []string
 	runningSpecs      map[string]ProcessSpec
 	startedInOrder    []string
@@ -73,6 +74,21 @@ func (supervisor *fakeSupervisor) Apply(ctx context.Context, specs []ProcessSpec
 	}
 	supervisor.runningSpecs = nextRunningSpecs
 	return nil
+}
+
+func (supervisor *fakeSupervisor) SetRoutes(_ context.Context, routes []daemon.Route) error {
+	if supervisor.daemonIsUp {
+		supervisor.routes = routes
+	}
+	return nil
+}
+
+func (supervisor *fakeSupervisor) routeOf(host string) (daemon.Route, bool) {
+	index := slices.IndexFunc(supervisor.routes, func(route daemon.Route) bool { return route.Host == host })
+	if index < 0 {
+		return daemon.Route{}, false
+	}
+	return supervisor.routes[index], true
 }
 
 func (supervisor *fakeSupervisor) IsUp(context.Context) bool {
@@ -173,7 +189,6 @@ type testEnvironment struct {
 	output        *bytes.Buffer
 	master        stack.Worktree
 	featureStack  stack.Worktree
-	routesDir     string
 }
 
 // Every ilot command builds its own controller.
@@ -299,7 +314,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	builds := &[]recordedBuild{}
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
-	routesDir := t.TempDir()
 	controller := &Controller{
 		Config:     testConfig(),
 		Store:      state.Store{RootDir: t.TempDir()},
@@ -314,7 +328,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		IsExternalServiceUp: func(int) bool { return true },
 		CheckoutsForStack:   fakeCheckoutsForStack,
 		UsesMise:            func(string) bool { return false },
-		RoutesDir:           routesDir,
 		BackendHost:         "devbox",
 		ReadyTimeout:        time.Second,
 		ProgressInterval:    0,
@@ -328,7 +341,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		output:        output,
 		master:        stack.Worktree{Name: "master", WorktreeDir: "/src/platform", MainCheckoutDir: "/src/platform"},
 		featureStack:  stack.Worktree{Name: "proj-1234", WorktreeDir: "/worktrees/proj-1234", MainCheckoutDir: "/src/platform"},
-		routesDir:     routesDir,
 	}
 }
 
@@ -879,17 +891,32 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	}
 }
 
-func TestRoutesFileServesEveryRoutedAppOfTheStack(t *testing.T) {
+func TestTheProxyGetsARouteForEveryRoutedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
-	if err != nil {
-		t.Fatalf("read routes file: %v", err)
+	route, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net")
+	if !isRouted || route.Port != environment.appPort(t, "proj-1234", "publicapi") {
+		t.Errorf("route of publicapi = %+v, routed %t; want its http port. Routes: %+v", route, isRouted, environment.supervisor.routes)
 	}
-	wantURL := "http://devbox:" + strconv.Itoa(environment.appPort(t, "proj-1234", "publicapi"))
-	if !strings.Contains(string(content), "publicapi.proj-1234.dev.example.net") || !strings.Contains(string(content), wantURL) {
-		t.Errorf("routes file:\n%s\nwant the publicapi host and %s", content, wantURL)
+	if want := "cd '/worktrees/proj-1234' && ilot start publicapi"; route.StartHint != want {
+		t.Errorf("start hint = %q, want %q", route.StartHint, want)
+	}
+	if _, isRouted := environment.supervisor.routeOf("gateway.master.dev.example.net"); isRouted {
+		t.Error("gateway.master has a route, but the app declares none")
+	}
+}
+
+func TestAStoppedAppKeepsItsRoute(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi", "standalone")
+
+	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"publicapi"}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if _, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net"); !isRouted {
+		t.Errorf("routes after the stop = %+v, want the route of publicapi kept: its URL then says how to start it", environment.supervisor.routes)
 	}
 }
 
@@ -1046,16 +1073,12 @@ func TestWatchedAppWithABuildRebuildsBeforeTheRestart(t *testing.T) {
 	}
 }
 
-func TestSharedAppRoutesUseTheDevboxHostnames(t *testing.T) {
+func TestASharedAppHasItsRouteInTheDevboxStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "temporal")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-devbox.yml"))
-	if err != nil {
-		t.Fatalf("read routes file: %v", err)
-	}
-	if !strings.Contains(string(content), "temporal.devbox.dev.example.net") || !strings.Contains(string(content), "http://devbox:10012") {
-		t.Errorf("routes file:\n%s\nwant the temporal UI host on port 10012", content)
+	if route, isRouted := environment.supervisor.routeOf("temporal.devbox.dev.example.net"); !isRouted || route.Port != 10012 {
+		t.Errorf("route of temporal = %+v, routed %t; want the temporal UI on port 10012", route, isRouted)
 	}
 }
 
@@ -1177,16 +1200,16 @@ func TestBootSkipsAContainerWhoseLinkedContainerImageFailed(t *testing.T) {
 	}
 }
 
-func TestHomeURLIsTheDevhomePageOnTheProxyPort(t *testing.T) {
+func TestHomeURLIsTheRouteListOfTheProxy(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ProxyPort = "18080"
 
-	if got := environment.controller.HomeURL(); got != "http://home.dev.example.net:18080" {
+	if got := environment.controller.HomeURL(); got != "http://dev.example.net:18080" {
 		t.Errorf("HomeURL = %q", got)
 	}
 }
 
-func TestRoutesFileRedirectsTheRootOfAnAppWithAHomePath(t *testing.T) {
+func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 	environment := newTestEnvironment(t)
 	publicapi := environment.controller.Config.Apps["publicapi"]
 	publicapi.HomePath = "/swagger/"
@@ -1194,12 +1217,8 @@ func TestRoutesFileRedirectsTheRootOfAnAppWithAHomePath(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
-	if err != nil {
-		t.Fatalf("read routes file: %v", err)
-	}
-	if !strings.Contains(string(content), "publicapi-proj-1234-home") || !strings.Contains(string(content), "/swagger/") {
-		t.Errorf("routes file:\n%s\nwant a home router redirecting to /swagger/", content)
+	if route, _ := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net"); route.HomePath != "/swagger/" {
+		t.Errorf("route of publicapi = %+v, want the home path /swagger/", route)
 	}
 }
 
@@ -1384,17 +1403,10 @@ func TestContainerCommandRunsOnDevproxyWithEnvMountsAndLinks(t *testing.T) {
 	}
 }
 
-func TestContainerRouteUsesTheContainerName(t *testing.T) {
+func TestContainerProbeUsesTheContainerName(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), "http://ilot-proj-1234-search:16271") {
-		t.Errorf("routes file:\n%s\nwant the container address", content)
-	}
 	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe.Host != "ilot-proj-1234-search" || probe.Port != 16271 {
 		t.Errorf("search probe = %+v", probe)
 	}

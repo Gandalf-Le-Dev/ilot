@@ -291,3 +291,13 @@ func TestValidateRefusesALinkToAnUnknownApp(t *testing.T) {
 		t.Fatalf("Validate() = %v", err)
 	}
 }
+
+func TestMergeGivesTheLocalhostDomainWhenNoFileSetsOne(t *testing.T) {
+	merged, err := Merge(map[string]Config{"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}}})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if merged.Domain != "localhost" {
+		t.Errorf("Domain = %q, want localhost, which needs no DNS", merged.Domain)
+	}
+}

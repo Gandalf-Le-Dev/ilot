@@ -58,7 +58,7 @@ func TestTheDaemonSupervisorKeepsTheContract(t *testing.T) {
 	daemonContext, stopDaemon := context.WithCancel(context.Background())
 	daemonEnded := make(chan error, 8)
 	spawned := 0
-	supervisor := DaemonSupervisor{
+	supervisor := &DaemonSupervisor{
 		Starter: daemon.Starter{Paths: paths, Spawn: func() error {
 			spawned++
 			go func() {
@@ -140,6 +140,10 @@ func checkSupervisorContract(t *testing.T, subject supervisorUnderContract) {
 	if supervisor.IsUp(ctx) {
 		t.Fatal("IsUp = true after a read: a read must not start the daemon")
 	}
+	someRoutes := []daemon.Route{{Host: "steady.master.localhost", Port: 20000}}
+	if err := supervisor.SetRoutes(ctx, someRoutes); err != nil || supervisor.IsUp(ctx) {
+		t.Fatalf("SetRoutes with no daemon = %v, IsUp = %t; want no error and no daemon", err, supervisor.IsUp(ctx))
+	}
 	if err := supervisor.Apply(ctx, nil); err != nil || supervisor.IsUp(ctx) {
 		t.Fatalf("Apply of nothing = %v, IsUp = %t; want no daemon for no process", err, supervisor.IsUp(ctx))
 	}
@@ -153,6 +157,10 @@ func checkSupervisorContract(t *testing.T, subject supervisorUnderContract) {
 	steady, isKnown := stateOf(subject.steady.Name)
 	if !isKnown || steady.State != daemon.StateReady || steady.Hash != subject.steady.Hash() || !supervisor.IsUp(ctx) {
 		t.Fatalf("steady = %+v, known %t, IsUp %t; want a ready process with the hash of its specification", steady, isKnown, supervisor.IsUp(ctx))
+	}
+
+	if err := supervisor.SetRoutes(ctx, someRoutes); err != nil {
+		t.Fatalf("SetRoutes: %v", err)
 	}
 
 	withCrashing := []ProcessSpec{subject.steady, subject.crashing}

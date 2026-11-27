@@ -3,8 +3,6 @@ package ilotctl
 import (
 	"errors"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -64,9 +62,8 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	if got := environment.supervisor.runningSpecs["ticket-iam.devbox"]; got.Command != iamSpecBefore.Command {
 		t.Errorf("shared ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
 	}
-	content, err := os.ReadFile(filepath.Join(environment.routesDir, "ilot-proj-1234.yml"))
-	if err != nil || !strings.Contains(string(content), "ticket-search") {
-		t.Errorf("routes of proj-1234 = %q, %v; want the ticket-search route kept", content, err)
+	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.dev.example.net"); !isRouted {
+		t.Errorf("routes = %+v, want the ticket-search route kept", environment.supervisor.routes)
 	}
 }
 

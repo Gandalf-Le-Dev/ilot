@@ -2,6 +2,7 @@ package appconfig
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,6 +18,8 @@ const (
 	ReservedPortFirst = 20000
 	ReservedPortLast  = 29999
 	DefaultRepo       = "platform"
+	// Every name under localhost points to this machine, with no DNS setup.
+	DefaultDomain = "localhost"
 )
 
 type Config struct {
@@ -123,7 +126,7 @@ func isUnknownFieldError(err error) bool {
 func Merge(configByRepo map[string]Config) (Config, error) {
 	rootConfig := configByRepo[DefaultRepo]
 	merged := Config{
-		Domain:   rootConfig.Domain,
+		Domain:   cmp.Or(rootConfig.Domain, DefaultDomain),
 		Repos:    rootConfig.Repos,
 		Env:      nil,
 		External: map[string]ExternalService{},

@@ -49,7 +49,7 @@ ilot logs -f -n 20 publicapi    # the last 20 lines, then the new ones: it never
 ilot env portal-api             # the environment of the app, with where each value comes from
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
-ilot rm task-2006               # stop a stack and delete its state, logs and routes (ask first)
+ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout>  # runs at login; you do not need it
 ilot restart                    # stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
@@ -63,7 +63,7 @@ ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL
 
 ## Where things are
 
-- Proxy URLs: `http://<app>.<stack>.<domain>:<proxy port>`. `ilot ls` prints them. The home page `http://home.<domain>:<proxy port>` lists them all.
+- Proxy URLs: `http://<app>.<stack>.localhost:4580`. `ilot ls` prints them. The page `http://localhost:4580` lists them all. The URL of an app that does not run answers 503 with the command that starts it.
 - State and logs: `~/.local/state/ilot/stacks/<stack>/`, logs in `logs/<app>.log`.
 - Apps: the `ilot.yaml` of each repo. `ilot apps` lists their names, their repo and their dependencies. In platform, `devbox/ilot.yaml`, which also holds the `repos:` list. In portal, `ilot.yaml` at the root.
 - The personal file: `~/.config/ilot/env.yaml`. It holds repo paths for clones in other places, and personal values (`env`, and `apps.<app>` for one app). A `repos` entry with a `path` and a `config` adds a personal repo: its `ilot.yaml` adds apps on this machine only. Do not put secrets in a repo file: put them there.
@@ -102,5 +102,6 @@ A port that "is taken by another process" belongs to something outside `ilot`. F
 
 - Two worktrees of one repo for the same ticket make `ilot` refuse that stack. The error names both folders. Keep one.
 - A container app's port is the port inside the container, so the same number can appear in several stacks.
-- If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also set `ILOT_ROUTES_DIR` to a scratch folder. Without it, the scratch state rewrites the real proxy routes.
+- If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also set `ILOT_PROXY_LISTEN` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
+- If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.
 - In zsh, a shell variable named `path` overwrites `PATH`. Name loop variables something else.
