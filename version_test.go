@@ -14,7 +14,7 @@ func TestVersionFromBuild(t *testing.T) {
 		buildSettings  []debug.BuildSetting
 		wantVersion    string
 	}{
-		{name: "image build", stampedVersion: "0.1.0-1.sha.gabcdef0", buildSettings: nil, wantVersion: "0.1.0-1.sha.gabcdef0"},
+		{name: "stamped build", stampedVersion: "0.1.0-1.sha.gabcdef0", buildSettings: nil, wantVersion: "0.1.0-1.sha.gabcdef0"},
 		{name: "build from a clean checkout", stampedVersion: "", buildSettings: commitSettings, wantVersion: "commit abcdef012345"},
 		{name: "build from a changed checkout", stampedVersion: "", buildSettings: changedCheckoutSettings, wantVersion: "commit abcdef012345 with local changes"},
 		{name: "build without git data", stampedVersion: "", buildSettings: nil, wantVersion: "unknown"},

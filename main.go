@@ -54,7 +54,6 @@ type cli struct {
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
-	Rebuild rebuildCommand `cmd:"" help:"Build ilot from the platform main checkout again, with the full build output."`
 }
 
 type envCommand struct {
@@ -436,7 +435,6 @@ func isListeningOnLocalhost(port int) bool {
 }
 
 func main() {
-	runCheckoutBinaryInstead(context.Background())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
