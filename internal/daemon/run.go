@@ -40,6 +40,8 @@ func Run(ctx context.Context, options Options) error {
 		return err
 	}
 	defer lock.Close()
+	// The socket file goes last, right before the lock: a caller that sees no file can start the next daemon at once.
+	defer os.Remove(paths.Socket())
 
 	logger := options.Logger
 	if logger == nil {
@@ -129,6 +131,7 @@ func listenOnSocket(socketPath string) (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
 	if err := os.Chmod(socketPath, 0o600); err != nil {
 		listener.Close()
 		return nil, err

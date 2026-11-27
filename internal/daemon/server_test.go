@@ -150,7 +150,8 @@ func TestRoundTripOfEveryCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Shutdown(ctx); err != nil {
+	// Not Client.Shutdown: it waits for the end of the daemon, and this server stays to answer the calls below.
+	if err := client.call(ctx, http.MethodPost, "/v1/shutdown", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -161,6 +162,9 @@ func TestRoundTripOfEveryCall(t *testing.T) {
 	waitUntil(t, "shutdown stopped the process", func() bool { return !isProcessAlive(survivor.PID) })
 	if _, err := client.Put(ctx, "late", spec); !errors.Is(err, ErrShuttingDown) {
 		t.Fatalf("a PUT after the shutdown gives %v", err)
+	}
+	if status, err := client.Status(ctx); err != nil || !status.ShuttingDown {
+		t.Fatalf("after the shutdown the status is %+v, %v", status, err)
 	}
 }
 

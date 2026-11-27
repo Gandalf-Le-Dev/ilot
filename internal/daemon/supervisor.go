@@ -186,6 +186,12 @@ func (supervisor *Supervisor) Shutdown() {
 	supervisor.background.Wait()
 }
 
+func (supervisor *Supervisor) IsShuttingDown() bool {
+	supervisor.mu.Lock()
+	defer supervisor.mu.Unlock()
+	return supervisor.isClosed
+}
+
 func (supervisor *Supervisor) lockEntry(name string, createIfMissing bool) (*entry, error) {
 	for {
 		supervisor.mu.Lock()
