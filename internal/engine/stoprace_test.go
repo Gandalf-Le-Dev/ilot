@@ -132,3 +132,46 @@ func TestStopStackStopsTheMembersOfTheStackOnly(t *testing.T) {
 		t.Error("publicapi.proj-1234.shop is still a member")
 	}
 }
+
+func stopWhenWaitedFor(environment testEnvironment, processName, appName string) {
+	other := environment.executorOfANewCommand()
+	environment.supervisor.onWaitReady = func(waitedName string) {
+		if waitedName != processName {
+			return
+		}
+		environment.supervisor.onWaitReady = nil
+		if err := other.Stop(context.Background(), environment.base, []string{appName}); err != nil {
+			panic(err)
+		}
+	}
+}
+
+func TestAStopWhileAStartWaitsSkipsTheAppWithoutAFailureOrAnURL(t *testing.T) {
+	environment := newTestEnvironment(t)
+	stopWhenWaitedFor(environment, "doc.base.shop", "doc")
+
+	environment.start(t, environment.base, StartOptions{}, "doc")
+
+	output := environment.output.String()
+	if !strings.Contains(output, "doc.base.shop does not start: another ilot command stopped it") {
+		t.Errorf("output %q, want the line that says why doc does not start", output)
+	}
+	if strings.Contains(output, "doc.base.shop: http") {
+		t.Errorf("output %q, want no URL of a skipped app", output)
+	}
+}
+
+func TestAStopOfADependencyWhileAStartWaitsSkipsItsDependents(t *testing.T) {
+	environment := newTestEnvironment(t)
+	stopWhenWaitedFor(environment, "gateway.base.shop", "gateway")
+
+	environment.start(t, environment.base, StartOptions{}, "internalapi")
+
+	output := environment.output.String()
+	if !strings.Contains(output, "internalapi.base.shop does not start: gateway.base.shop was stopped by another ilot command") {
+		t.Errorf("output %q, want the dependent skipped with the dependency named", output)
+	}
+	if environment.isApplied("internalapi.base.shop") {
+		t.Error("internalapi.base.shop runs without its dependency")
+	}
+}
