@@ -16,6 +16,8 @@ type Spec struct {
 	LogFile string            `json:"log_file"`
 	// Runs instead of SIGTERM when the process stops.
 	Stop string `json:"stop,omitempty"`
+	// With no probe, a process is ready as soon as it runs.
+	Ready *Probe `json:"ready,omitempty"`
 }
 
 func (spec Spec) Validate() error {
@@ -24,6 +26,9 @@ func (spec Spec) Validate() error {
 	}
 	if spec.LogFile == "" {
 		return errors.New("the specification has no log file")
+	}
+	if spec.Ready != nil {
+		return spec.Ready.Validate()
 	}
 	return nil
 }

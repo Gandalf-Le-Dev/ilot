@@ -31,12 +31,17 @@ type SupervisorOptions struct {
 	Logger      *slog.Logger
 	StopTimeout time.Duration
 	LogMaxBytes int64
+	// The time between two readiness probes, and the longest time of one probe.
+	ProbeInterval time.Duration
+	ProbeTimeout  time.Duration
 }
 
 type Supervisor struct {
-	logger      *slog.Logger
-	stopTimeout time.Duration
-	logMaxBytes int64
+	logger        *slog.Logger
+	stopTimeout   time.Duration
+	logMaxBytes   int64
+	probeInterval time.Duration
+	probeTimeout  time.Duration
 
 	mu         sync.Mutex
 	entries    map[string]*entry
@@ -60,6 +65,8 @@ type run struct {
 	output *rotatingFile
 	// Cancelled when the process has exited and its output is in the log file.
 	exited context.Context
+	// Closed at the first probe that passes, or at the start when the specification has no probe.
+	ready chan struct{}
 
 	// Guarded by Supervisor.mu.
 	state    State
@@ -68,10 +75,12 @@ type run struct {
 
 func NewSupervisor(options SupervisorOptions) *Supervisor {
 	return &Supervisor{
-		logger:      cmp.Or(options.Logger, slog.New(slog.DiscardHandler)),
-		stopTimeout: cmp.Or(options.StopTimeout, defaultStopTimeout),
-		logMaxBytes: cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
-		entries:     map[string]*entry{},
+		logger:        cmp.Or(options.Logger, slog.New(slog.DiscardHandler)),
+		stopTimeout:   cmp.Or(options.StopTimeout, defaultStopTimeout),
+		logMaxBytes:   cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
+		probeInterval: cmp.Or(options.ProbeInterval, defaultProbeInterval),
+		probeTimeout:  cmp.Or(options.ProbeTimeout, defaultProbeTimeout),
+		entries:       map[string]*entry{},
 	}
 }
 
@@ -254,7 +263,13 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 		return fmt.Errorf("start %s: %w", name, err)
 	}
 	exited, markExited := context.WithCancel(context.Background())
-	started := &run{pid: command.Process.Pid, output: output, exited: exited, state: StateReady}
+	started := &run{pid: command.Process.Pid, output: output, exited: exited, ready: make(chan struct{}), state: StateStarting}
+	if spec.Ready == nil {
+		started.state = StateReady
+		close(started.ready)
+	} else {
+		supervisor.background.Go(func() { supervisor.probeUntilReady(name, spec, started) })
+	}
 	target.run = started
 	supervisor.background.Go(func() {
 		supervisor.watch(name, started, command, pipeReader, markExited)
