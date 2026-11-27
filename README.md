@@ -86,11 +86,14 @@ After an upgrade, run `ilot daemon restart` to replace the daemon of the old ver
 
 ## Try the sample workspace
 
-`examples/` holds a workspace of two repos: `shop`, the root repo, with an `api`, and `web`, a member repo, with a `front` that calls the `api`. Both apps are small Go servers.
+`examples/` in this repo holds a workspace of two repos: `shop`, the root repo, with an `api`, and `web`, a member repo, with a `front` that calls the `api`. Both apps are small Go servers, so the sample needs Go on the `PATH` of a login shell.
+The commands copy the two folders to `~/code` and make each one a git repo.
 
 ```bash
+git clone https://github.com/Gandalf-Le-Dev/ilot && cd ilot
+mkdir -p ~/code
 cp -R examples/shop examples/web ~/code/
-for repo in shop web; do (cd ~/code/$repo && git init -q && git add -A && git commit -qm sample); done
+for repo in shop web; do (cd ~/code/$repo && git init -q && git add -A && git -c user.name=sample -c user.email=sample@localhost commit -qm sample); done
 cd ~/code/web
 ilot start front              # builds and starts api in base, then front
 curl http://front.base.shop.localhost:4580
