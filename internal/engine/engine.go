@@ -40,14 +40,18 @@ type StartOptions struct {
 }
 
 func (executor *Executor) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) error {
-	processByName, err := executor.processesOfALiveDaemon(ctx)
-	if err != nil {
+	// A start tests the ports of its apps, so it needs a daemon that has killed what a dead daemon left behind. That can take seconds, so not under the lock.
+	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
+	var processByName map[string]daemon.Process
 	var before plan.Snapshot
 	var dropped, requestedInstances []plan.Instance
 	var start plan.Start
-	err = executor.underLock(ctx, func() (err error) {
+	err := executor.underLock(ctx, func() (err error) {
+		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
+			return err
+		}
 		if before, dropped, err = executor.loadStacks(stackName); err != nil {
 			return err
 		}
@@ -97,16 +101,8 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	return nil
 }
 
-// A start tests the ports of its apps, so it needs a daemon that has killed what a dead daemon left behind.
-func (executor *Executor) processesOfALiveDaemon(ctx context.Context) (map[string]daemon.Process, error) {
-	if err := executor.Supervisor.Up(ctx); err != nil {
-		return nil, err
-	}
-	return executor.Supervisor.Processes(ctx)
-}
-
 // underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a call that starts or stops a process.
-// A step can read the process list, so that it sees what the commands before it started.
+// A step reads the process list after the lock is taken, so that it sees what a command that held the lock started.
 func (executor *Executor) underLock(ctx context.Context, step func() error) (err error) {
 	release, err := executor.Store.Lock(ctx)
 	if err != nil {
@@ -237,13 +233,16 @@ func (executor *Executor) bootApps(ctx context.Context, baseStackName string) er
 // StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
 // A member that runs gets no call.
 func (executor *Executor) StartAll(ctx context.Context) error {
-	processByName, err := executor.processesOfALiveDaemon(ctx)
-	if err != nil {
+	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
+	var processByName map[string]daemon.Process
 	var start plan.Start
 	var problems []error
-	err = executor.underLock(ctx, func() error {
+	err := executor.underLock(ctx, func() (err error) {
+		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
+			return err
+		}
 		snapshot, _, err := executor.loadStacks(plan.BaseStack)
 		if err != nil {
 			return err

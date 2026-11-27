@@ -75,3 +75,40 @@ func TestStopOfAnAppThatNoConfigDeclaresFreesItsPorts(t *testing.T) {
 		t.Error("ticket-search.proj-1234.platform still runs")
 	}
 }
+
+// Another command can start a shared dependency while this one waits for the state lock.
+func TestAStartSeesTheProcessesThatAnotherCommandStartedDuringItsWaitForTheLock(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	startedByTheOtherCommand := environment.supervisor.runningSpecs["standalone.base.platform"]
+	if err := environment.executor.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
+		t.Fatal(err)
+	}
+	storedPort := environment.appPort(t, "base", "standalone")
+	environment.executor.IsPortFreeOnHost = func(port int) bool {
+		return port != storedPort || !environment.isApplied(startedByTheOtherCommand.Name)
+	}
+	release, err := environment.executor.Store.Lock(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	waits, mayGoOn := make(chan struct{}), make(chan struct{})
+	environment.executor.Store.OnLockWait = func(string) {
+		close(waits)
+		<-mayGoOn
+	}
+	startErr := make(chan error)
+	go func() {
+		startErr <- environment.executor.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
+	}()
+	<-waits
+	environment.supervisor.runningSpecs[startedByTheOtherCommand.Name] = startedByTheOtherCommand
+	if err := release(); err != nil {
+		t.Fatal(err)
+	}
+	close(mayGoOn)
+
+	if err := <-startErr; err != nil {
+		t.Fatalf("Start = %v, want no port test for a process that ilot runs", err)
+	}
+}
