@@ -113,8 +113,12 @@ func TestTheDataCommandsPrintOnlyDataOnStdoutWhenAWarningIsPresent(t *testing.T)
 		if key, _, isPair := strings.Cut(line, "="); !isPair || strings.Contains(key, " ") || strings.HasPrefix(line, "warning") {
 			t.Errorf("ilot env api printed %q, which is not a variable", line)
 		}
-		if fromTheShell := strings.HasSuffix(strings.TrimSpace(line), "(shell)") || strings.HasSuffix(strings.TrimSpace(line), "(session)"); !fromTheShell && strings.Contains(line, "   (") {
-			t.Errorf("ilot env api printed %q, want no padding after the value", line)
+		beforeSource := line[:strings.LastIndex(line, "(")]
+		source := strings.TrimSpace(line[len(beforeSource):])
+		gap := len(beforeSource) - len(strings.TrimRight(beforeSource, " "))
+		valueMayEndWithSpaces := source == "(shell)" || source == "(session)"
+		if gap < 2 || (gap > 2 && !valueMayEndWithSpaces) {
+			t.Errorf("ilot env api printed %q, want exactly two spaces between the value and the source", line)
 		}
 	}
 }
