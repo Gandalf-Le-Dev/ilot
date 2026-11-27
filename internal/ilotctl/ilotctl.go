@@ -11,52 +11,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
-	"github.com/Gandalf-Le-Dev/ilot/internal/state"
-	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
+// Controller runs the commands that change the stacks: it plans with the snapshot of its Source, then builds, calls the daemon and waits.
 type Controller struct {
-	// The name of the workspace, which is also the name of its root repo.
-	Workspace string
-	// The main checkout of the root repo, which the state records for the workspace.
-	Root                string
-	Config              config.Config
-	Store               state.Store
+	Source
 	Supervisor          ProcessSupervisor
 	RunBuild            func(ctx context.Context, workingDir, shellCommand string, environ []string) error
 	EnsureImage         func(ctx context.Context, image string) (pullOutput string, err error)
 	IsPortFreeOnHost    func(port int) bool
 	IsExternalServiceUp func(port int) bool
-	CheckoutsForStack   func(stackName string) (map[string]workspace.Worktree, error)
-	ConfigForStack      func(stackName string) (config.Config, error)
-	ReposNotCloned      map[string]string
-	// What the global file holds for the workspace: values for every app, and values for one app.
-	Settings  config.WorkspaceSettings
-	Domain    string
-	PortRange ports.Range
-	ShellEnv  func() (map[string]string, error)
-	Login     string
-	ProxyPort string
-	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
-	IlotBinary       string
-	IlotEnv          map[string]string
-	ReadyTimeout     time.Duration
-	ProgressInterval time.Duration
-	Output           io.Writer
+	PortRange           ports.Range
+	ReadyTimeout        time.Duration
+	ProgressInterval    time.Duration
+	Output              io.Writer
 }
 
 type StartOptions struct {
 	SkipDependencies bool
-}
-
-// The workspace is in the name, because the daemon runs the apps of every workspace.
-func (controller *Controller) processName(appInstance plan.Instance) string {
-	return appInstance.App + "." + appInstance.Stack + "." + controller.Workspace
 }
 
 func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) (err error) {
@@ -90,7 +66,7 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 	isReallyRunning := map[plan.Instance]bool{}
 	hasEndedProcess := map[plan.Instance]bool{}
 	for _, appInstance := range startOrder {
-		process, isKnown := processByName[controller.processName(appInstance)]
+		process, isKnown := processByName[plan.ProcessName(controller.Workspace, appInstance)]
 		isStoredAsRunning := snapshot.IsWanted(appInstance)
 		isReallyRunning[appInstance] = isStoredAsRunning && isKnown && process.State != daemon.StateExited
 		hasEndedProcess[appInstance] = isKnown && process.State == daemon.StateExited
@@ -162,7 +138,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 	}
 	for _, appInstance := range restartedInstances {
 		if !snapshot.IsWanted(appInstance) {
-			return fmt.Errorf("%s does not run: start it with ilot start %s", controller.processName(appInstance), appInstance.App)
+			return fmt.Errorf("%s does not run: start it with ilot start %s", plan.ProcessName(controller.Workspace, appInstance), appInstance.App)
 		}
 	}
 	if err := controller.buildApps(ctx, snapshot, restartedInstances, func(plan.Instance) bool { return true }); err != nil {
@@ -174,7 +150,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 	}
 	for _, appInstance := range restartedInstances {
 		// A process that the daemon does not hold starts in the apply. A restart on top would start it twice.
-		_, isHeldByDaemon := processByName[controller.processName(appInstance)]
+		_, isHeldByDaemon := processByName[plan.ProcessName(controller.Workspace, appInstance)]
 		if err := controller.startInstance(ctx, snapshot, appInstance, isHeldByDaemon, false); err != nil {
 			return err
 		}
@@ -235,7 +211,7 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 	isFailed := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
 		isFailed[failure.appInstance] = true
-		problems = append(problems, fmt.Errorf("%s: %w", controller.processName(failure.appInstance), failure.err))
+		problems = append(problems, fmt.Errorf("%s: %w", plan.ProcessName(controller.Workspace, failure.appInstance), failure.err))
 	}
 	for _, appInstance := range startOrder {
 		if isFailed[appInstance] {
@@ -243,7 +219,7 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 		}
 		if failedDependency, hasFailedDependency := controller.failedDependencyOf(snapshot, appInstance, isFailed); hasFailedDependency {
 			isFailed[appInstance] = true
-			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", controller.processName(appInstance), controller.processName(failedDependency)))
+			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", plan.ProcessName(controller.Workspace, appInstance), plan.ProcessName(controller.Workspace, failedDependency)))
 			continue
 		}
 		if err := controller.startInstance(ctx, snapshot, appInstance, false, true); err != nil {
@@ -297,15 +273,15 @@ func (controller *Controller) startInstance(ctx context.Context, snapshot plan.S
 		return err
 	}
 	if needsRestart {
-		if err := controller.Supervisor.Restart(ctx, controller.processName(appInstance)); err != nil {
+		if err := controller.Supervisor.Restart(ctx, plan.ProcessName(controller.Workspace, appInstance)); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(controller.Output, "waiting for %s\n", controller.processName(appInstance))
-	stopShowingLog := logs.FollowNewMessages(controller.logFile(appInstance), &linePrefixWriter{prefix: controller.processName(appInstance) + " | ", output: controller.Output, isAtLineStart: true})
-	waitErr := controller.Supervisor.WaitReady(ctx, controller.processName(appInstance), controller.ReadyTimeout)
+	fmt.Fprintf(controller.Output, "waiting for %s\n", plan.ProcessName(controller.Workspace, appInstance))
+	stopShowingLog := logs.FollowNewMessages(snapshot.LogFile(appInstance), &linePrefixWriter{prefix: plan.ProcessName(controller.Workspace, appInstance) + " | ", output: controller.Output, isAtLineStart: true})
+	waitErr := controller.Supervisor.WaitReady(ctx, plan.ProcessName(controller.Workspace, appInstance), controller.ReadyTimeout)
 	if err := errors.Join(waitErr, stopShowingLog()); err != nil {
-		failure := fmt.Errorf("%w, see %s", err, controller.logFile(appInstance))
+		failure := fmt.Errorf("%w, see %s", err, snapshot.LogFile(appInstance))
 		_, hasEnded := errors.AsType[*daemon.ExitedError](err)
 		_, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err)
 		switch {
@@ -327,7 +303,7 @@ func (controller *Controller) stopFailedInstance(ctx context.Context, snapshot p
 		err = controller.applyAll(cleanupCtx, snapshot)
 	}
 	if err != nil {
-		return fmt.Errorf("stop %s after its failure: %w", controller.processName(failedInstance), err)
+		return fmt.Errorf("stop %s after its failure: %w", plan.ProcessName(controller.Workspace, failedInstance), err)
 	}
 	return nil
 }
@@ -401,7 +377,7 @@ func (controller *Controller) Stop(ctx context.Context, stackName string, appNam
 	stacksBeforeStop := snapshot.Clone()
 	for _, stoppedInstance := range stoppedInstances {
 		if !snapshot.IsWanted(stoppedInstance) {
-			fmt.Fprintf(controller.Output, "%s is not running\n", controller.processName(stoppedInstance))
+			fmt.Fprintf(controller.Output, "%s is not running\n", plan.ProcessName(controller.Workspace, stoppedInstance))
 			continue
 		}
 		snapshot.SetWanted(stoppedInstance, false)
@@ -419,7 +395,7 @@ func (controller *Controller) warnAboutDependents(snapshotBeforeStop plan.Snapsh
 			continue
 		}
 		if snapshotBeforeStop.Serving(runningInstance.Stack, stoppedInstance.App) == stoppedInstance.Stack {
-			fmt.Fprintf(controller.Output, "warning: %s depends on %s and keeps running\n", controller.processName(runningInstance), controller.processName(stoppedInstance))
+			fmt.Fprintf(controller.Output, "warning: %s depends on %s and keeps running\n", plan.ProcessName(controller.Workspace, runningInstance), plan.ProcessName(controller.Workspace, stoppedInstance))
 		}
 	}
 }

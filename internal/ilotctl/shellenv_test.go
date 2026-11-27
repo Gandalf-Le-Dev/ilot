@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
 func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
@@ -18,7 +19,7 @@ func TestEnvironmentListsTheShellBelowEveryOtherSource(t *testing.T) {
 
 	entryByKey := environmentOf(t, environment, "standalone")
 
-	want := map[string]EnvEntry{
+	want := map[string]plan.EnvEntry{
 		"GOPROXY":   {Key: "GOPROXY", Value: "https://proxy", Source: "shell"},
 		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "global"},
 		"REGION":    {Key: "REGION", Value: "EU1", Source: "repo"},

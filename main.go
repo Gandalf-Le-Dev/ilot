@@ -29,6 +29,7 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
@@ -72,11 +73,11 @@ type envCommand struct {
 }
 
 func (command *envCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
+	source, stackName, err := sourceForCurrentWorktree(ctx)
 	if err != nil {
 		return err
 	}
-	entries, err := controller.Environment(stackName, command.App)
+	entries, err := source.Environment(stackName, command.App)
 	if err != nil {
 		return err
 	}
@@ -95,11 +96,11 @@ type logsCommand struct {
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
+	source, stackName, err := sourceForCurrentWorktree(ctx)
 	if err != nil {
 		return err
 	}
-	logPath, err := controller.LogFile(stackName, command.App)
+	logPath, err := source.LogFile(stackName, command.App)
 	if err != nil {
 		return err
 	}
@@ -215,9 +216,9 @@ func (command *lsCommand) Run(ctx context.Context) error {
 		return err
 	}
 	if command.JSON {
-		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: controller.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
+		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: controller.Machine.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
 	}
-	fmt.Printf("every URL: %s\n\n", controller.HomeURL())
+	fmt.Printf("every URL: %s\n\n", controller.Machine.HomeURL())
 	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "STACK\tAPP\tSTATUS\tPORTS\tURL")
 	for _, app := range listing.Apps {
@@ -338,6 +339,24 @@ func newControllerForCurrentWorktree(ctx context.Context, readyTimeout time.Dura
 	return controller, stackName, err
 }
 
+// sourceForCurrentWorktree is for a command that only reads: it records no binding.
+func sourceForCurrentWorktree(ctx context.Context) (ilotctl.Source, string, error) {
+	currentWorkspace, worktree, err := findCurrentWorkspace()
+	if err != nil {
+		return ilotctl.Source{}, "", err
+	}
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return ilotctl.Source{}, "", err
+	}
+	currentWorkspace, stackName, err := stackOfWorktree(ctx, store, currentWorkspace, worktree, false, os.Stderr)
+	if err != nil {
+		return ilotctl.Source{}, "", err
+	}
+	source, err := newSource(ctx, currentWorkspace, store, stackName)
+	return source, stackName, err
+}
+
 func findCurrentWorkspace() (workspace.Workspace, workspace.Worktree, error) {
 	currentDir, err := os.Getwd()
 	if err != nil {
@@ -362,64 +381,69 @@ func stateDirOf(homeDir string) string {
 	return filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(homeDir, ".local", "state")), "ilot")
 }
 
-func newController(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+// newSource gives what a command of a stack reads: the state, the files of its checkouts and the login shell.
+func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string) (ilotctl.Source, error) {
 	stackConfig, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
-		return nil, err
+		return ilotctl.Source{}, err
 	}
 	global := currentWorkspace.Global
-	proxyListen := global.Proxy.Listen
-	_, proxyPort, err := net.SplitHostPort(proxyListen)
+	_, proxyPort, err := net.SplitHostPort(global.Proxy.Listen)
 	if err != nil {
-		return nil, err
+		return ilotctl.Source{}, err
 	}
 	currentUser, err := user.Current()
 	if err != nil {
-		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
+		return ilotctl.Source{}, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
-	stateDir := store.RootDir
-	shellEnv := sync.OnceValues(func() (map[string]string, error) {
-		return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
-	})
 	ilotBinary, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("find the ilot binary, to start its daemon: %w", err)
+		return ilotctl.Source{}, fmt.Errorf("find the ilot binary, which the watcher of an app runs: %w", err)
 	}
 	ilotEnv := map[string]string{}
 	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
 		ilotEnv["XDG_STATE_HOME"] = value
 	}
-	daemonPaths := daemon.Paths{StateDir: stateDir}
+	return ilotctl.Source{
+		Workspace:         currentWorkspace.Name,
+		Root:              currentWorkspace.RootDir,
+		Config:            stackConfig,
+		Store:             store,
+		CheckoutsForStack: currentWorkspace.CheckoutsForStack,
+		ConfigForStack:    currentWorkspace.ConfigForStack,
+		ReposNotCloned:    currentWorkspace.ReposNotCloned(),
+		Settings:          currentWorkspace.Settings,
+		Machine:           plan.Machine{StateDir: store.RootDir, Domain: global.Proxy.Domain, ProxyPort: proxyPort, Login: currentUser.Username, ShellEnv: nil, IlotBinary: ilotBinary, IlotEnv: ilotEnv},
+		ShellEnv: sync.OnceValues(func() (map[string]string, error) {
+			return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
+		}),
+	}, nil
+}
+
+func newController(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+	source, err := newSource(ctx, currentWorkspace, store, stackName)
+	if err != nil {
+		return nil, err
+	}
+	global := currentWorkspace.Global
+	proxyListen := global.Proxy.Listen
+	daemonPaths := daemon.Paths{StateDir: store.RootDir}
 	startDaemon := func() error {
-		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
+		_, err := daemon.Launch{Binary: source.Machine.IlotBinary, Args: []string{"daemon", "run", "--state-dir", store.RootDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
 		return err
 	}
-	controller := &ilotctl.Controller{
-		Workspace:           currentWorkspace.Name,
-		Root:                currentWorkspace.RootDir,
-		Config:              stackConfig,
-		Store:               store,
+	return &ilotctl.Controller{
+		Source:              source,
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		IsPortFreeOnHost:    ports.IsFreeOnLoopback,
 		IsExternalServiceUp: isListeningOnLocalhost,
-		CheckoutsForStack:   currentWorkspace.CheckoutsForStack,
-		ConfigForStack:      currentWorkspace.ConfigForStack,
-		ReposNotCloned:      currentWorkspace.ReposNotCloned(),
-		Settings:            currentWorkspace.Settings,
-		Domain:              global.Proxy.Domain,
 		PortRange:           ports.Range{First: global.Ports.First, Last: global.Ports.Last},
-		ShellEnv:            shellEnv,
-		Login:               currentUser.Username,
-		ProxyPort:           proxyPort,
-		IlotBinary:          ilotBinary,
-		IlotEnv:             ilotEnv,
 		ReadyTimeout:        readyTimeout,
 		ProgressInterval:    10 * time.Second,
 		Output:              os.Stdout,
-	}
-	return controller, nil
+	}, nil
 }
 
 // The same shell as the daemon gives an app, so a build and a run command read the same syntax.

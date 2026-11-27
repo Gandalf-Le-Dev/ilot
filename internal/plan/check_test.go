@@ -1,4 +1,4 @@
-package ilotctl
+package plan
 
 import (
 	"errors"

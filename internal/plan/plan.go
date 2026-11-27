@@ -34,6 +34,9 @@ type Snapshot struct {
 	Checkouts map[string]map[string]string
 	// The path that each repo would have, for a repo that is not cloned.
 	ReposNotCloned map[string]string
+	// What the global file holds for the workspace: values for every app, and values for one app.
+	Settings config.WorkspaceSettings
+	Machine  Machine
 }
 
 // Clone gives a snapshot whose state can change without a change to this one.
@@ -279,4 +282,16 @@ func (snapshot Snapshot) PlanStart(requested []Instance, skipDependencies bool) 
 		after.SetWanted(instance, true)
 	}
 	return start
+}
+
+// DropUndeclared takes the membership away from each instance that no loaded configuration declares any more, and gives them.
+func (snapshot Snapshot) DropUndeclared() []Instance {
+	var dropped []Instance
+	for _, wantedInstance := range snapshot.Wanted() {
+		if _, isDeclared := snapshot.Declaration(wantedInstance); !isDeclared {
+			snapshot.SetWanted(wantedInstance, false)
+			dropped = append(dropped, wantedInstance)
+		}
+	}
+	return dropped
 }

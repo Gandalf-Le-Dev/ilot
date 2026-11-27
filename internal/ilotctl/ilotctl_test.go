@@ -16,6 +16,7 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
@@ -310,12 +311,18 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
 	controller := &Controller{
-		Workspace:  "platform",
-		Domain:     "dev.example.net",
-		PortRange:  ports.Range{First: 20000, Last: 29999},
-		Config:     testConfig(),
-		Root:       "/src/platform",
-		Store:      state.Store{RootDir: t.TempDir(), LockTimeout: 0, OnLockWait: nil},
+		Source: Source{
+			Workspace:         "platform",
+			Root:              "/src/platform",
+			Config:            testConfig(),
+			Store:             state.Store{RootDir: t.TempDir(), LockTimeout: 0, OnLockWait: nil},
+			CheckoutsForStack: fakeCheckoutsForStack,
+			ConfigForStack:    nil,
+			ReposNotCloned:    nil,
+			Settings:          config.WorkspaceSettings{Repos: nil, Env: nil, Apps: nil},
+			Machine:           plan.Machine{StateDir: "", Domain: "dev.example.net", ProxyPort: "", Login: "", ShellEnv: nil, IlotBinary: "/opt/ilot/bin/ilot", IlotEnv: nil},
+			ShellEnv:          nil,
+		},
 		Supervisor: supervisor,
 		RunBuild: func(_ context.Context, workingDir, shellCommand string, environ []string) error {
 			*builds = append(*builds, recordedBuild{workingDir: workingDir, command: shellCommand})
@@ -325,12 +332,12 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		EnsureImage:         func(context.Context, string) (string, error) { return "", nil },
 		IsPortFreeOnHost:    func(int) bool { return true },
 		IsExternalServiceUp: func(int) bool { return true },
-		CheckoutsForStack:   fakeCheckoutsForStack,
-		IlotBinary:          "/opt/ilot/bin/ilot",
+		PortRange:           ports.Range{First: 20000, Last: 29999},
 		ReadyTimeout:        time.Second,
 		ProgressInterval:    0,
 		Output:              output,
 	}
+	controller.Machine.StateDir = controller.Store.RootDir
 	return testEnvironment{
 		controller:    controller,
 		supervisor:    supervisor,
@@ -921,7 +928,7 @@ func TestAStoppedAppKeepsItsRoute(t *testing.T) {
 
 func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ProxyPort = "18080"
+	environment.controller.Machine.ProxyPort = "18080"
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
 	listing, err := environment.controller.List(t.Context())
@@ -1020,7 +1027,7 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe"})
-	environment.controller.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
+	environment.controller.Machine.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
 
 	environment.start(t, environment.base, StartOptions{}, "restapi")
 
@@ -1252,9 +1259,9 @@ func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 
 func TestHomeURLIsTheRouteListOfTheProxy(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ProxyPort = "18080"
+	environment.controller.Machine.ProxyPort = "18080"
 
-	if got := environment.controller.HomeURL(); got != "http://dev.example.net:18080" {
+	if got := environment.controller.Machine.HomeURL(); got != "http://dev.example.net:18080" {
 		t.Errorf("HomeURL = %q", got)
 	}
 }
@@ -1274,7 +1281,7 @@ func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 
 func TestListShowsTheHomePathInTheURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ProxyPort = "18080"
+	environment.controller.Machine.ProxyPort = "18080"
 	publicapi := environment.controller.Config.Apps["publicapi"]
 	publicapi.HomePath = "/swagger/"
 	environment.controller.Config.Apps["publicapi"] = publicapi
@@ -1328,13 +1335,13 @@ func TestAppRunsFromTheCheckoutOfItsRepo(t *testing.T) {
 	}
 }
 
-func environmentOf(t *testing.T, environment testEnvironment, appName string) map[string]EnvEntry {
+func environmentOf(t *testing.T, environment testEnvironment, appName string) map[string]plan.EnvEntry {
 	t.Helper()
 	entries, err := environment.controller.Environment(environment.featureStack, appName)
 	if err != nil {
 		t.Fatalf("Environment(%s): %v", appName, err)
 	}
-	entryByKey := map[string]EnvEntry{}
+	entryByKey := map[string]plan.EnvEntry{}
 	for _, entry := range entries {
 		entryByKey[entry.Key] = entry
 	}
@@ -1343,7 +1350,7 @@ func environmentOf(t *testing.T, environment testEnvironment, appName string) ma
 
 func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Login = "jdoe"
+	environment.controller.Machine.Login = "jdoe"
 	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"LOG_LEVEL": "info", "REGION": "DEV1"}}
 	standalone := environment.controller.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"PORT": "{{.Ports.http}}", "REGION": "EU1"}
@@ -1358,7 +1365,7 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	entryByKey := environmentOf(t, environment, "standalone")
 
 	wantPort := strconv.Itoa(environment.appPort(t, "proj-1234", "standalone"))
-	want := map[string]EnvEntry{
+	want := map[string]plan.EnvEntry{
 		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "global"},
 		"REGION":    {Key: "REGION", Value: "EU1", Source: "app"},
 		"PORT":      {Key: "PORT", Value: wantPort, Source: "computed"},
@@ -1376,8 +1383,8 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 
 func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Login = "jdoe"
-	environment.controller.ProxyPort = "18080"
+	environment.controller.Machine.Login = "jdoe"
+	environment.controller.Machine.ProxyPort = "18080"
 	standalone := environment.controller.Config.Apps["standalone"]
 	standalone.Run = `run {{.Stack}} {{.User}} {{repo "portal"}} {{url "temporal"}} {{url "internalapi"}}`
 	environment.controller.Config.Apps["standalone"] = standalone
@@ -1544,7 +1551,7 @@ func TestDomainTemplateGivesTheProxyDomain(t *testing.T) {
 
 func TestProxyPortTemplateGivesTheProxyPort(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.ProxyPort = "18080"
+	environment.controller.Machine.ProxyPort = "18080"
 	standalone := environment.controller.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"EXPOSED_PORT": "{{.ProxyPort}}"}
 	environment.controller.Config.Apps["standalone"] = standalone
@@ -1593,7 +1600,7 @@ func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t
 
 	entryByKey := environmentOf(t, environment, "portal-standalone")
 
-	want := map[string]EnvEntry{
+	want := map[string]plan.EnvEntry{
 		"LOG_LEVEL":  {Key: "LOG_LEVEL", Value: "info", Source: "root repo"},
 		"REGION":     {Key: "REGION", Value: "EU2", Source: "repo"},
 		"STACK_NAME": {Key: "STACK_NAME", Value: "proj-1234", Source: "computed"},
