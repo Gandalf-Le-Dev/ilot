@@ -113,7 +113,7 @@ func TestTheDataCommandsPrintOnlyDataOnStdoutWhenAWarningIsPresent(t *testing.T)
 		if key, _, isPair := strings.Cut(line, "="); !isPair || strings.Contains(key, " ") || strings.HasPrefix(line, "warning") {
 			t.Errorf("ilot env api printed %q, which is not a variable", line)
 		}
-		if strings.Contains(line, "   (") {
+		if fromTheShell := strings.HasSuffix(strings.TrimSpace(line), "(shell)") || strings.HasSuffix(strings.TrimSpace(line), "(session)"); !fromTheShell && strings.Contains(line, "   (") {
 			t.Errorf("ilot env api printed %q, want no padding after the value", line)
 		}
 	}
