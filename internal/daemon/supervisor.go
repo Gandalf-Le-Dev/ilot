@@ -76,6 +76,8 @@ type run struct {
 	// Tells this process from a later one with the same ID.
 	startedAt string
 	output    *rotatingFile
+	// Cancelled when the process has exited, before its output is read to the end: a grandchild can hold that output open.
+	dead context.Context
 	// Cancelled when the process has exited and its output is in the log file.
 	exited context.Context
 	// Closed at the first probe that passes, or after the alive window when the specification has no probe.
@@ -288,8 +290,9 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 		}
 		return fmt.Errorf("start %s: %w", name, err)
 	}
+	dead, markDead := context.WithCancel(context.Background())
 	exited, markExited := context.WithCancel(context.Background())
-	started := &run{pid: command.Process.Pid, output: output, exited: exited, ready: make(chan struct{}), state: StateStarting}
+	started := &run{pid: command.Process.Pid, output: output, dead: dead, exited: exited, ready: make(chan struct{}), state: StateStarting}
 	started.startedAt, _ = processStartTime(started.pid)
 	supervisor.mu.Lock()
 	target.run = started
@@ -301,14 +304,14 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 		supervisor.background.Go(func() { supervisor.readyIfStillAlive(name, started) })
 	}
 	supervisor.background.Go(func() {
-		supervisor.watch(name, started, command, pipeReader, markExited)
+		supervisor.watch(name, started, command, pipeReader, markDead, markExited)
 	})
 
 	supervisor.logger.Info("process started", "process", name, "pid", started.pid)
 	return nil
 }
 
-func (supervisor *Supervisor) watch(name string, watched *run, command *exec.Cmd, pipeReader *os.File, markExited context.CancelFunc) {
+func (supervisor *Supervisor) watch(name string, watched *run, command *exec.Cmd, pipeReader *os.File, markDead, markExited context.CancelFunc) {
 	copied := make(chan struct{})
 	go func() {
 		defer close(copied)
@@ -319,6 +322,7 @@ func (supervisor *Supervisor) watch(name string, watched *run, command *exec.Cmd
 	}()
 
 	_ = command.Wait()
+	markDead()
 	// Whatever the shell left in its group must not outlive it.
 	_ = syscall.Kill(-watched.pid, syscall.SIGKILL)
 	select {
