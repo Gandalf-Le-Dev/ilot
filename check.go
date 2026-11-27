@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -11,10 +12,8 @@ import (
 	"strings"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
-	"github.com/Gandalf-Le-Dev/ilot/internal/realpath"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type checkCommand struct {
@@ -22,11 +21,11 @@ type checkCommand struct {
 }
 
 func (command *checkCommand) Run() error {
-	currentDir, err := currentFolder()
+	currentDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	var currentWorkspace *workspace
+	var currentWorkspace *workspace.Workspace
 	loadedWorkspace, err := loadCurrentWorkspace()
 	switch {
 	case err == nil:
@@ -95,37 +94,31 @@ func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string
 }
 
 // A nil workspace is CI: no repo layout, so a file is known only by its own repos: list.
-func configFileToCheck(currentWorkspace *workspace, currentDir, requestedPath string) (repoName, configFile string, err error) {
+func configFileToCheck(currentWorkspace *workspace.Workspace, currentDir, requestedPath string) (repoName, configFile string, err error) {
 	if requestedPath != "" {
 		return repoOfConfigFile(currentWorkspace, requestedPath)
 	}
-	if currentWorkspace.locationOf(currentDir) != insideCheckout {
-		mainCheckout, err := platformMainCheckout(*currentWorkspace)
-		if err != nil {
-			return "", "", err
-		}
-		return appconfig.DefaultRepo, filepath.Join(mainCheckout.WorktreeDir, platformConfigPath), nil
-	}
-	repoName, err = checkouts.RepoOf(currentWorkspace.repoPaths, currentDir)
+	_, checkout, err := currentWorkspace.StackOf(currentDir, false, io.Discard)
 	if err != nil {
 		return "", "", err
 	}
-	checkout, err := stack.Locate(currentDir)
-	if err != nil {
-		return "", "", err
-	}
-	relativeConfigPath := currentWorkspace.repoConfigs[repoName].Config
+	relativeConfigPath := currentWorkspace.RepoConfigs[checkout.Repo].Config
 	if relativeConfigPath == "" {
-		return "", "", fmt.Errorf("repo %s has no config file in the repos: list of %s", repoName, platformConfigPath)
+		return "", "", fmt.Errorf("repo %s has no config file in the repos: list of %s", checkout.Repo, workspace.PlatformConfigPath)
 	}
-	return repoName, filepath.Join(checkout.WorktreeDir, relativeConfigPath), nil
+	return checkout.Repo, filepath.Join(checkout.Dir, relativeConfigPath), nil
 }
 
-func repoOfConfigFile(currentWorkspace *workspace, requestedPath string) (repoName, configFile string, err error) {
-	configFile = realpath.Of(requestedPath)
+func repoOfConfigFile(currentWorkspace *workspace.Workspace, requestedPath string) (repoName, configFile string, err error) {
+	configFile, err = workspace.Canonical(requestedPath)
+	if err != nil {
+		return "", "", err
+	}
 	if currentWorkspace != nil {
-		if repoName, err := checkouts.RepoOf(currentWorkspace.repoPaths, filepath.Dir(configFile)); err == nil {
-			return repoName, configFile, nil
+		if checkout, err := currentWorkspace.Locate(filepath.Dir(configFile)); err == nil {
+			if repoName, err := currentWorkspace.RepoOf(checkout); err == nil {
+				return repoName, configFile, nil
+			}
 		}
 	}
 	config, err := appconfig.Parse(configFile)
@@ -138,24 +131,18 @@ func repoOfConfigFile(currentWorkspace *workspace, requestedPath string) (repoNa
 	return appconfig.DefaultRepo, configFile, nil
 }
 
-func otherConfigFiles(currentWorkspace workspace, currentDir, checkedRepo string) (map[string]string, error) {
-	stackName := stack.MasterStackName
-	if currentWorkspace.locationOf(currentDir) == insideCheckout {
-		if _, err := checkouts.RepoOf(currentWorkspace.repoPaths, currentDir); err == nil {
-			checkout, err := stack.Locate(currentDir)
-			if err != nil {
-				return nil, err
-			}
-			stackName = checkout.Name
-		}
+func otherConfigFiles(currentWorkspace workspace.Workspace, currentDir, checkedRepo string) (map[string]string, error) {
+	stackName, _, err := currentWorkspace.StackOf(currentDir, false, io.Discard)
+	if err != nil {
+		stackName = workspace.MasterStackName
 	}
-	checkoutByRepo, err := currentWorkspace.checkoutsForStack(stackName)
-	if err != nil && !checkouts.IsSeveralWorktrees(err) {
+	checkoutByRepo, err := currentWorkspace.CheckoutsForStack(stackName)
+	if err != nil && !workspace.IsSeveralWorktrees(err) {
 		return nil, err
 	}
 	fileByRepo := map[string]string{}
 	for repoName, checkout := range checkoutByRepo {
-		relativeConfigPath := currentWorkspace.repoConfigs[repoName].Config
+		relativeConfigPath := currentWorkspace.RepoConfigs[repoName].Config
 		if repoName == checkedRepo || relativeConfigPath == "" {
 			continue
 		}

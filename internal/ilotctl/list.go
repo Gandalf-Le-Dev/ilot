@@ -6,8 +6,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type Listing struct {
@@ -81,15 +81,15 @@ func statusOf(process daemon.Process) string {
 }
 
 // A repo with several worktrees for a stack is left out: ilot start reports it in that stack.
-func (controller *Controller) StackCheckouts() (map[string]map[string]checkouts.Checkout, error) {
+func (controller *Controller) StackCheckouts() (map[string]map[string]workspace.Worktree, error) {
 	allStacks, err := controller.Store.All()
 	if err != nil {
 		return nil, err
 	}
-	checkoutsByStack := map[string]map[string]checkouts.Checkout{}
+	checkoutsByStack := map[string]map[string]workspace.Worktree{}
 	for _, stackState := range allStacks {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)
-		if err != nil && !checkouts.IsSeveralWorktrees(err) {
+		if err != nil && !workspace.IsSeveralWorktrees(err) {
 			return nil, err
 		}
 		checkoutsByStack[stackState.Name] = checkoutByRepo

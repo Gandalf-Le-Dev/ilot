@@ -9,8 +9,8 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 const (
@@ -80,7 +80,7 @@ func stacksWithEveryAppRunning(config appconfig.Config) stackSet {
 		}
 	}
 	stacks := stackSet{byName: map[string]*state.StackState{}}
-	for _, stackName := range []string{stack.MasterStackName, stack.SharedStackName, checkStackName} {
+	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName, checkStackName} {
 		stackState := stacks.ensure(stackName)
 		for _, repoName := range repoNames {
 			stackState.CheckoutDirs[repoName] = madeUpCheckoutsRoot + repoName
@@ -89,9 +89,9 @@ func stacksWithEveryAppRunning(config appconfig.Config) stackSet {
 	nextMadeUpPort := firstMadeUpPort
 	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[appName]
-		stackNames := []string{checkStackName, stack.MasterStackName}
+		stackNames := []string{checkStackName, workspace.MasterStackName}
 		if app.Shared {
-			stackNames = []string{stack.SharedStackName}
+			stackNames = []string{workspace.SharedStackName}
 		}
 		for _, stackName := range stackNames {
 			portByName := map[string]int{}

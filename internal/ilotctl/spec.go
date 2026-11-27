@@ -11,15 +11,14 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 func (controller *Controller) binDir(stackName string) string {
 	return filepath.Join(controller.Store.StackDir(stackName), "bin")
 }
 
-func (controller *Controller) LogFile(worktree stack.Worktree, appName string) (string, error) {
-	appInstances, err := controller.instancesOf(worktree.Name, []string{appName})
+func (controller *Controller) LogFile(stackName string, appName string) (string, error) {
+	appInstances, err := controller.instancesOf(stackName, []string{appName})
 	if err != nil {
 		return "", err
 	}

@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type Controller struct {
@@ -28,7 +27,7 @@ type Controller struct {
 	EnsureImage         func(ctx context.Context, image string) (pullOutput string, err error)
 	IsPortFreeOnHost    func(port int) bool
 	IsExternalServiceUp func(port int) bool
-	CheckoutsForStack   func(stackName string) (map[string]checkouts.Checkout, error)
+	CheckoutsForStack   func(stackName string) (map[string]workspace.Worktree, error)
 	ConfigForStack      func(stackName string) (appconfig.Config, error)
 	ReposNotCloned      map[string]string
 	Personal            personal.Settings
@@ -58,18 +57,18 @@ func (appInstance instance) processName() string {
 	return appInstance.appName + "." + appInstance.stackName
 }
 
-func (controller *Controller) Start(ctx context.Context, worktree stack.Worktree, appNames []string, options StartOptions) (err error) {
+func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(worktree)
+	stacks, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	requestedInstances, err := controller.instancesOf(worktree.Name, appNames)
+	requestedInstances, err := controller.instancesOf(stackName, appNames)
 	if err != nil {
 		return err
 	}
@@ -128,7 +127,7 @@ func (controller *Controller) startAgainInItsStackHint(stacks stackSet, failedIn
 	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.appName, failedInstance.stackName, strings.Join(appNamesToRequest, " "))
 }
 
-func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Worktree) (err error) {
+func (controller *Controller) Boot(ctx context.Context, masterStackName string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
@@ -139,23 +138,23 @@ func (controller *Controller) Boot(ctx context.Context, mainCheckout stack.Workt
 		fmt.Fprintln(controller.Output, "ilot already runs, nothing to boot")
 		return nil
 	}
-	return controller.bootApps(ctx, mainCheckout)
+	return controller.bootApps(ctx, masterStackName)
 }
 
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
-func (controller *Controller) RestartApps(ctx context.Context, worktree stack.Worktree, appNames []string) (err error) {
+func (controller *Controller) RestartApps(ctx context.Context, stackName string, appNames []string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(worktree)
+	stacks, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	restartedInstances, err := controller.instancesOf(worktree.Name, appNames)
+	restartedInstances, err := controller.instancesOf(stackName, appNames)
 	if err != nil {
 		return err
 	}
@@ -183,7 +182,7 @@ func (controller *Controller) RestartApps(ctx context.Context, worktree stack.Wo
 }
 
 // The only command that replaces the daemon, for example after an upgrade of ilot.
-func (controller *Controller) Restart(ctx context.Context, mainCheckout stack.Worktree) (err error) {
+func (controller *Controller) Restart(ctx context.Context, masterStackName string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
@@ -196,18 +195,18 @@ func (controller *Controller) Restart(ctx context.Context, mainCheckout stack.Wo
 	if err := controller.Supervisor.Shutdown(ctx); err != nil {
 		return err
 	}
-	return controller.bootApps(ctx, mainCheckout)
+	return controller.bootApps(ctx, masterStackName)
 }
 
-func (controller *Controller) bootApps(ctx context.Context, mainCheckout stack.Worktree) error {
-	stacks, err := controller.loadStacks(mainCheckout)
+func (controller *Controller) bootApps(ctx context.Context, masterStackName string) error {
+	stacks, err := controller.loadStacks(masterStackName)
 	if err != nil {
 		return err
 	}
 	var bootInstances []instance
 	for _, appName := range slices.Sorted(maps.Keys(controller.Config.Apps)) {
 		if controller.Config.Apps[appName].Autostart {
-			bootInstances = append(bootInstances, instance{stackName: controller.stackOf(stack.MasterStackName, appName), appName: appName})
+			bootInstances = append(bootInstances, instance{stackName: controller.stackOf(workspace.MasterStackName, appName), appName: appName})
 		}
 	}
 	for _, instanceRunningBeforeBoot := range stacks.runningInstances() {
@@ -308,7 +307,7 @@ func (controller *Controller) reposNotClonedHint() error {
 
 func (controller *Controller) stackOf(requestedStackName, appName string) string {
 	if controller.Config.Apps[appName].Shared {
-		return stack.SharedStackName
+		return workspace.SharedStackName
 	}
 	return requestedStackName
 }
@@ -408,18 +407,18 @@ func (writer *linePrefixWriter) Write(content []byte) (int, error) {
 	return len(content), nil
 }
 
-func (controller *Controller) Stop(ctx context.Context, worktree stack.Worktree, appNames []string) (err error) {
+func (controller *Controller) Stop(ctx context.Context, stackName string, appNames []string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(worktree)
+	stacks, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	stoppedInstances, err := controller.instancesOf(worktree.Name, appNames)
+	stoppedInstances, err := controller.instancesOf(stackName, appNames)
 	if err != nil {
 		return err
 	}

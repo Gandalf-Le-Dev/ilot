@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
 type EnvEntry struct {
@@ -25,12 +24,12 @@ const (
 	sourceComputed    = "computed"
 )
 
-func (controller *Controller) Environment(worktree stack.Worktree, appName string) ([]EnvEntry, error) {
-	stacks, err := controller.loadStacks(worktree)
+func (controller *Controller) Environment(stackName string, appName string) ([]EnvEntry, error) {
+	stacks, err := controller.loadStacks(stackName)
 	if err != nil {
 		return nil, err
 	}
-	appInstances, err := controller.instancesOf(worktree.Name, []string{appName})
+	appInstances, err := controller.instancesOf(stackName, []string{appName})
 	if err != nil {
 		return nil, err
 	}

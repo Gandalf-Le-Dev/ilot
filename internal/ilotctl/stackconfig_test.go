@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func configWithApps(base appconfig.Config, extraApps map[string]appconfig.App) appconfig.Config {
@@ -36,7 +36,7 @@ func useConfigPerStack(environment testEnvironment, configByStack map[string]app
 		if config, isKnown := configByStack[stackName]; isKnown {
 			return config, nil
 		}
-		return configByStack[stack.MasterStackName], nil
+		return configByStack[workspace.MasterStackName], nil
 	}
 }
 
@@ -44,7 +44,7 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	environment := newTestEnvironment(t)
 	masterConfig := testConfig()
 	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	useConfigPerStack(environment, map[string]appconfig.Config{stack.MasterStackName: masterConfig, "proj-1234": ticketConfig})
+	useConfigPerStack(environment, map[string]appconfig.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig})
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search", "ticket-iam")
 	searchSpecBefore := environment.supervisor.runningSpecs["ticket-search.proj-1234"]
@@ -68,7 +68,7 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 	environment := newTestEnvironment(t)
 	masterConfig := testConfig()
 	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	configByStack := map[string]appconfig.Config{stack.MasterStackName: masterConfig, "proj-1234": ticketConfig}
+	configByStack := map[string]appconfig.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig}
 	useConfigPerStack(environment, configByStack)
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search")

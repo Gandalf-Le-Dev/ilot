@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
@@ -34,7 +33,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	if _, err := os.Stat(environment.controller.Store.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)
 	}
-	otherStack := stack.Worktree{Name: "proj-5678", WorktreeDir: "/src/platform", MainCheckoutDir: "/src/platform", Branch: "PROJ-5678-y"}
+	otherStack := "proj-5678"
 	environment.start(t, otherStack, StartOptions{}, "internalapi")
 	if port := environment.appPort(t, "proj-5678", "internalapi"); port != portOfRemovedStack {
 		t.Errorf("internalapi.proj-5678 got port %d, want the freed port %d", port, portOfRemovedStack)
@@ -45,7 +44,7 @@ func TestRemoveRefusesMasterAndDevbox(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "internalapi")
 
-	for _, stackName := range []string{stack.MasterStackName, stack.SharedStackName} {
+	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName} {
 		err := environment.controller.Remove(t.Context(), stackName)
 		if err == nil || !strings.Contains(err.Error(), "cannot remove") {
 			t.Errorf("Remove(%s) = %v, want a refusal", stackName, err)
@@ -92,8 +91,8 @@ func TestStacksWithoutCheckoutsListsOnlyGoneOnes(t *testing.T) {
 func TestStacksWithoutCheckoutsKeepsAStackWithSeveralWorktreesOfARepo(t *testing.T) {
 	environment := newTestEnvironment(t)
 	saveEmptyStacks(t, environment.controller.Store, "proj-2001")
-	environment.controller.CheckoutsForStack = func(string) (map[string]checkouts.Checkout, error) {
-		return map[string]checkouts.Checkout{}, checkouts.SeveralWorktreesError{Repo: "platform", StackName: "proj-2001", WorktreeDirs: []string{"/a", "/b"}}
+	environment.controller.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
+		return map[string]workspace.Worktree{}, workspace.SeveralWorktreesError{Repo: "platform", StackName: "proj-2001", WorktreeDirs: []string{"/a", "/b"}}
 	}
 
 	gone, err := environment.controller.StacksWithoutCheckouts()
@@ -106,7 +105,7 @@ func TestStacksWithoutCheckoutsKeepsAStackWithSeveralWorktreesOfARepo(t *testing
 func TestStacksWithoutCheckoutsFailsWhenGitFails(t *testing.T) {
 	environment := newTestEnvironment(t)
 	saveEmptyStacks(t, environment.controller.Store, "proj-2001")
-	environment.controller.CheckoutsForStack = func(string) (map[string]checkouts.Checkout, error) {
+	environment.controller.CheckoutsForStack = func(string) (map[string]workspace.Worktree, error) {
 		return nil, errors.New("list the worktrees of platform: exit status 128")
 	}
 
