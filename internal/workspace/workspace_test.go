@@ -51,6 +51,23 @@ func TestFindFromTheRootRepo(t *testing.T) {
 	}
 }
 
+func TestFindInARepoWithNoCommit(t *testing.T) {
+	shopDir := filepath.Join(canonicalTempDir(t), "shop")
+	if err := os.MkdirAll(shopDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInTest(t, shopDir, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(shopDir, "ilot.yaml"), []byte("apps:\n  api: {run: api}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, worktree := find(t, shopDir)
+
+	if want := (Worktree{Repo: "shop", Dir: shopDir, Branch: "main", IsMain: true, MainDir: shopDir}); worktree != want {
+		t.Errorf("worktree = %+v, want %+v", worktree, want)
+	}
+}
+
 func TestFindFromAMemberRepoFollowsMemberOf(t *testing.T) {
 	shopDir, webDir := shopAndWeb(t, "name: store\nrepos:\n  web: ../web\n", webFile)
 	if err := os.MkdirAll(filepath.Join(webDir, "src"), 0o755); err != nil {

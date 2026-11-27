@@ -21,31 +21,51 @@ type Worktree struct {
 	MainDir string `json:"-"`
 }
 
-const detachedHead = "HEAD"
-
 // Locate finds the worktree that holds a folder, with one git process.
+// git worktree list gives the branch on an unborn HEAD too, where git rev-parse --abbrev-ref HEAD fails.
 func (git *Git) Locate(dirInsideWorktree string) (Worktree, error) {
-	output, err := git.Output(dirInsideWorktree, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir", "--abbrev-ref", "HEAD")
+	dir, err := Canonical(dirInsideWorktree)
+	if err != nil {
+		return Worktree{}, err
+	}
+	worktrees, err := git.list("", dir)
 	if err != nil {
 		return Worktree{}, fmt.Errorf("%s is not inside a git checkout: %w", dirInsideWorktree, err)
 	}
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) != 4 {
-		return Worktree{}, fmt.Errorf("unexpected git rev-parse output %q", output)
+	located := -1
+	for index, worktree := range worktrees {
+		isInside := dir == worktree.Dir || strings.HasPrefix(dir, worktree.Dir+string(filepath.Separator))
+		// A worktree can sit inside the folder of another one, so the longest path wins.
+		if isInside && (located < 0 || len(worktree.Dir) > len(worktrees[located].Dir)) {
+			located = index
+		}
 	}
-	// git resolves the links of these three paths itself, so they compare equal to a canonical path.
-	worktreeDir, gitDir, commonGitDir, branch := lines[0], lines[1], lines[2], lines[3]
-	if branch == detachedHead {
-		branch = ""
+	if located < 0 {
+		return Worktree{}, fmt.Errorf("%s is in no worktree that git lists for its repo", dirInsideWorktree)
 	}
-	return Worktree{Repo: "", Dir: worktreeDir, Branch: branch, IsMain: gitDir == commonGitDir, MainDir: filepath.Dir(commonGitDir)}, nil
+	return worktrees[located], nil
 }
 
 // Worktrees lists the worktrees of a repo with one git process. The main checkout is the first one.
 func (git *Git) Worktrees(repoName, repoDir string) ([]Worktree, error) {
-	output, err := git.Output(repoDir, "worktree", "list", "--porcelain")
+	listed, err := git.list(repoName, repoDir)
 	if err != nil {
 		return nil, fmt.Errorf("list the worktrees of %s at %s: %w", repoName, repoDir, err)
+	}
+	var worktrees []Worktree
+	for _, worktree := range listed {
+		if !worktree.IsMain && isDeleted(worktree.Dir) {
+			continue
+		}
+		worktrees = append(worktrees, worktree)
+	}
+	return worktrees, nil
+}
+
+func (git *Git) list(repoName, dir string) ([]Worktree, error) {
+	output, err := git.Output(dir, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
 	}
 	var worktrees []Worktree
 	for entry := range strings.SplitSeq(strings.TrimSpace(output), "\n\n") {
@@ -61,13 +81,13 @@ func (git *Git) Worktrees(repoName, repoDir string) ([]Worktree, error) {
 				worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
 			}
 		}
-		if worktree.Dir == "" || (!worktree.IsMain && isDeleted(worktree.Dir)) {
+		if worktree.Dir == "" {
 			continue
 		}
 		worktrees = append(worktrees, worktree)
 	}
 	if len(worktrees) == 0 {
-		return nil, fmt.Errorf("repo %s at %s has no checkout", repoName, repoDir)
+		return nil, fmt.Errorf("git lists no checkout at %s", dir)
 	}
 	for index := range worktrees {
 		worktrees[index].MainDir = worktrees[0].Dir
