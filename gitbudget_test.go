@@ -66,7 +66,7 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	if err != nil || stackName != "proj-1" {
 		t.Fatalf("stackOfWorktree = %q, %v; want proj-1", stackName, err)
 	}
-	controller, err := newController(currentWorkspace, store, stackName, time.Second)
+	controller, err := newController(t.Context(), currentWorkspace, store, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
