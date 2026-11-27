@@ -258,3 +258,38 @@ func leaveStaleSocket(t *testing.T, socketPath string) {
 		t.Fatal(err)
 	}
 }
+
+func TestShutdownTellsTheStoppedDaemonFromTheNextOneOnTheSameSocket(t *testing.T) {
+	socketPath := filepath.Join(shortDir(t), "daemon.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const stoppedPID, nextPID = 111, 222
+	// One server plays both daemons: the next daemon holds the path before the caller looks at it.
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, request *http.Request) {
+		writeJSON(writer, http.StatusOK, shutdownReply{PID: stoppedPID})
+	})
+	mux.HandleFunc("GET /v1/status", func(writer http.ResponseWriter, request *http.Request) {
+		writeJSON(writer, http.StatusOK, Status{PID: nextPID})
+	})
+	httpServer := &http.Server{Handler: mux}
+	serving := make(chan struct{})
+	go func() {
+		defer close(serving)
+		_ = httpServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		httpServer.Close()
+		<-serving
+	})
+
+	begin := time.Now()
+	if err := NewClient(socketPath).Shutdown(t.Context()); err != nil {
+		t.Fatalf("Shutdown gives %v after %s", err, time.Since(begin))
+	}
+	if took := time.Since(begin); took > shutdownExitWait/2 {
+		t.Fatalf("Shutdown took %s although the stopped daemon is gone", took)
+	}
+}

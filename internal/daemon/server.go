@@ -28,6 +28,11 @@ type routeList struct {
 	Routes []Route `json:"routes"`
 }
 
+// shutdownReply names the daemon that stops, so that the caller can tell it from the next one on the same socket.
+type shutdownReply struct {
+	PID int `json:"pid"`
+}
+
 type errorBody struct {
 	Error string `json:"error"`
 }
@@ -95,7 +100,7 @@ func (server *Server) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, request *http.Request) {
 		server.Supervisor.Shutdown()
-		writer.WriteHeader(http.StatusNoContent)
+		writeJSON(writer, http.StatusOK, shutdownReply{PID: server.Status.PID})
 		if server.OnShutdown != nil {
 			server.OnShutdown()
 		}
