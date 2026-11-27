@@ -29,16 +29,20 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 	if _, isKnown := current.Stacks(controller.Workspace)[stackName]; !isKnown {
 		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
-	current.RemoveStack(controller.Workspace, stackName)
-	snapshot, dropped, err := controller.complete(current, plan.BaseStack)
-	if err != nil {
+	// The state alone names the processes of the stack, so a stack whose ilot.yaml is broken or gone can be removed.
+	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current, Machine: controller.Machine}
+	removedInstances := []plan.Instance{}
+	for _, appName := range slices.Sorted(maps.Keys(current.Stacks(controller.Workspace)[stackName].Apps)) {
+		removedInstances = append(removedInstances, plan.Instance{Stack: stackName, App: appName})
+	}
+	if err := controller.deleteProcesses(ctx, snapshot, removedInstances); err != nil {
 		return err
 	}
-	controller.warnAboutUndeclared(snapshot, dropped)
+	current.RemoveStack(controller.Workspace, stackName)
 	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}
-	if err := controller.applyAll(ctx, snapshot); err != nil {
+	if err := controller.Supervisor.SetRoutes(ctx, snapshot.Routes()); err != nil {
 		return err
 	}
 	return os.RemoveAll(controller.StackDir(stackName))

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"slices"
@@ -400,8 +401,13 @@ func shellCommand(ctx context.Context, spec Spec, script string) *exec.Cmd {
 	command := exec.CommandContext(ctx, "/bin/sh", "-c", script)
 	command.Dir = spec.Dir
 	// A nil slice would give the process the environment of the daemon.
-	command.Env = make([]string, 0, len(spec.Env))
-	for key, value := range spec.Env {
+	environment := maps.Clone(spec.Session)
+	if environment == nil {
+		environment = map[string]string{}
+	}
+	maps.Copy(environment, spec.Env)
+	command.Env = make([]string, 0, len(environment))
+	for key, value := range environment {
 		command.Env = append(command.Env, key+"="+value)
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

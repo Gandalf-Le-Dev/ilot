@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -24,33 +25,20 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 	return errors.Join(problems...)
 }
 
-// allocatePorts gives each instance of the start its fixed ports and a free port for each port that has no number yet.
-func (controller *Controller) allocatePorts(snapshot plan.Snapshot, start plan.Start) error {
+// allocatePorts gives each instance of the start, in the state after it, a free port for each port that has no number yet.
+// A fixed port of an instance that was not a member must be free: another program can hold it.
+func (controller *Controller) allocatePorts(before plan.Snapshot, start plan.Start) error {
 	for _, fixedPort := range start.FixedPorts {
-		if !snapshot.IsWanted(fixedPort.Instance) && !controller.IsPortFreeOnHost(fixedPort.Port) {
-			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, plan.ProcessName(controller.Workspace, fixedPort.Instance))
+		if !before.IsWanted(fixedPort.Instance) && !controller.IsPortFreeOnHost(fixedPort.Port) {
+			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, before.ProcessName(fixedPort.Instance))
 		}
-		snapshot.SetPort(fixedPort.Instance, fixedPort.PortName, fixedPort.Port)
 	}
-	allocated, err := controller.PortRange.Allocate(len(start.PortNeeds), snapshot.State.PortsInUse(), controller.IsPortFreeOnHost)
+	allocated, err := controller.PortRange.Allocate(len(start.PortNeeds), start.After.State.PortsInUse(), controller.IsPortFreeOnHost)
 	if err != nil {
 		return err
 	}
 	for index, need := range start.PortNeeds {
-		snapshot.SetPort(need.Instance, need.PortName, allocated[index])
-	}
-	return nil
-}
-
-func (controller *Controller) checkEveryProcessRenders(snapshot plan.Snapshot, startOrder []plan.Instance) error {
-	stacksWithPlanRunning := snapshot.Clone()
-	for _, appInstance := range startOrder {
-		stacksWithPlanRunning.SetWanted(appInstance, true)
-	}
-	for _, appInstance := range startOrder {
-		if _, err := stacksWithPlanRunning.Spec(appInstance); err != nil {
-			return err
-		}
+		start.After.SetPort(need.Instance, need.PortName, allocated[index])
 	}
 	return nil
 }
@@ -88,7 +76,7 @@ func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snaps
 		}
 		fmt.Fprintf(controller.Output, "building %s in %s\n", plan.ProcessName(controller.Workspace, appInstance), workingDir)
 		stopProgress := controller.printProgressUntilStopped("building " + plan.ProcessName(controller.Workspace, appInstance))
-		err = controller.RunBuild(ctx, workingDir, build.command, environ(snapshot.Machine.ShellEnv))
+		err = controller.RunBuild(ctx, workingDir, build.command, buildEnviron(snapshot.Machine))
 		stopProgress()
 		if err := errors.Join(err, releaseBuilds()); err != nil {
 			return fmt.Errorf("build %s: %w", plan.ProcessName(controller.Workspace, appInstance), err)
@@ -135,11 +123,14 @@ func (controller *Controller) loadState() (state.State, error) {
 	return controller.Store.Load()
 }
 
-// loadStacks gives the snapshot of a command of a stack, and warns about each app that no config declares any more.
-func (controller *Controller) loadStacks(stackName string) (plan.Snapshot, error) {
+// loadStacks gives the snapshot of a command of a stack, and stops each app that its config no longer declares.
+func (controller *Controller) loadStacks(ctx context.Context, stackName string) (plan.Snapshot, error) {
 	snapshot, dropped, err := controller.Snapshot(stackName)
+	if err != nil {
+		return plan.Snapshot{}, err
+	}
 	controller.warnAboutUndeclared(snapshot, dropped)
-	return snapshot, err
+	return snapshot, controller.deleteProcesses(ctx, snapshot, dropped)
 }
 
 func (controller *Controller) warnAboutUndeclared(snapshot plan.Snapshot, dropped []plan.Instance) {
@@ -153,4 +144,14 @@ func (controller *Controller) saveStacks(snapshot plan.Snapshot) error {
 		return err
 	}
 	return controller.Store.Save(snapshot.State)
+}
+
+// A build runs in the terminal of the command, so it gets the session variables too, for example SSH_AUTH_SOCK for a private module.
+func buildEnviron(machine plan.Machine) []string {
+	environment := maps.Clone(machine.SessionEnv)
+	if environment == nil {
+		environment = map[string]string{}
+	}
+	maps.Copy(environment, machine.ShellEnv)
+	return environ(environment)
 }

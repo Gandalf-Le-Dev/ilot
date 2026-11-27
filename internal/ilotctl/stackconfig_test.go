@@ -76,7 +76,7 @@ func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 
 	configByStack["proj-1234"] = baseConfig
 	environment.controller.Config = baseConfig
-	environment.start(t, environment.base, StartOptions{}, "standalone")
+	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	if _, isRunning := environment.supervisor.runningSpecs["ticket-search.proj-1234.platform"]; isRunning {
 		t.Error("ticket-search.proj-1234.platform still runs, but no config declares it")
@@ -108,7 +108,7 @@ func TestEnvironmentPrintsNoWarningForAnAppThatNoConfigDeclares(t *testing.T) {
 	}
 }
 
-func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
+func TestABrokenConfigOfAStackDoesNotStopAStartInAnother(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.controller.ConfigForStack = func(stackName string) (config.Config, error) {
@@ -117,34 +117,75 @@ func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 		}
 		return testConfig(), nil
 	}
+	environment.supervisor.calls = nil
 
-	err := environment.controller.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
+	environment.start(t, "proj-5678", StartOptions{SkipDependencies: true}, "standalone")
 
-	if err == nil || !strings.Contains(err.Error(), "proj-1234") || !strings.Contains(err.Error(), "bad indentation") {
-		t.Fatalf("Start = %v, want the config error of proj-1234", err)
+	if slices.ContainsFunc(environment.supervisor.calls, func(call string) bool { return strings.Contains(call, "proj-1234") }) {
+		t.Errorf("calls = %v, want none for proj-1234", environment.supervisor.calls)
 	}
 }
 
-func TestListKeepsGoingWhenTheConfigOfAStackCannotBeRead(t *testing.T) {
+func TestAStartFailsWhenTheConfigOfBaseCannotBeRead(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.controller.ConfigForStack = func(stackName string) (config.Config, error) {
-		if stackName == "proj-1234" {
-			return config.Config{}, errors.New("repo platform has several worktrees for stack proj-1234")
+		if stackName == "base" {
+			return config.Config{}, errors.New("parse ilot.yaml: bad indentation")
 		}
 		return testConfig(), nil
 	}
+
+	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"standalone"}, StartOptions{})
+
+	if err == nil || !strings.Contains(err.Error(), "base") || !strings.Contains(err.Error(), "bad indentation") {
+		t.Fatalf("Start = %v, want the config error of base, which serves the other apps", err)
+	}
+}
+
+func TestStopWorksWithABrokenConfig(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.controller.Config = config.Config{}
+	environment.controller.ConfigErr = errors.New("parse ilot.yaml: bad indentation")
+
+	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"publicapi", "temporal"}); err != nil {
+		t.Fatalf("Stop = %v, want the stop to work from the state alone", err)
+	}
+
+	for _, stoppedProcess := range []string{"publicapi.proj-1234.platform", "temporal.base.platform"} {
+		if environment.isApplied(stoppedProcess) {
+			t.Errorf("%s still runs after ilot stop", stoppedProcess)
+		}
+	}
+	if !environment.isApplied("internalapi.base.platform") {
+		t.Error("internalapi.base.platform stopped, but the stop did not name it")
+	}
+	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"nope"}); err == nil || !strings.Contains(err.Error(), "bad indentation") {
+		t.Errorf("Stop of an app that no stack has = %v, want the config error", err)
+	}
+}
+
+func TestListNeedsNoConfig(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.controller.ConfigForStack = func(string) (config.Config, error) {
+		return config.Config{}, errors.New("repo platform has several worktrees for stack proj-1234")
+	}
+	environment.controller.Config = config.Config{}
+	environment.controller.ConfigErr = errors.New("parse ilot.yaml: bad indentation")
+	environment.output.Reset()
 
 	listing, err := environment.controller.List(t.Context())
 
 	if err != nil {
 		t.Fatalf("List = %v, want the rows of every stack", err)
 	}
-	if !slices.ContainsFunc(listing.Apps, func(row AppRow) bool { return row.Stack == "proj-1234" && row.App == "standalone" }) {
-		t.Errorf("apps = %+v, want standalone.proj-1234.platform", listing.Apps)
+	row := rowFor(listing.Apps, "proj-1234", "publicapi")
+	if row.Status != "ready" || row.URL != "http://publicapi.proj-1234.platform.dev.example.net" {
+		t.Errorf("publicapi.proj-1234 = %+v, want its status and its URL from the state", row)
 	}
-	if !strings.Contains(environment.output.String(), "several worktrees") {
-		t.Errorf("output %q does not warn about the stack whose config failed", environment.output.String())
+	if !strings.Contains(environment.output.String(), "bad indentation") {
+		t.Errorf("output %q does not say why the external services are not listed", environment.output.String())
 	}
 }
 

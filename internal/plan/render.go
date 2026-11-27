@@ -23,6 +23,8 @@ type Machine struct {
 	Login     string
 	// The environment of a login shell, the base of the environment of every app.
 	ShellEnv map[string]string
+	// The variables of the terminal of the command that no shell file gives, such as SSH_AUTH_SOCK. A process gets them, and its hash leaves them out.
+	SessionEnv map[string]string
 	// The watcher of an app runs this binary, with IlotEnv: the variables that make it find the same state and the same daemon.
 	IlotBinary string
 	IlotEnv    map[string]string
@@ -71,7 +73,13 @@ func (snapshot Snapshot) Spec(appInstance Instance) (ProcessSpec, error) {
 		return ProcessSpec{}, err
 	}
 	// The daemon gives a process this environment and nothing else.
-	env := map[string]string{}
+	env, session := map[string]string{}, map[string]string{}
+	for _, entry := range envEntries {
+		if entry.Source == sourceSession {
+			session[entry.Key] = entry.Value
+		}
+	}
+	envEntries = slices.DeleteFunc(envEntries, func(entry EnvEntry) bool { return entry.Source == sourceSession })
 	var command string
 	if snapshot.IsContainer(appInstance) {
 		// The docker command needs the shell values, for example PATH and HOME. The image gets only the -e values.
@@ -109,6 +117,7 @@ func (snapshot Snapshot) Spec(appInstance Instance) (ProcessSpec, error) {
 			Command: command,
 			Dir:     workingDir,
 			Env:     env,
+			Session: session,
 			LogFile: snapshot.LogFile(appInstance),
 			Stop:    shutdownCommand,
 			Ready:   readyProbe,
@@ -162,6 +171,9 @@ func (snapshot Snapshot) WorkingDir(appInstance Instance) (string, error) {
 	return filepath.Join(checkoutDir, appDir), nil
 }
 
+// WatcherSuffix ends the app name of the watcher of an app.
+const WatcherSuffix = "-watch"
+
 // Watcher gives the watcher process of an app that has watch paths.
 func (snapshot Snapshot) Watcher(watchedInstance Instance) (ProcessSpec, bool, error) {
 	watch := snapshot.App(watchedInstance).Watch
@@ -189,13 +201,16 @@ func (snapshot Snapshot) Watcher(watchedInstance Instance) (ProcessSpec, bool, e
 	env := map[string]string{}
 	maps.Copy(env, snapshot.Machine.ShellEnv)
 	maps.Copy(env, snapshot.Machine.IlotEnv)
-	watcherInstance := Instance{Stack: watchedInstance.Stack, App: watchedInstance.App + "-watch"}
+	session := map[string]string{}
+	maps.Copy(session, snapshot.Machine.SessionEnv)
+	watcherInstance := Instance{Stack: watchedInstance.Stack, App: watchedInstance.App + WatcherSuffix}
 	return ProcessSpec{
 		Name: snapshot.ProcessName(watcherInstance),
 		Spec: daemon.Spec{
 			Command: strings.Join(commandParts, " "),
 			Dir:     workingDir,
 			Env:     env,
+			Session: session,
 			LogFile: snapshot.LogFile(watcherInstance),
 			Stop:    "",
 			Ready:   nil,
@@ -409,6 +424,7 @@ type EnvEntry struct {
 }
 
 const (
+	sourceSession   = "session"
 	sourceShell     = "shell"
 	sourceRoot      = "root repo"
 	sourceRepo      = "repo"
@@ -418,7 +434,7 @@ const (
 	sourceComputed  = "computed"
 )
 
-// The layers, and the last one wins: the login shell, the env of the root repo, the env of the repo of the app, the env of the app, the global file.
+// The layers, and the last one wins: the terminal of the command, the login shell, the env of the root repo, the env of the repo of the app, the env of the app, the global file.
 // A value written with a template is computed by ilot (ports, addresses, the stack), so a value of the global file cannot override it.
 func (snapshot Snapshot) Environment(appInstance Instance) ([]EnvEntry, error) {
 	app := snapshot.App(appInstance)
@@ -428,6 +444,7 @@ func (snapshot Snapshot) Environment(appInstance Instance) ([]EnvEntry, error) {
 			entryByKey[key] = EnvEntry{Key: key, Value: value, Source: source}
 		}
 	}
+	setAll(sourceSession, snapshot.Machine.SessionEnv)
 	setAll(sourceShell, snapshot.Machine.ShellEnv)
 	literalRootEnv, templatedRootEnv := splitByTemplate(snapshot.repoEnvOf(appInstance)[snapshot.Workspace])
 	literalRepoEnv, templatedRepoEnv := splitByTemplate(snapshot.repoEnvOf(appInstance)[cmp.Or(app.Repo, snapshot.Workspace)])
@@ -466,36 +483,63 @@ func splitByTemplate(valueByKey map[string]string) (literalValues, templatedValu
 }
 
 // A stopped app keeps its route, so that its URL answers with the command that starts it.
+// Routes gives the route table of the proxy, for every workspace, from the state alone.
+// A stopped app keeps its route, so that its URL answers with the command that starts it.
 func (snapshot Snapshot) Routes() []daemon.Route {
 	var routes []daemon.Route
-	stacks := snapshot.State.Stacks(snapshot.Workspace)
-	for _, stackName := range slices.Sorted(maps.Keys(stacks)) {
-		for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
-			routedInstance := Instance{Stack: stackName, App: appName}
-			app := snapshot.App(routedInstance)
-			port := stacks[stackName].Apps[appName].Ports[app.Route]
-			if app.Route == "" || port == 0 {
-				continue
+	for _, workspaceName := range slices.Sorted(maps.Keys(snapshot.State.Workspaces)) {
+		stacks := snapshot.State.Stacks(workspaceName)
+		for _, stackName := range slices.Sorted(maps.Keys(stacks)) {
+			for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
+				route := stacks[stackName].Apps[appName].Route
+				if route == nil || route.Port == 0 {
+					continue
+				}
+				startHint := "ilot start " + appName
+				if route.Dir != "" {
+					startHint = "cd " + ShellQuote(route.Dir) + " && " + startHint
+				}
+				host := snapshot.Machine.host(workspaceName, Instance{Stack: stackName, App: appName})
+				routes = append(routes, daemon.Route{Host: host, Port: route.Port, HomePath: route.HomePath, StartHint: startHint})
 			}
-			startHint := "ilot start " + appName
-			if checkoutDir, err := snapshot.CheckoutDir(routedInstance); err == nil {
-				startHint = "cd " + ShellQuote(checkoutDir) + " && " + startHint
-			}
-			routes = append(routes, daemon.Route{Host: snapshot.Host(routedInstance), Port: port, HomePath: app.HomePath, StartHint: startHint})
 		}
 	}
 	return routes
 }
 
+// RecordRoutes writes in the state what a command that has no ilot.yaml needs of an instance: its route and the name of its container.
+func (snapshot Snapshot) RecordRoutes(instances []Instance) {
+	for _, recordedInstance := range instances {
+		app := snapshot.App(recordedInstance)
+		stack := snapshot.State.Stack(snapshot.Workspace, recordedInstance.Stack)
+		stored := stack.Apps[recordedInstance.App]
+		stored.Route, stored.Container = nil, ""
+		if port := stored.Ports[app.Route]; app.Route != "" && port != 0 {
+			checkoutDir, _ := snapshot.CheckoutDir(recordedInstance)
+			stored.Route = &state.Route{Port: port, HomePath: app.HomePath, Dir: checkoutDir}
+		}
+		if snapshot.IsContainer(recordedInstance) {
+			stored.Container = snapshot.ContainerName(recordedInstance)
+		}
+		stack.Apps[recordedInstance.App] = stored
+	}
+}
+
+// URL gives the address of an instance through the proxy, from its stored route. It is empty for an app with no route.
 func (snapshot Snapshot) URL(appInstance Instance) string {
-	if snapshot.App(appInstance).Route == "" {
+	route := snapshot.State.App(snapshot.Workspace, appInstance.Stack, appInstance.App).Route
+	if route == nil {
 		return ""
 	}
-	return snapshot.baseURL(appInstance) + snapshot.App(appInstance).HomePath
+	return snapshot.baseURL(appInstance) + route.HomePath
 }
 
 func (snapshot Snapshot) Host(appInstance Instance) string {
-	return appInstance.App + "." + appInstance.Stack + "." + snapshot.Workspace + "." + snapshot.Machine.Domain
+	return snapshot.Machine.host(snapshot.Workspace, appInstance)
+}
+
+func (machine Machine) host(workspaceName string, appInstance Instance) string {
+	return appInstance.App + "." + appInstance.Stack + "." + workspaceName + "." + machine.Domain
 }
 
 func (snapshot Snapshot) baseURL(appInstance Instance) string {

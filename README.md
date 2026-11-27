@@ -164,9 +164,12 @@ ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do n
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
 `ilot start` also rebuilds an app that already runs, then restarts it.
+A command calls the daemon only for the apps that it starts, restarts or stops. A dependency that runs gets no call, and an app of another stack never restarts.
+When the start changes a template of a running app of the same stack, for example because the stack now runs its own copy of a dependency, `ilot start` restarts that app and prints one line for it.
 Only one build runs in a stack at a time. A second build, from another `ilot` command or from a watcher, waits and says so.
-When an app that `ilot start` started ends, `ilot start` stops it, marks it stopped and keeps its log.
+The stack owns every app of a start from the first line: an app that ends, or that fails to start, stays in the stack. `ilot ls` shows it `exited`, its log stays, and the next `ilot start` starts it again in the same stack.
 When the timeout passes while the app still runs, `ilot` keeps the app and says so.
+`ilot stop`, `ilot rm`, `ilot ls` and `ilot logs` need the state only, so they work when an `ilot.yaml` is broken. A start reads the files of its own stack and of `base` only.
 
 ## The ilot.yaml files
 
@@ -309,6 +312,7 @@ An older `ilot` read a personal file, `~/.config/ilot/env.yaml`. `ilot` now stop
 `ilot` builds the environment of an app in this order, and the last value wins:
 
 1. The shell. `ilot` runs your shell, `$SHELL`, with the flags of `shell_env.args`, and takes its whole environment. The default, `-l`, makes a login shell. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
+   `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` come from the terminal, unless a profile file sets them. `ilot env` shows them as `session`. An app gets them, but a change of them does not make its specification change, so a command from another terminal restarts nothing.
 2. The top-level `env` of the `ilot.yaml` of the root repo, for the apps of every repo.
 3. The top-level `env` of the `ilot.yaml` of the repo of the app, then the `env` of the app.
 4. The global file: the `env` of the workspace, then its entry under `apps`.

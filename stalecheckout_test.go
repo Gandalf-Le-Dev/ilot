@@ -29,7 +29,9 @@ func startInFolder(t *testing.T, dir string, supervisor *readySupervisor, appNam
 		t.Fatal(err)
 	}
 	controller.Supervisor = supervisor
-	controller.ShellEnv = func() (map[string]string, error) { return map[string]string{}, nil }
+	controller.ShellEnv = func() (map[string]string, map[string]string, error) {
+		return map[string]string{}, map[string]string{}, nil
+	}
 	controller.Output = io.Discard
 	return controller.Start(t.Context(), stackName, appNames, ilotctl.StartOptions{SkipDependencies: false})
 }
@@ -44,6 +46,7 @@ func TestAStackWhoseBoundWorktreeIsDeletedRunsFromTheMainCheckout(t *testing.T) 
 	if err := os.RemoveAll(worktreeDir); err != nil {
 		t.Fatal(err)
 	}
+	clear(supervisor.dirs)
 
 	if err := startInFolder(t, shopDir, supervisor, "api"); err != nil {
 		t.Fatalf("a start in base after the worktree of retry-jobs was deleted = %v", err)

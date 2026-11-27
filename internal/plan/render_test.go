@@ -10,7 +10,7 @@ import (
 func renderSnapshot() Snapshot {
 	snapshot := snapshotOf(ticket, map[string]config.Config{ticket: shopConfig()}, Instance{Stack: ticket, App: "api"})
 	snapshot.Checkouts = map[string]map[string]string{BaseStack: {"shop": "/code/shop"}, ticket: {"shop": "/code/shop-retry"}}
-	snapshot.Machine = Machine{StateDir: "/state", Domain: "localhost", ProxyPort: "4580", Login: "me", ShellEnv: map[string]string{"PATH": "/usr/bin", "LOG": "shell"}, IlotBinary: "/bin/ilot", IlotEnv: nil}
+	snapshot.Machine = Machine{StateDir: "/state", Domain: "localhost", ProxyPort: "4580", Login: "me", ShellEnv: map[string]string{"PATH": "/usr/bin", "LOG": "shell"}, SessionEnv: nil, IlotBinary: "/bin/ilot", IlotEnv: nil}
 	snapshot.Settings = config.WorkspaceSettings{Repos: nil, Env: map[string]string{"LOG": "global"}, Apps: nil}
 	snapshot.SetPort(Instance{Stack: ticket, App: "api"}, "http", 20001)
 	snapshot.SetPort(Instance{Stack: BaseStack, App: "db"}, "pg", 5432)
@@ -40,12 +40,14 @@ func TestSpecRendersAnInstanceFromTheSnapshotAlone(t *testing.T) {
 	}
 }
 
-func TestRoutesComeFromTheStateAndKeepAStoppedApp(t *testing.T) {
+func TestRoutesComeFromTheStateAloneAndKeepAStoppedApp(t *testing.T) {
 	snapshot := renderSnapshot()
 	api := shopConfig().Apps["api"]
 	api.Route = "http"
 	snapshot.Configs[ticket].Apps["api"] = api
+	snapshot.RecordRoutes([]Instance{{Stack: ticket, App: "api"}})
 	snapshot.SetWanted(Instance{Stack: ticket, App: "api"}, false)
+	snapshot.Configs = nil
 
 	routes := snapshot.Routes()
 

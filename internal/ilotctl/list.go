@@ -35,10 +35,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 	if err != nil {
 		return Listing{}, err
 	}
-	snapshot, problems := controller.snapshotOf(current, plan.BaseStack)
-	for _, problem := range problems {
-		fmt.Fprintf(controller.Output, "warning: %v\n", problem)
-	}
+	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current, Machine: controller.Machine}
 	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return Listing{}, err
@@ -49,7 +46,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
 			appInstance := plan.Instance{Stack: stackName, App: appName}
 			status := "stopped"
-			if process, isKnown := processByName[plan.ProcessName(controller.Workspace, appInstance)]; isKnown {
+			if process, isKnown := processByName[snapshot.ProcessName(appInstance)]; isKnown {
 				status = statusOf(process)
 			}
 			listing.Apps = append(listing.Apps, AppRow{
@@ -60,6 +57,9 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 				URL:    snapshot.URL(appInstance),
 			})
 		}
+	}
+	if controller.ConfigErr != nil {
+		fmt.Fprintf(controller.Output, "warning: the external services are not listed: %v\n", controller.ConfigErr)
 	}
 	for _, externalName := range slices.Sorted(maps.Keys(controller.Config.External)) {
 		port := controller.Config.External[externalName].Port

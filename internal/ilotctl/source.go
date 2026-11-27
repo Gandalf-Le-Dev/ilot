@@ -1,10 +1,7 @@
 package ilotctl
 
 import (
-	"errors"
 	"fmt"
-	"maps"
-	"slices"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
@@ -18,16 +15,18 @@ type Source struct {
 	Workspace string
 	// The main checkout of the root repo, which the state records for the workspace.
 	Root string
-	// The configuration of the stack of the command.
+	// The configuration of the stack of the command, or why it cannot be read. ilot stop, ilot rm, ilot ls and ilot logs work without it.
 	Config            config.Config
+	ConfigErr         error
 	Store             state.Store
 	CheckoutsForStack func(stackName string) (map[string]workspace.Worktree, error)
 	ConfigForStack    func(stackName string) (config.Config, error)
 	ReposNotCloned    map[string]string
 	Settings          config.WorkspaceSettings
 	// The machine, with no shell environment: ShellEnv reads it when a command renders.
-	Machine  plan.Machine
-	ShellEnv func() (map[string]string, error)
+	Machine plan.Machine
+	// ShellEnv gives the environment of a login shell, and apart from it the variables of the terminal that no shell file gives.
+	ShellEnv func() (shellEnv, sessionEnv map[string]string, err error)
 }
 
 // StackDir holds the logs and the binaries of a stack.
@@ -35,29 +34,20 @@ func (source Source) StackDir(stackName string) string {
 	return source.Store.StackDir(source.Workspace, stackName)
 }
 
-// A stack whose config cannot be read keeps the config of the command, so a listing still shows it.
-func (source Source) loadStackConfigs(stackNames []string) (map[string]config.Config, []error) {
-	configByStack := map[string]config.Config{}
-	if source.ConfigForStack == nil {
-		return configByStack, nil
+// snapshotOf gives the snapshot of a state, with no checkout and no shell environment.
+// A command reads the configuration of its own stack and of base only, so a broken ilot.yaml of another stack does not stop it.
+func (source Source) snapshotOf(current state.State, ownStackName string) (plan.Snapshot, error) {
+	if source.ConfigErr != nil {
+		return plan.Snapshot{}, source.ConfigErr
 	}
-	var problems []error
-	for _, stackName := range stackNames {
-		stackConfig, err := source.ConfigForStack(stackName)
+	configByStack := map[string]config.Config{ownStackName: source.Config}
+	if ownStackName != plan.BaseStack && source.ConfigForStack != nil {
+		baseConfig, err := source.ConfigForStack(plan.BaseStack)
 		if err != nil {
-			problems = append(problems, fmt.Errorf("read the config of stack %s: %w: fix it, or remove the stack with ilot rm %s", stackName, err, stackName))
-			continue
+			return plan.Snapshot{}, fmt.Errorf("read the config of the %s stack, which serves the apps that this stack does not run: %w", plan.BaseStack, err)
 		}
-		configByStack[stackName] = stackConfig
+		configByStack[plan.BaseStack] = baseConfig
 	}
-	return configByStack, problems
-}
-
-// snapshotOf gives the snapshot of a state, with no checkout and no shell environment. The problems are the stacks whose config cannot be read.
-func (source Source) snapshotOf(current state.State, ownStackName string) (plan.Snapshot, []error) {
-	stackNames := slices.Sorted(maps.Keys(current.Stacks(source.Workspace)))
-	configByStack, problems := source.loadStackConfigs(stackNames)
-	configByStack[ownStackName] = source.Config
 	return plan.Snapshot{
 		Workspace:      source.Workspace,
 		Own:            ownStackName,
@@ -67,7 +57,7 @@ func (source Source) snapshotOf(current state.State, ownStackName string) (plan.
 		ReposNotCloned: source.ReposNotCloned,
 		Settings:       source.Settings,
 		Machine:        source.Machine,
-	}, problems
+	}, nil
 }
 
 // Snapshot gives what a command of a stack renders from. The instances that no config declares any more lose their membership in it.
@@ -82,24 +72,40 @@ func (source Source) Snapshot(stackName string) (plan.Snapshot, []plan.Instance,
 }
 
 func (source Source) complete(current state.State, stackName string) (plan.Snapshot, []plan.Instance, error) {
-	snapshot, problems := source.snapshotOf(current, stackName)
-	if err := errors.Join(problems...); err != nil {
-		return plan.Snapshot{}, nil, err
-	}
-	if err := source.deriveCheckouts(snapshot); err != nil {
-		return plan.Snapshot{}, nil, err
-	}
-	shellEnv, err := source.shellEnvironment()
+	snapshot, err := source.snapshotOf(current, stackName)
 	if err != nil {
 		return plan.Snapshot{}, nil, err
 	}
-	snapshot.Machine.ShellEnv = shellEnv
+	if err := source.deriveCheckouts(snapshot, stackName); err != nil {
+		return plan.Snapshot{}, nil, err
+	}
+	snapshot.Machine.ShellEnv, snapshot.Machine.SessionEnv, err = source.shellEnvironment()
+	if err != nil {
+		return plan.Snapshot{}, nil, err
+	}
 	return snapshot, snapshot.DropUndeclared(), nil
 }
 
+// addStack loads the configuration and the checkouts of one more stack into a snapshot.
+func (source Source) addStack(snapshot plan.Snapshot, stackName string) error {
+	if _, isLoaded := snapshot.Configs[stackName]; isLoaded {
+		return nil
+	}
+	if source.ConfigForStack == nil {
+		snapshot.Configs[stackName] = source.Config
+		return source.deriveCheckouts(snapshot, stackName)
+	}
+	stackConfig, err := source.ConfigForStack(stackName)
+	if err != nil {
+		return fmt.Errorf("read the config of stack %s: %w: fix it, or remove the stack with ilot rm %s", stackName, err, stackName)
+	}
+	snapshot.Configs[stackName] = stackConfig
+	return source.deriveCheckouts(snapshot, stackName)
+}
+
 // A bound worktree that is deleted gives its repo back to the main checkout.
-func (source Source) deriveCheckouts(snapshot plan.Snapshot) error {
-	for stackName := range snapshot.State.Stacks(source.Workspace) {
+func (source Source) deriveCheckouts(snapshot plan.Snapshot, ownStackName string) error {
+	for _, stackName := range []string{plan.BaseStack, ownStackName} {
 		checkoutByRepo, err := source.CheckoutsForStack(stackName)
 		if err != nil {
 			return err
@@ -112,9 +118,9 @@ func (source Source) deriveCheckouts(snapshot plan.Snapshot) error {
 	return nil
 }
 
-func (source Source) shellEnvironment() (map[string]string, error) {
+func (source Source) shellEnvironment() (shellEnv, sessionEnv map[string]string, err error) {
 	if source.ShellEnv == nil {
-		return map[string]string{}, nil
+		return map[string]string{}, map[string]string{}, nil
 	}
 	return source.ShellEnv()
 }
@@ -134,10 +140,34 @@ func (source Source) Environment(stackName, appName string) ([]plan.EnvEntry, er
 
 // LogFile gives the log of an app in a stack. An app with the scope base has one log, in the base stack.
 func (source Source) LogFile(stackName, appName string) (string, error) {
-	snapshot, _ := source.snapshotOf(state.New(), stackName)
-	appInstances, err := snapshot.Instances(stackName, []string{appName})
+	current, err := source.Store.Load()
 	if err != nil {
 		return "", err
 	}
-	return snapshot.LogFile(appInstances[0]), nil
+	appInstances, err := source.instancesToStop(current, stackName, []string{appName})
+	if err != nil {
+		return "", err
+	}
+	return plan.Snapshot{Workspace: source.Workspace, Machine: source.Machine}.LogFile(appInstances[0]), nil
+}
+
+// instancesToStop names the instances of a command that only reads or stops. With a configuration, the scope of each app decides.
+// Without one, the state decides: the own stack if it has the app, else the base stack, which holds every app with the scope base.
+func (source Source) instancesToStop(current state.State, stackName string, appNames []string) ([]plan.Instance, error) {
+	if source.ConfigErr == nil {
+		snapshot := plan.Snapshot{Workspace: source.Workspace, Own: stackName, State: current, Configs: map[string]config.Config{stackName: source.Config}, ReposNotCloned: source.ReposNotCloned}
+		return snapshot.Instances(stackName, appNames)
+	}
+	var instances []plan.Instance
+	for _, appName := range appNames {
+		stackOfApp := stackName
+		if !current.HasApp(source.Workspace, stackName, appName) {
+			stackOfApp = plan.BaseStack
+		}
+		if !current.HasApp(source.Workspace, stackOfApp, appName) {
+			return nil, fmt.Errorf("%w; and no stack has the app %q", source.ConfigErr, appName)
+		}
+		instances = append(instances, plan.Instance{Stack: stackOfApp, App: appName})
+	}
+	return instances, nil
 }

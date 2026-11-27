@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
@@ -20,9 +21,11 @@ import (
 // Controller runs the commands that change the stacks: it plans with the snapshot of its Source, then builds, calls the daemon and waits.
 type Controller struct {
 	Source
-	Supervisor          ProcessSupervisor
-	RunBuild            func(ctx context.Context, workingDir, shellCommand string, environ []string) error
-	EnsureImage         func(ctx context.Context, image string) (pullOutput string, err error)
+	Supervisor  ProcessSupervisor
+	RunBuild    func(ctx context.Context, workingDir, shellCommand string, environ []string) error
+	EnsureImage func(ctx context.Context, image string) (pullOutput string, err error)
+	// RemoveContainer removes a container by name, and is no error for a container that does not exist.
+	RemoveContainer     func(ctx context.Context, name string) error
 	IsPortFreeOnHost    func(port int) bool
 	IsExternalServiceUp func(port int) bool
 	PortRange           ports.Range
@@ -42,67 +45,75 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	snapshot, err := controller.loadStacks(stackName)
+	before, err := controller.loadStacks(ctx, stackName)
 	if err != nil {
 		return err
 	}
-	requestedInstances, err := snapshot.Instances(stackName, appNames)
+	requestedInstances, err := before.Instances(stackName, appNames)
 	if err != nil {
 		return err
 	}
-	startOrder, err := controller.prepareStart(snapshot, requestedInstances, options)
+	start, err := controller.prepareStart(before, requestedInstances, options)
 	if err != nil {
 		return err
 	}
-
-	isRequested := map[plan.Instance]bool{}
-	for _, requestedInstance := range requestedInstances {
-		isRequested[requestedInstance] = true
-	}
+	after := start.After
 	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return err
 	}
-	isReallyRunning := map[plan.Instance]bool{}
-	hasEndedProcess := map[plan.Instance]bool{}
-	for _, appInstance := range startOrder {
-		process, isKnown := processByName[plan.ProcessName(controller.Workspace, appInstance)]
-		isStoredAsRunning := snapshot.IsWanted(appInstance)
-		isReallyRunning[appInstance] = isStoredAsRunning && isKnown && process.State != daemon.StateExited
-		hasEndedProcess[appInstance] = isKnown && process.State == daemon.StateExited
+	isRequested := map[plan.Instance]bool{}
+	for _, requestedInstance := range requestedInstances {
+		isRequested[requestedInstance] = true
 	}
-	if failures := controller.ensureImages(snapshot, ctx, startOrder, func(appInstance plan.Instance) bool { return !isReallyRunning[appInstance] }, true); len(failures) > 0 {
+	isRunning := func(appInstance plan.Instance) bool {
+		process, isHeld := processByName[after.ProcessName(appInstance)]
+		return isHeld && process.State != daemon.StateExited
+	}
+	if failures := controller.ensureImages(after, ctx, start.Order, func(appInstance plan.Instance) bool { return !isRunning(appInstance) }, true); len(failures) > 0 {
 		return failures[0].err
 	}
-	needsBuild := func(appInstance plan.Instance) bool { return isRequested[appInstance] || !isReallyRunning[appInstance] }
-	if err := controller.buildApps(ctx, snapshot, startOrder, needsBuild); err != nil {
+	needsBuild := func(appInstance plan.Instance) bool { return isRequested[appInstance] || !isRunning(appInstance) }
+	if err := controller.buildApps(ctx, after, start.Order, needsBuild); err != nil {
 		return err
 	}
-
-	for _, appInstance := range startOrder {
-		needsRestart := (isRequested[appInstance] && isReallyRunning[appInstance]) || hasEndedProcess[appInstance]
-		isStartedByThisRun := isRequested[appInstance] || !isReallyRunning[appInstance]
-		if err := controller.startInstance(ctx, snapshot, appInstance, needsRestart, isStartedByThisRun); err != nil {
-			return errors.Join(err, controller.startAgainInItsStackHint(snapshot, appInstance, requestedInstances, options))
+	for _, appInstance := range start.Order {
+		if err := controller.startInstance(ctx, after, appInstance, processByName, isRequested[appInstance]); err != nil {
+			return err
 		}
 	}
-	controller.printURLs(snapshot, requestedInstances)
+	if err := controller.replaceChangedDependents(ctx, before, after, stackName, start.Order, processByName); err != nil {
+		return err
+	}
+	if err := controller.Supervisor.SetRoutes(ctx, after.Routes()); err != nil {
+		return err
+	}
+	controller.printURLs(after, requestedInstances)
 	return nil
 }
 
-func (controller *Controller) startAgainInItsStackHint(snapshot plan.Snapshot, failedInstance plan.Instance, requestedInstances []plan.Instance, options StartOptions) error {
-	if snapshot.IsWanted(failedInstance) {
-		return nil
+// replaceChangedDependents replaces each running app of the stack whose specification this start changed, for example a template that now names an app of the stack.
+// Both specifications come from the same shell environment, so a change of the shell or of the terminal replaces nothing.
+func (controller *Controller) replaceChangedDependents(ctx context.Context, before, after plan.Snapshot, stackName string, startOrder []plan.Instance, processByName map[string]daemon.Process) error {
+	for _, wantedInstance := range after.Wanted() {
+		process, isHeld := processByName[after.ProcessName(wantedInstance)]
+		if wantedInstance.Stack != stackName || slices.Contains(startOrder, wantedInstance) || !isHeld || process.State == daemon.StateExited {
+			continue
+		}
+		specAfter, err := after.Spec(wantedInstance)
+		if err != nil {
+			return err
+		}
+		specBefore, err := before.Spec(wantedInstance)
+		if err == nil && specBefore.Hash() == specAfter.Hash() {
+			continue
+		}
+		fmt.Fprintf(controller.Output, "restarting %s: this start changed its specification\n", specAfter.Name)
+		if err := controller.Supervisor.Put(ctx, specAfter); err != nil {
+			return err
+		}
 	}
-	retryStartOrder, _ := snapshot.StartOrder(requestedInstances, options.SkipDependencies)
-	if slices.Contains(retryStartOrder, failedInstance) {
-		return nil
-	}
-	appNamesToRequest := []string{failedInstance.App}
-	for _, requestedInstance := range requestedInstances {
-		appNamesToRequest = append(appNamesToRequest, requestedInstance.App)
-	}
-	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.App, failedInstance.Stack, strings.Join(appNamesToRequest, " "))
+	return nil
 }
 
 func (controller *Controller) Boot(ctx context.Context, baseStackName string) (err error) {
@@ -128,7 +139,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	snapshot, err := controller.loadStacks(stackName)
+	snapshot, err := controller.loadStacks(ctx, stackName)
 	if err != nil {
 		return err
 	}
@@ -138,7 +149,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 	}
 	for _, appInstance := range restartedInstances {
 		if !snapshot.IsWanted(appInstance) {
-			return fmt.Errorf("%s does not run: start it with ilot start %s", plan.ProcessName(controller.Workspace, appInstance), appInstance.App)
+			return fmt.Errorf("%s does not run: start it with ilot start %s", snapshot.ProcessName(appInstance), appInstance.App)
 		}
 	}
 	if err := controller.buildApps(ctx, snapshot, restartedInstances, func(plan.Instance) bool { return true }); err != nil {
@@ -149,9 +160,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 		return err
 	}
 	for _, appInstance := range restartedInstances {
-		// A process that the daemon does not hold starts in the apply. A restart on top would start it twice.
-		_, isHeldByDaemon := processByName[plan.ProcessName(controller.Workspace, appInstance)]
-		if err := controller.startInstance(ctx, snapshot, appInstance, isHeldByDaemon, false); err != nil {
+		if err := controller.startInstance(ctx, snapshot, appInstance, processByName, true); err != nil {
 			return err
 		}
 	}
@@ -177,7 +186,7 @@ func (controller *Controller) Restart(ctx context.Context, baseStackName string)
 }
 
 func (controller *Controller) bootApps(ctx context.Context, baseStackName string) error {
-	snapshot, err := controller.loadStacks(baseStackName)
+	snapshot, err := controller.loadStacks(ctx, baseStackName)
 	if err != nil {
 		return err
 	}
@@ -187,22 +196,28 @@ func (controller *Controller) bootApps(ctx context.Context, baseStackName string
 			bootInstances = append(bootInstances, plan.Instance{Stack: snapshot.StackOf(plan.BaseStack, appName), App: appName})
 		}
 	}
-	for _, instanceRunningBeforeBoot := range snapshot.Wanted() {
-		if !slices.Contains(bootInstances, instanceRunningBeforeBoot) {
-			bootInstances = append(bootInstances, instanceRunningBeforeBoot)
+	// A boot starts the members of every stack, so it reads the file of each one. A stack whose file is broken stays down, and the others start.
+	var problems []error
+	for _, wantedInstance := range snapshot.Wanted() {
+		if err := controller.addStack(snapshot, wantedInstance.Stack); err != nil {
+			problems = append(problems, err)
+			continue
 		}
-		snapshot.SetWanted(instanceRunningBeforeBoot, false)
+		if !slices.Contains(bootInstances, wantedInstance) {
+			bootInstances = append(bootInstances, wantedInstance)
+		}
 	}
-	startOrder, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false})
+	start, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false})
 	if err != nil {
 		return err
 	}
-	imageFailures := controller.ensureImages(snapshot, ctx, startOrder, func(plan.Instance) bool { return true }, false)
+	imageFailures := controller.ensureImages(start.After, ctx, start.Order, func(plan.Instance) bool { return true }, false)
 	needsBuild := func(appInstance plan.Instance) bool { return controller.binDirIsEmpty(appInstance.Stack) }
-	if err := controller.buildApps(ctx, snapshot, startOrder, needsBuild); err != nil {
+	if err := controller.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
 		return err
 	}
-	return controller.startEachUnlessADependencyFailed(ctx, snapshot, startOrder, imageFailures)
+	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures)
+	return errors.Join(append(problems, err, controller.Supervisor.SetRoutes(ctx, start.After.Routes()))...)
 }
 
 // One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
@@ -211,7 +226,7 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 	isFailed := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
 		isFailed[failure.appInstance] = true
-		problems = append(problems, fmt.Errorf("%s: %w", plan.ProcessName(controller.Workspace, failure.appInstance), failure.err))
+		problems = append(problems, fmt.Errorf("%s: %w", snapshot.ProcessName(failure.appInstance), failure.err))
 	}
 	for _, appInstance := range startOrder {
 		if isFailed[appInstance] {
@@ -219,10 +234,10 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 		}
 		if failedDependency, hasFailedDependency := controller.failedDependencyOf(snapshot, appInstance, isFailed); hasFailedDependency {
 			isFailed[appInstance] = true
-			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", plan.ProcessName(controller.Workspace, appInstance), plan.ProcessName(controller.Workspace, failedDependency)))
+			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(failedDependency)))
 			continue
 		}
-		if err := controller.startInstance(ctx, snapshot, appInstance, false, true); err != nil {
+		if err := controller.startInstance(ctx, snapshot, appInstance, map[string]daemon.Process{}, false); err != nil {
 			isFailed[appInstance] = true
 			problems = append(problems, err)
 		}
@@ -250,60 +265,89 @@ func (controller *Controller) failedDependencyOf(snapshot plan.Snapshot, appInst
 	return plan.Instance{}, false
 }
 
-func (controller *Controller) prepareStart(snapshot plan.Snapshot, requestedInstances []plan.Instance, options StartOptions) ([]plan.Instance, error) {
-	start := snapshot.PlanStart(requestedInstances, options.SkipDependencies)
+// prepareStart plans a start, gives its ports, and saves the state after it: every instance of the plan is a member from now on.
+// A failed start keeps them members, so the next ilot start tries them again in the same stacks.
+func (controller *Controller) prepareStart(before plan.Snapshot, requestedInstances []plan.Instance, options StartOptions) (plan.Start, error) {
+	start := before.PlanStart(requestedInstances, options.SkipDependencies)
 	if err := controller.checkExternalServicesUp(start.Externals); err != nil {
-		return nil, err
+		return plan.Start{}, err
 	}
-	if err := controller.allocatePorts(snapshot, start); err != nil {
-		return nil, err
+	if err := controller.allocatePorts(before, start); err != nil {
+		return plan.Start{}, err
 	}
-	if err := controller.checkEveryProcessRenders(snapshot, start.Order); err != nil {
-		return nil, err
+	for _, appInstance := range start.Order {
+		if _, err := start.After.Spec(appInstance); err != nil {
+			return plan.Start{}, err
+		}
 	}
-	return start.Order, controller.saveStacks(snapshot)
+	start.After.RecordRoutes(start.Order)
+	return start, controller.saveStacks(start.After)
 }
 
-func (controller *Controller) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, needsRestart bool, isStartedByThisRun bool) error {
-	snapshot.SetWanted(appInstance, true)
-	if err := controller.saveStacks(snapshot); err != nil {
+// startInstance sends one instance to the daemon and waits until it is ready.
+// A requested instance starts again: with Put when its specification changed, which replaces it one time, and with Restart when it did not.
+// A dependency that runs gets no call, so a change that a command did not ask for never replaces it.
+func (controller *Controller) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process, isRequested bool) error {
+	spec, err := snapshot.Spec(appInstance)
+	if err != nil {
 		return err
 	}
-	if err := controller.applyAll(ctx, snapshot); err != nil {
-		return err
-	}
-	if needsRestart {
-		if err := controller.Supervisor.Restart(ctx, plan.ProcessName(controller.Workspace, appInstance)); err != nil {
+	process, isHeld := processByName[spec.Name]
+	isRunning := isHeld && process.State != daemon.StateExited
+	switch {
+	case !isRunning:
+		if err := controller.put(ctx, spec); err != nil {
+			return err
+		}
+	case isRequested && process.Hash != spec.Hash():
+		fmt.Fprintf(controller.Output, "restarting %s with its new specification\n", spec.Name)
+		if err := controller.put(ctx, spec); err != nil {
+			return err
+		}
+	case isRequested:
+		fmt.Fprintf(controller.Output, "restarting %s\n", spec.Name)
+		if err := controller.Supervisor.Restart(ctx, spec.Name); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(controller.Output, "waiting for %s\n", plan.ProcessName(controller.Workspace, appInstance))
-	stopShowingLog := logs.FollowNewMessages(snapshot.LogFile(appInstance), &linePrefixWriter{prefix: plan.ProcessName(controller.Workspace, appInstance) + " | ", output: controller.Output, isAtLineStart: true})
-	waitErr := controller.Supervisor.WaitReady(ctx, plan.ProcessName(controller.Workspace, appInstance), controller.ReadyTimeout)
+	if !isRunning || isRequested {
+		if err := controller.putWatcher(ctx, snapshot, appInstance, processByName); err != nil {
+			return err
+		}
+	}
+	return controller.waitReady(ctx, snapshot, appInstance)
+}
+
+func (controller *Controller) put(ctx context.Context, spec plan.ProcessSpec) error {
+	if err := os.MkdirAll(filepath.Dir(spec.LogFile), 0o700); err != nil {
+		return err
+	}
+	return controller.Supervisor.Put(ctx, spec)
+}
+
+// The watcher of an app restarts only when its own specification changed: it runs ilot restart, which rebuilds the app itself.
+func (controller *Controller) putWatcher(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process) error {
+	watcher, isWatched, err := snapshot.Watcher(appInstance)
+	if err != nil || !isWatched {
+		return err
+	}
+	if process, isHeld := processByName[watcher.Name]; isHeld && process.State != daemon.StateExited && process.Hash == watcher.Hash() {
+		return nil
+	}
+	return controller.put(ctx, watcher)
+}
+
+func (controller *Controller) waitReady(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance) error {
+	processName := snapshot.ProcessName(appInstance)
+	fmt.Fprintf(controller.Output, "waiting for %s\n", processName)
+	stopShowingLog := logs.FollowNewMessages(snapshot.LogFile(appInstance), &linePrefixWriter{prefix: processName + " | ", output: controller.Output, isAtLineStart: true})
+	waitErr := controller.Supervisor.WaitReady(ctx, processName, controller.ReadyTimeout)
 	if err := errors.Join(waitErr, stopShowingLog()); err != nil {
 		failure := fmt.Errorf("%w, see %s", err, snapshot.LogFile(appInstance))
-		_, hasEnded := errors.AsType[*daemon.ExitedError](err)
-		_, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err)
-		switch {
-		case hasEnded && isStartedByThisRun && ctx.Err() == nil:
-			return errors.Join(failure, controller.stopFailedInstance(ctx, snapshot, appInstance))
-		case isNotReadyInTime:
+		if _, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err); isNotReadyInTime {
 			return fmt.Errorf("%w; it still starts: ilot keeps it", failure)
 		}
 		return failure
-	}
-	return nil
-}
-
-func (controller *Controller) stopFailedInstance(ctx context.Context, snapshot plan.Snapshot, failedInstance plan.Instance) error {
-	cleanupCtx := context.WithoutCancel(ctx)
-	snapshot.SetWanted(failedInstance, false)
-	err := controller.saveStacks(snapshot)
-	if err == nil {
-		err = controller.applyAll(cleanupCtx, snapshot)
-	}
-	if err != nil {
-		return fmt.Errorf("stop %s after its failure: %w", plan.ProcessName(controller.Workspace, failedInstance), err)
 	}
 	return nil
 }
@@ -366,27 +410,63 @@ func (controller *Controller) Stop(ctx context.Context, stackName string, appNam
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	snapshot, err := controller.loadStacks(stackName)
+	current, err := controller.loadState()
 	if err != nil {
 		return err
 	}
-	stoppedInstances, err := snapshot.Instances(stackName, appNames)
+	stoppedInstances, err := controller.instancesToStop(current, stackName, appNames)
 	if err != nil {
 		return err
 	}
-	stacksBeforeStop := snapshot.Clone()
+	// The warning about dependents needs the configuration. Without it, the stop still works.
+	before, configErr := controller.snapshotOf(current.Clone(), stackName)
+	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: stackName, State: current, Machine: controller.Machine}
+	var stopped []plan.Instance
 	for _, stoppedInstance := range stoppedInstances {
 		if !snapshot.IsWanted(stoppedInstance) {
-			fmt.Fprintf(controller.Output, "%s is not running\n", plan.ProcessName(controller.Workspace, stoppedInstance))
+			fmt.Fprintf(controller.Output, "%s is not running\n", snapshot.ProcessName(stoppedInstance))
 			continue
 		}
 		snapshot.SetWanted(stoppedInstance, false)
-		controller.warnAboutDependents(stacksBeforeStop, stoppedInstance)
+		stopped = append(stopped, stoppedInstance)
+		if configErr == nil {
+			controller.warnAboutDependents(before, stoppedInstance)
+		}
 	}
 	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}
-	return controller.applyAll(ctx, snapshot)
+	if err := controller.deleteProcesses(ctx, snapshot, stopped); err != nil {
+		return err
+	}
+	return controller.Supervisor.SetRoutes(ctx, snapshot.Routes())
+}
+
+// deleteProcesses stops instances and their watchers. A container that the daemon does not hold, after a crash of the daemon, is removed too.
+func (controller *Controller) deleteProcesses(ctx context.Context, snapshot plan.Snapshot, instances []plan.Instance) error {
+	if len(instances) == 0 {
+		return nil
+	}
+	processByName, err := controller.Supervisor.Processes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, deletedInstance := range instances {
+		processName := snapshot.ProcessName(deletedInstance)
+		watcherName := snapshot.ProcessName(plan.Instance{Stack: deletedInstance.Stack, App: deletedInstance.App + plan.WatcherSuffix})
+		for _, name := range []string{watcherName, processName} {
+			if err := controller.Supervisor.Delete(ctx, name); err != nil {
+				return err
+			}
+		}
+		containerName := snapshot.State.App(controller.Workspace, deletedInstance.Stack, deletedInstance.App).Container
+		if _, isHeld := processByName[processName]; containerName != "" && !isHeld && controller.RemoveContainer != nil {
+			if err := controller.RemoveContainer(ctx, containerName); err != nil {
+				return fmt.Errorf("remove the container %s of %s: %w", containerName, processName, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (controller *Controller) warnAboutDependents(snapshotBeforeStop plan.Snapshot, stoppedInstance plan.Instance) {

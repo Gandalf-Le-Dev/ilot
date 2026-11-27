@@ -60,7 +60,7 @@ func snapshotWithEveryAppRunning(workspaceName string, repoNames []string, merge
 		Checkouts:      map[string]map[string]string{},
 		ReposNotCloned: nil,
 		Settings:       config.WorkspaceSettings{Repos: nil, Env: nil, Apps: nil},
-		Machine:        Machine{StateDir: madeUpCheckoutsRoot + "state", Domain: config.DefaultDomain, ProxyPort: "", Login: checkStackName, ShellEnv: nil, IlotBinary: "ilot", IlotEnv: nil},
+		Machine:        Machine{StateDir: madeUpCheckoutsRoot + "state", Domain: config.DefaultDomain, ProxyPort: "", Login: checkStackName, ShellEnv: nil, SessionEnv: nil, IlotBinary: "ilot", IlotEnv: nil},
 	}
 	for _, stackName := range []string{BaseStack, checkStackName} {
 		snapshot.Checkouts[stackName] = map[string]string{}
