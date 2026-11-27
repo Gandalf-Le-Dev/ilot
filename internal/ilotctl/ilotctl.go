@@ -214,7 +214,39 @@ func (controller *Controller) bootApps(ctx context.Context, baseStackName string
 	if err := controller.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
 		return err
 	}
-	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures)
+	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures, map[string]daemon.Process{})
+	return errors.Join(append(problems, err, controller.sendRoutes(ctx))...)
+}
+
+// StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
+// A member that runs gets no call.
+func (controller *Controller) StartAll(ctx context.Context) error {
+	var start plan.Start
+	var problems []error
+	err := controller.underLock(ctx, func() error {
+		snapshot, _, err := controller.loadStacks(plan.BaseStack)
+		if err != nil {
+			return err
+		}
+		start, problems, err = controller.planMembers(snapshot, nil)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	processByName, err := controller.Supervisor.Processes(ctx)
+	if err != nil {
+		return err
+	}
+	isDown := func(appInstance plan.Instance) bool {
+		process, isHeld := processByName[start.After.ProcessName(appInstance)]
+		return !isHeld || process.State == daemon.StateExited
+	}
+	imageFailures := controller.ensureImages(start.After, ctx, start.Order, isDown, false)
+	if err := controller.buildApps(ctx, start.After, start.Order, isDown); err != nil {
+		return err
+	}
+	err = controller.startEachUnlessADependencyFailed(ctx, start.After, start.Order, imageFailures, processByName)
 	return errors.Join(append(problems, err, controller.sendRoutes(ctx))...)
 }
 
@@ -225,7 +257,12 @@ func (controller *Controller) planBoot(snapshot plan.Snapshot) (plan.Start, []er
 			bootInstances = append(bootInstances, plan.Instance{Stack: snapshot.StackOf(plan.BaseStack, appName), App: appName})
 		}
 	}
-	// A boot starts the members of every stack, so it reads the file of each one. A stack whose file is broken stays down, and the others start.
+	return controller.planMembers(snapshot, bootInstances)
+}
+
+// planMembers plans the start of every member of every stack, after the given instances.
+// It reads the file of each stack. A stack whose file is broken stays down, and the others start.
+func (controller *Controller) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance) (plan.Start, []error, error) {
 	var problems []error
 	for _, wantedInstance := range snapshot.Wanted() {
 		if err := controller.addStack(snapshot, wantedInstance.Stack); err != nil {
@@ -241,7 +278,7 @@ func (controller *Controller) planBoot(snapshot plan.Snapshot) (plan.Start, []er
 }
 
 // One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
-func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, imageFailures []imageFailure) error {
+func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, imageFailures []imageFailure, processByName map[string]daemon.Process) error {
 	var problems []error
 	isFailed := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
@@ -257,7 +294,7 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(failedDependency)))
 			continue
 		}
-		if err := controller.startInstance(ctx, snapshot, appInstance, map[string]daemon.Process{}, false); err != nil {
+		if err := controller.startInstance(ctx, snapshot, appInstance, processByName, false); err != nil {
 			isFailed[appInstance] = true
 			problems = append(problems, err)
 		}

@@ -140,6 +140,7 @@ ilot apps                     # every app and external service that the ilot.yam
 ilot apps --json              # the same as one JSON object
 ilot start api                # build, then start the app after its dependencies
 ilot start api --no-deps      # start only this app
+ilot start --all              # start every app that a stack owns and that does not run, for example after the daemon crashed
 ilot stop api                 # stop the app in this stack
 ilot logs api                 # the last 100 lines of the log of the app; a JSON line becomes one readable line
 ilot logs --json api          # the lines of the app as it wrote them
@@ -160,7 +161,8 @@ ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
 ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do not need it
 ```
 
-`ilot ls` gives each app one of these statuses: `starting`, `ready`, `stopping`, `exited (<exit code>)`, or `stopped` for an app that the daemon does not hold.
+`ilot ls` gives each app one of these statuses: `starting`, `ready`, `stopping`, `exited (<exit code>)`, `down` for an app that its stack owns and that the daemon does not hold, for example after a crash of the daemon, or `stopped` for an app that no stack owns.
+When an app is `down`, `ilot ls` ends with the command that starts it again: `ilot start --all`. It starts each app that a stack owns and that does not run, after its dependencies, and leaves the others as they are.
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
 `ilot start` also rebuilds an app that already runs, then restarts it.

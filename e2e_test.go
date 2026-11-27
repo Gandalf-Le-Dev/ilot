@@ -275,7 +275,7 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 		t.Errorf("GET of an unknown host = %d %q, %v; want the 404 page that lists the routes", status, body, err)
 	}
 
-	// A killed daemon leaves its apps behind. The next daemon kills them, and the next start restores the apps.
+	// A killed daemon leaves its apps behind. The next daemon kills them, and ilot start --all restores the apps.
 	killedDaemon, err := machine.daemonClient().Status(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -300,8 +300,13 @@ func TestEndToEndAnAppRunsInBaseAndInAWorktreeBehindTheProxy(t *testing.T) {
 	if stackOutput := machine.ilot(worktree, "stack", "show"); !strings.Contains(stackOutput, "stack: proj-1 (this worktree is bound to it)") {
 		t.Errorf("ilot stack show after git switch printed %q, want the stack proj-1", stackOutput)
 	}
-	machine.ilot(mainCheckout, "start", "hello")
-	machine.ilot(worktree, "start", "hello")
+	if statusByApp := machine.statusByApp(worktree); statusByApp["hello.base"] != "down" || statusByApp["hello.proj-1"] != "down" {
+		t.Errorf("ilot ls after the kill = %v, want both apps down", statusByApp)
+	}
+	if listOutput := machine.ilot(worktree, "ls"); !strings.Contains(listOutput, "ilot start --all starts them again") {
+		t.Errorf("ilot ls after the kill printed %q, want the line that restores the apps", listOutput)
+	}
+	machine.ilot(worktree, "start", "--all")
 
 	waitUntilGone(t, "the apps of the killed daemon", pidsBeforeTheKill["hello.base.shop"], pidsBeforeTheKill["hello.proj-1.shop"])
 	machine.wantBody("hello.base.shop.localhost", "hello from base\n")
