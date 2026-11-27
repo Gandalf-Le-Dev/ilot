@@ -25,6 +25,8 @@ type ProcessSupervisor interface {
 	Restart(ctx context.Context, processName string) error
 	// Delete stops a process and forgets it. A process or a daemon that does not exist is no error.
 	Delete(ctx context.Context, processName string) error
+	// Up starts the daemon when none runs. A new daemon first kills the processes that a dead one left, which can hold the ports of the apps.
+	Up(ctx context.Context) error
 	// Processes is empty when no daemon runs. It never starts one.
 	Processes(ctx context.Context) (map[string]daemon.Process, error)
 	// WaitReady returns a *daemon.ExitedError for an ended process, and a *daemon.NotReadyError after the timeout.
@@ -106,6 +108,11 @@ func (supervisor *DaemonSupervisor) Put(ctx context.Context, spec ProcessSpec) e
 		return withRetryHint(fmt.Errorf("start %s: %w", spec.Name, err))
 	}
 	return nil
+}
+
+func (supervisor *DaemonSupervisor) Up(ctx context.Context) error {
+	_, err := supervisor.ensureDaemon(ctx)
+	return err
 }
 
 func (supervisor *DaemonSupervisor) Delete(ctx context.Context, processName string) error {

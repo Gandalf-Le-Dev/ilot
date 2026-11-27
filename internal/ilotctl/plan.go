@@ -7,9 +7,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 	"time"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
@@ -25,14 +27,33 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 	return errors.Join(problems...)
 }
 
-// allocatePorts gives each instance of the start, in the state after it, a free port for each port that has no number yet.
-// A fixed port of an instance that was not a member must be free: another program can hold it.
-func (controller *Controller) allocatePorts(before plan.Snapshot, start plan.Start) error {
+// checkStoredPorts tests each port that an instance to start already has: its fixed ports, and the ports of an earlier start.
+// Another program can have taken one since, and the app would then fail with an error of its own.
+func (controller *Controller) checkStoredPorts(before plan.Snapshot, start plan.Start, processByName map[string]daemon.Process) error {
+	fixedPortsOf := map[plan.Instance]map[string]int{}
 	for _, fixedPort := range start.FixedPorts {
-		if !before.IsWanted(fixedPort.Instance) && !controller.IsPortFreeOnHost(fixedPort.Port) {
-			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, before.ProcessName(fixedPort.Instance))
+		if fixedPortsOf[fixedPort.Instance] == nil {
+			fixedPortsOf[fixedPort.Instance] = map[string]int{}
+		}
+		fixedPortsOf[fixedPort.Instance][fixedPort.PortName] = fixedPort.Port
+	}
+	for _, appInstance := range start.Order {
+		if process, isHeld := processByName[before.ProcessName(appInstance)]; isHeld && process.State != daemon.StateExited {
+			continue
+		}
+		ports := maps.Clone(before.Ports(appInstance))
+		maps.Copy(ports, fixedPortsOf[appInstance])
+		for _, portName := range slices.Sorted(maps.Keys(ports)) {
+			if !controller.IsPortFreeOnHost(ports[portName]) {
+				return fmt.Errorf("port %d (%s) of %s is taken by another process: stop that process, then run the command again", ports[portName], portName, before.ProcessName(appInstance))
+			}
 		}
 	}
+	return nil
+}
+
+// allocatePorts gives each instance of the start, in the state after it, a free port for each port that has no number yet.
+func (controller *Controller) allocatePorts(start plan.Start) error {
 	allocated, err := controller.PortRange.Allocate(len(start.PortNeeds), start.After.State.PortsInUse(), controller.IsPortFreeOnHost)
 	if err != nil {
 		return err

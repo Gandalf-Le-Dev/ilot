@@ -6,8 +6,10 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -27,6 +29,8 @@ type AppRow struct {
 	Status string         `json:"status"`
 	Ports  map[string]int `json:"ports"`
 	URL    string         `json:"url"`
+	// No ilot.yaml of its stack declares the app any more. It keeps its ports until ilot stop removes it.
+	Undeclared bool `json:"undeclared,omitzero"`
 }
 
 type ExternalServiceRow struct {
@@ -40,7 +44,7 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 	if err != nil {
 		return Listing{}, err
 	}
-	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current, Machine: controller.Machine}
+	snapshot := plan.Snapshot{Workspace: controller.Workspace, Own: plan.BaseStack, State: current, Configs: controller.readableConfigs(current), Machine: controller.Machine}
 	processByName, err := controller.Supervisor.Processes(ctx)
 	if err != nil {
 		return Listing{}, err
@@ -60,11 +64,12 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 				listing.Restore = "ilot start --all"
 			}
 			listing.Apps = append(listing.Apps, AppRow{
-				Stack:  stackName,
-				App:    appName,
-				Status: status,
-				Ports:  stacks[stackName].Apps[appName].Ports,
-				URL:    snapshot.URL(appInstance),
+				Stack:      stackName,
+				App:        appName,
+				Status:     status,
+				Ports:      stacks[stackName].Apps[appName].Ports,
+				URL:        snapshot.URL(appInstance),
+				Undeclared: isUndeclared(snapshot, appInstance),
 			})
 		}
 	}
@@ -111,4 +116,33 @@ func (controller *Controller) printURLs(snapshot plan.Snapshot, requestedInstanc
 			fmt.Fprintf(controller.Output, "%s: %s\n", plan.ProcessName(controller.Workspace, appInstance), url)
 		}
 	}
+}
+
+// readableConfigs gives the configuration of each stack that has one that parses. A listing works without them.
+func (controller *Controller) readableConfigs(current state.State) map[string]config.Config {
+	configByStack := map[string]config.Config{}
+	if controller.ConfigErr == nil {
+		configByStack[plan.BaseStack] = controller.Config
+	}
+	for stackName := range current.Stacks(controller.Workspace) {
+		if controller.ConfigForStack == nil {
+			if controller.ConfigErr == nil {
+				configByStack[stackName] = controller.Config
+			}
+			continue
+		}
+		if stackConfig, err := controller.ConfigForStack(stackName); err == nil {
+			configByStack[stackName] = stackConfig
+		}
+	}
+	return configByStack
+}
+
+// An instance of a stack whose configuration cannot be read is never called undeclared: nothing says so.
+func isUndeclared(snapshot plan.Snapshot, appInstance plan.Instance) bool {
+	if _, isLoaded := snapshot.Configs[appInstance.Stack]; !isLoaded {
+		return false
+	}
+	_, isDeclared := snapshot.Declaration(appInstance)
+	return !isDeclared
 }

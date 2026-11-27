@@ -222,18 +222,27 @@ func (command *lsCommand) Run(ctx context.Context) error {
 	fmt.Printf("every URL: %s\n\n", controller.Machine.HomeURL())
 	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "STACK\tAPP\tSTATUS\tPORTS\tURL")
+	hasUndeclared := false
 	for _, app := range listing.Apps {
 		var formattedPorts []string
 		for _, portName := range slices.Sorted(maps.Keys(app.Ports)) {
 			formattedPorts = append(formattedPorts, fmt.Sprintf("%s=%d", portName, app.Ports[portName]))
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", app.Stack, app.App, app.Status, strings.Join(formattedPorts, " "), app.URL)
+		status := app.Status
+		if app.Undeclared {
+			status += ", undeclared"
+			hasUndeclared = true
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", app.Stack, app.App, status, strings.Join(formattedPorts, " "), app.URL)
 	}
 	for _, externalService := range listing.ExternalServices {
 		fmt.Fprintf(table, "external\t%s\t%s\t%d\t\n", externalService.Name, externalService.Status, externalService.Port)
 	}
 	if err := table.Flush(); err != nil {
 		return err
+	}
+	if hasUndeclared {
+		fmt.Println("\nno ilot.yaml declares an app marked undeclared: it keeps its ports until ilot stop <app>, in its stack, removes it")
 	}
 	if listing.Restore != "" {
 		fmt.Printf("\napps that a stack owns are down: %s starts them again\n", listing.Restore)
