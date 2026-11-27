@@ -139,7 +139,6 @@ ilot rm proj-1234             # stop a stack and delete its state, logs, routes 
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
 ilot restart                  # stop every app, start the daemon again with a fresh environment, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran: run it at login
-ilot bootstrap                # set up an Artifactory token for npm, jf and docker, and the GPG and SSH agents
 ilot --version
 ilot --skill                  # print the skill for AI agents
 ```

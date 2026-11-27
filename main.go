@@ -43,19 +43,18 @@ type cli struct {
 	Version kong.VersionFlag `short:"v" help:"Print the version of ilot and exit."`
 	Skill   skillFlag        `help:"Print the ilot skill for AI agents and exit."`
 
-	Ls        lsCommand        `cmd:"" help:"List the apps of every stack and the external services."`
-	Apps      appsCommand      `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
-	Start     startCommand     `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
-	Stop      stopCommand      `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Boot      bootCommand      `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
-	Restart   restartCommand   `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
-	Env       envCommand       `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
-	Logs      logsCommand      `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
-	Rm        rmCommand        `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
-	Clean     cleanCommand     `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
-	Check     checkCommand     `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
-	Rebuild   rebuildCommand   `cmd:"" help:"Build ilot from the platform main checkout again, with the full build output."`
-	Bootstrap bootstrapCommand `cmd:"" help:"Set up the Artifactory token for npm, jf and docker, the GPG loopback lines and the agent unlock. Safe to run again."`
+	Ls      lsCommand      `cmd:"" help:"List the apps of every stack and the external services."`
+	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
+	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
+	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
+	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
+	Restart restartCommand `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
+	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
+	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
+	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
+	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
+	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
+	Rebuild rebuildCommand `cmd:"" help:"Build ilot from the platform main checkout again, with the full build output."`
 }
 
 type envCommand struct {
@@ -441,6 +440,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
-	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary(), "artifactory_host": defaultArtifactoryHost})
+	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
 	commandLine.FatalIfErrorf(commandLine.Run())
 }

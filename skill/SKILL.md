@@ -52,7 +52,6 @@ ilot rm task-2006               # stop a stack and delete its state, logs, route
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout>  # runs at login; you do not need it
 ilot restart                    # stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran (ask first)
-ilot bootstrap               # the user runs it, once: it asks for secrets. If npm, jf or docker login fail with 401, tell the user to run it. Never run it yourself.
 ilot rebuild                    # build ilot from the main checkout again, with the full output
 ilot --version                  # the version of ilot: (checkout) or (image)
 ilot --skill                    # print this skill
