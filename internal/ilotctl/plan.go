@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
+	"syscall"
+	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
@@ -151,19 +154,57 @@ func (controller *Controller) buildApps(ctx context.Context, stacks stackSet, st
 		if err := os.MkdirAll(controller.binDir(appInstance.stackName), 0o755); err != nil {
 			return err
 		}
-		fmt.Fprintf(controller.Output, "building %s in %s\n", appInstance.processName(), workingDir)
 		environ, err := controller.shellEnviron()
 		if err != nil {
 			return err
 		}
+		releaseBuilds, err := controller.lockBuilds(ctx, appInstance.stackName)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(controller.Output, "building %s in %s\n", appInstance.processName(), workingDir)
 		stopProgress := controller.printProgressUntilStopped("building " + appInstance.processName())
 		err = controller.RunBuild(ctx, workingDir, build.command, environ)
 		stopProgress()
-		if err != nil {
+		if err := errors.Join(err, releaseBuilds()); err != nil {
 			return fmt.Errorf("build %s: %w", appInstance.processName(), err)
 		}
 	}
 	return nil
+}
+
+const buildLockPollInterval = 100 * time.Millisecond
+
+// lockBuilds lets one build run in a stack at a time: two apps of a stack can write the same binary.
+// ilot start, ilot restart and the watcher of an app all build through it.
+func (controller *Controller) lockBuilds(ctx context.Context, stackName string) (release func() error, err error) {
+	if err := os.MkdirAll(controller.Store.StackDir(stackName), 0o700); err != nil {
+		return nil, err
+	}
+	lockFile, err := os.OpenFile(filepath.Join(controller.Store.StackDir(stackName), "build.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	hasSaidThatItWaits := false
+	for {
+		err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return lockFile.Close, nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, errors.Join(fmt.Errorf("lock %s: %w", lockFile.Name(), err), lockFile.Close())
+		}
+		if !hasSaidThatItWaits {
+			fmt.Fprintf(controller.Output, "waiting for another build of stack %s\n", stackName)
+			hasSaidThatItWaits = true
+		}
+		// A poll, and not a blocking lock, so that Ctrl-C ends the wait.
+		select {
+		case <-ctx.Done():
+			return nil, errors.Join(ctx.Err(), lockFile.Close())
+		case <-time.After(buildLockPollInterval):
+		}
+	}
 }
 
 func (controller *Controller) loadSavedStacks() (stackSet, error) {

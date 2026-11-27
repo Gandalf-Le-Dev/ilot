@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -48,7 +49,7 @@ type cli struct {
 	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
 	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before this machine restarted. Does nothing when the ilot daemon already runs."`
-	Restart restartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
+	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them. With no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`
@@ -120,15 +121,38 @@ type bootCommand struct {
 }
 
 type restartCommand struct {
+	Apps    []string      `arg:"" optional:"" help:"Apps to build again and restart. With no app, ilot restarts its daemon and every app of every stack."`
+	Stack   string        `help:"Stack of the apps. The default is the stack of the current folder. The watcher of an app uses it."`
 	Timeout time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
 }
 
 func (command *restartCommand) Run(ctx context.Context) error {
-	controller, mainCheckout, err := newControllerForCurrentWorktree(command.Timeout, true)
+	switch {
+	case len(command.Apps) == 0 && command.Stack != "":
+		return errors.New("--stack needs the apps to restart")
+	case len(command.Apps) == 0:
+		controller, mainCheckout, err := newControllerForCurrentWorktree(command.Timeout, true)
+		if err != nil {
+			return err
+		}
+		return controller.Restart(ctx, mainCheckout)
+	case command.Stack != "":
+		currentWorkspace, err := loadCurrentWorkspace()
+		if err != nil {
+			return err
+		}
+		namedStack := stack.Worktree{Name: command.Stack, WorktreeDir: "", MainCheckoutDir: "", Branch: ""}
+		controller, err := newController(currentWorkspace, namedStack, command.Timeout)
+		if err != nil {
+			return err
+		}
+		return controller.RestartApps(ctx, namedStack, command.Apps)
+	}
+	controller, worktree, err := newControllerForCurrentWorktree(command.Timeout, false)
 	if err != nil {
 		return err
 	}
-	return controller.Restart(ctx, mainCheckout)
+	return controller.RestartApps(ctx, worktree, command.Apps)
 }
 
 type lsCommand struct {
@@ -349,6 +373,12 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	if err != nil {
 		return nil, fmt.Errorf("find the ilot binary, to start its daemon: %w", err)
 	}
+	ilotEnv := map[string]string{}
+	for _, name := range []string{"XDG_STATE_HOME", proxyListenVariable} {
+		if value, isSet := os.LookupEnv(name); isSet {
+			ilotEnv[name] = value
+		}
+	}
 	daemonPaths := daemon.Paths{StateDir: stateDir}
 	startDaemon := func() error {
 		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
@@ -370,6 +400,8 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		Login:               currentUser.Username,
 		BackendHost:         "devbox",
 		ProxyPort:           proxyPort,
+		IlotBinary:          ilotBinary,
+		IlotEnv:             ilotEnv,
 		ReadyTimeout:        readyTimeout,
 		ProgressInterval:    10 * time.Second,
 		Output:              os.Stdout,

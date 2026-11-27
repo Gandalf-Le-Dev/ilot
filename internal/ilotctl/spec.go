@@ -3,6 +3,7 @@ package ilotctl
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,15 +126,12 @@ func (controller *Controller) workingDir(stacks stackSet, appInstance instance) 
 	return filepath.Join(checkoutDir, appDir), nil
 }
 
-func (controller *Controller) watcherSpec(stacks stackSet, watchedInstance instance, workingDir string) (ProcessSpec, bool, error) {
-	app := controller.app(watchedInstance)
-	watch := app.Watch
+// The watcher runs ilot restart, so a change of a file goes through the same build lock and the same steps as a command of the user.
+// It names the stack, because the folder of an app does not always tell it: a ticket stack can run an app from a main checkout.
+func (controller *Controller) watcherSpec(watchedInstance instance, workingDir string) (ProcessSpec, bool, error) {
+	watch := controller.app(watchedInstance).Watch
 	if len(watch.Paths) == 0 {
 		return ProcessSpec{}, false, nil
-	}
-	onChange, err := controller.watcherCommand(stacks, watchedInstance, app)
-	if err != nil {
-		return ProcessSpec{}, false, err
 	}
 	commandParts := []string{"watchexec --postpone"}
 	for _, watchedPath := range watch.Paths {
@@ -142,44 +140,29 @@ func (controller *Controller) watcherSpec(stacks stackSet, watchedInstance insta
 	if len(watch.Exts) > 0 {
 		commandParts = append(commandParts, "--exts "+strings.Join(watch.Exts, ","))
 	}
+	onChange := shellQuote(controller.IlotBinary) + " restart --stack " + shellQuote(watchedInstance.stackName) + " " + shellQuote(watchedInstance.appName)
 	commandParts = append(commandParts, "--", shellQuote(onChange))
 	shellEnv, err := controller.shellEnvironment()
 	if err != nil {
 		return ProcessSpec{}, false, err
 	}
+	env := maps.Clone(shellEnv)
+	if env == nil {
+		env = map[string]string{}
+	}
+	maps.Copy(env, controller.IlotEnv)
 	watcherInstance := instance{stackName: watchedInstance.stackName, appName: watchedInstance.appName + "-watch"}
 	return ProcessSpec{
 		Name: watcherInstance.processName(),
 		Spec: daemon.Spec{
 			Command: strings.Join(commandParts, " "),
 			Dir:     workingDir,
-			Env:     shellEnv,
+			Env:     env,
 			LogFile: controller.logFile(watcherInstance),
 			Stop:    "",
 			Ready:   nil,
 		},
 	}, true, nil
-}
-
-// An app with a build rebuilds before the restart, in its checkout, like ilot start does.
-// A failed build keeps the running app. The lock serializes the builds of the stack:
-// apps that share a binary, such as internalapi and publicapi, would otherwise write it at the same time.
-func (controller *Controller) watcherCommand(stacks stackSet, watchedInstance instance, app appconfig.App) (string, error) {
-	restart := controller.Supervisor.RestartCommand(watchedInstance.processName())
-	if app.Build == "" {
-		return restart, nil
-	}
-	buildCommand, err := controller.renderTemplate(stacks, watchedInstance, app.Build)
-	if err != nil {
-		return "", err
-	}
-	checkoutDir, err := controller.checkoutDir(stacks, watchedInstance)
-	if err != nil {
-		return "", err
-	}
-	lockFile := filepath.Join(controller.Store.StackDir(watchedInstance.stackName), "build.lock")
-	build := "cd " + shellQuote(checkoutDir) + " && " + controller.wrapped(watchedInstance, buildCommand)
-	return "flock " + shellQuote(lockFile) + " bash -c " + shellQuote(build) + " && " + restart, nil
 }
 
 func (controller *Controller) binDirIsEmpty(stackName string) bool {

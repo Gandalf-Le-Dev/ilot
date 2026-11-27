@@ -50,6 +50,8 @@ func CheckRendering(config appconfig.Config) []error {
 		Login:               checkStackName,
 		BackendHost:         "",
 		ProxyPort:           "",
+		IlotBinary:          "ilot",
+		IlotEnv:             nil,
 		ReadyTimeout:        0,
 		ProgressInterval:    0,
 		Output:              io.Discard,
