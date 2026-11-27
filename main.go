@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -24,82 +25,86 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
-	"github.com/Gandalf-Le-Dev/ilot/internal/processcompose"
 	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
-)
-
-const (
-	devboxMarkerFile       = "/etc/devhost.env"
-	traefikRoutesMountPath = "/etc/traefik/routes"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type cli struct {
 	Version kong.VersionFlag `short:"v" help:"Print the version of ilot and exit."`
-	Skill   skillFlag        `help:"Print the ilot skill for AI agents and exit."`
 
-	Ls        lsCommand        `cmd:"" help:"List the apps of every stack and the external services."`
-	Apps      appsCommand      `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
-	Start     startCommand     `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
-	Stop      stopCommand      `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Boot      bootCommand      `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
-	Restart   restartCommand   `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
-	Env       envCommand       `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
-	Logs      logsCommand      `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
-	Rm        rmCommand        `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
-	Clean     cleanCommand     `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
-	Check     checkCommand     `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
-	Rebuild   rebuildCommand   `cmd:"" help:"Build ilot from the platform main checkout again, with the full build output."`
-	Bootstrap bootstrapCommand `cmd:"" help:"Set up the Artifactory token for npm, jf and docker, the GPG loopback lines and the agent unlock. Safe to run again."`
+	Ls      lsCommand      `cmd:"" help:"List the apps of every stack and the external services."`
+	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
+	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
+	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
+	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them, in the stack of the current worktree. An app that is down needs ilot start, which starts its dependencies first."`
+	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
+	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
+	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`
+	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
+	Stack   stackCommand   `cmd:"" help:"Print the stack of the current worktree, or put the worktree in another stack."`
+	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
+	Doctor  doctorCommand  `cmd:"" help:"Test what ilot needs on this machine: git, the state folder, the daemon, the proxy address, the name lookup, the login shell, and watchexec and docker when an app needs them. Report what an older ilot left behind."`
+	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
+	Daemon  daemonCommand  `cmd:"" help:"Show, stop or restart the ilot daemon, which supervises the apps of every stack and holds the proxy. ilot starts it when it needs it."`
+}
+
+type daemonCommand struct {
+	Status  daemonStatusCommand  `cmd:"" help:"Print the version, the process ID and the proxy address of the ilot daemon."`
+	Stop    daemonStopCommand    `cmd:"" help:"Stop every app of every stack, then the ilot daemon. The stacks keep their apps: ilot start --all starts them again."`
+	Restart daemonRestartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start again every app that a stack of any workspace owns. A workspace that fails stays down, and the error names it. Use it after an upgrade of ilot or a change of proxy in the global file."`
+	Run     daemonRunCommand     `cmd:"" hidden:"" help:"Run the daemon that supervises the apps, until a signal or a shutdown call stops it. ilot runs it by itself."`
+}
+
+type daemonRunCommand struct {
+	StateDir    string `required:"" help:"State folder of ilot, which holds the lock, the socket and the log of the daemon."`
+	ProxyListen string `help:"Address of the proxy, for example 127.0.0.1:4580. Without it, the daemon runs no proxy."`
+}
+
+func (command *daemonRunCommand) Run(ctx context.Context) error {
+	return daemon.Run(ctx, daemon.Options{Paths: daemon.Paths{StateDir: command.StateDir}, Version: versionOfThisBinary(), ProxyListen: command.ProxyListen})
 }
 
 type envCommand struct {
-	App string `arg:"" help:"App declared in an ilot.yaml."`
+	App       string    `arg:"" help:"App declared in an ilot.yaml."`
+	Selection selection `embed:""`
 }
 
-const unrecordedEnvironmentNote = "note: ilot started before it fixed the environment of the apps: they have the environment of the shell that started it. Run ilot restart."
-
 func (command *envCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	source, stackName, err := sourceFor(ctx, command.Selection)
 	if err != nil {
 		return err
 	}
-	entries, err := controller.Environment(worktree, command.App)
+	entries, err := source.Environment(stackName, command.App)
 	if err != nil {
 		return err
 	}
-	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	for _, entry := range entries {
-		fmt.Fprintf(table, "%s=%s\t(%s)\n", entry.Key, entry.Value, entry.Source)
+		fmt.Fprintf(os.Stdout, "%s=%s  (%s)\n", entry.Key, entry.Value, entry.Source)
 	}
-	if err := table.Flush(); err != nil {
-		return err
-	}
-	isUnrecorded, err := controller.RunsWithoutARecordedEnvironment(ctx)
-	if isUnrecorded {
-		fmt.Fprintln(os.Stderr, unrecordedEnvironmentNote)
-	}
-	return err
+	return nil
 }
 
 type logsCommand struct {
-	App    string `arg:"" help:"App declared in devbox/ilot.yaml."`
-	Follow bool   `short:"f" help:"Keep printing new lines."`
-	Lines  int    `short:"n" default:"100" help:"How many of the last lines to print first."`
-	JSON   bool   `help:"Print the app's own log lines as they are, for tools and agents."`
+	App       string    `arg:"" help:"App declared in an ilot.yaml."`
+	Follow    bool      `short:"f" help:"Keep printing new lines."`
+	Lines     int       `short:"n" default:"100" help:"How many of the last lines to print first."`
+	JSON      bool      `help:"Print each line as the app wrote it. Without it, ilot turns a JSON line into one readable line."`
+	Selection selection `embed:""`
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	source, stackName, err := sourceFor(ctx, command.Selection)
 	if err != nil {
 		return err
 	}
-	logPath, err := controller.LogFile(worktree, command.App)
+	logPath, err := source.LogFile(stackName, command.App)
 	if err != nil {
 		return err
 	}
@@ -110,103 +115,98 @@ func (command *logsCommand) Run(ctx context.Context) error {
 	return logs.PrintMessages(ctx, logPath, command.Lines, command.Follow, format, os.Stdout)
 }
 
-type bootCommand struct {
-	Checkout string        `required:"" type:"existingdir" help:"Main checkout of the platform repo, whose devbox/ilot.yaml is read."`
-	Timeout  time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
-}
-
 type restartCommand struct {
-	Timeout time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
+	Apps      []string      `arg:"" help:"Apps to build again and restart."`
+	Timeout   time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
+	Selection selection     `embed:""`
 }
 
 func (command *restartCommand) Run(ctx context.Context) error {
-	controller, mainCheckout, err := newControllerForCurrentWorktree(command.Timeout, true)
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
-	return controller.Restart(ctx, mainCheckout)
+	return executor.RestartApps(ctx, stackName, command.Apps)
 }
 
 type lsCommand struct {
-	JSON bool `help:"Print the apps, the external services and the checkout of each repo per stack as one JSON object, for tools and agents."`
+	JSON      bool               `help:"Print the apps, the external services and the checkout of each repo per stack as one JSON object, for tools and agents."`
+	Selection workspaceSelection `embed:""`
 }
 
 type lsJSONOutput struct {
 	Home string `json:"home"`
-	ilotctl.Listing
-	CheckoutsByStack map[string]map[string]checkouts.Checkout `json:"checkouts"`
+	engine.Listing
+	CheckoutsByStack map[string]map[string]workspace.Worktree `json:"checkouts"`
 }
 
 type rmCommand struct {
-	Stack string `arg:"" help:"Stack to remove, as ilot ls shows it."`
+	Stack     string             `arg:"" help:"Stack to remove, as ilot ls shows it."`
+	Selection workspaceSelection `embed:""`
 }
 
-type cleanCommand struct{}
+type cleanCommand struct {
+	DryRun    bool               `help:"Print what ilot clean would remove, and remove nothing."`
+	Selection workspaceSelection `embed:""`
+}
 
 type startCommand struct {
-	Apps    []string      `arg:"" help:"Apps declared in devbox/ilot.yaml."`
-	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
-	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
+	Apps      []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml. With no app, ilot starts every app that the stack owns and that does not run."`
+	All       bool          `help:"Start every app that a stack of the workspace owns and that does not run, for example after the daemon crashed."`
+	NoDeps    bool          `help:"Start only the named apps, not their dependencies."`
+	Timeout   time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
+	Selection selection     `embed:""`
 }
 
 type stopCommand struct {
-	Apps []string `arg:"" help:"Apps declared in devbox/ilot.yaml."`
-}
-
-func (command *bootCommand) Run(ctx context.Context) error {
-	installAgentSkillOrWarn(os.UserHomeDir, os.Stderr)
-	mainCheckout, err := stack.Locate(command.Checkout)
-	if err != nil {
-		return err
-	}
-	if mainCheckout.Name != stack.MasterStackName {
-		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
-	}
-	currentWorkspace, err := loadCurrentWorkspace()
-	if err != nil {
-		return err
-	}
-	controller, err := newController(currentWorkspace, mainCheckout, command.Timeout)
-	if err != nil {
-		return err
-	}
-	return controller.Boot(ctx, mainCheckout)
+	Apps      []string  `arg:"" optional:"" help:"Apps declared in an ilot.yaml."`
+	All       bool      `help:"Stop every app that the stack owns."`
+	Selection selection `embed:""`
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	executor, _, err := newExecutorFor(ctx, command.Selection.selection(), time.Minute, baseStack)
+	if err != nil {
+		return err
+	}
+	listing, err := executor.List(ctx)
+	if err != nil {
+		return err
+	}
+	checkoutsByStack, err := executor.StackCheckouts()
 	if err != nil {
 		return err
 	}
 	if command.JSON {
-		controller.Output = os.Stderr
+		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: executor.Machine.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
 	}
-	listing, err := controller.List(ctx)
-	if err != nil {
-		return err
-	}
-	checkoutsByStack, err := controller.StackCheckouts()
-	if err != nil {
-		return err
-	}
-	if command.JSON {
-		return json.NewEncoder(os.Stdout).Encode(lsJSONOutput{Home: controller.HomeURL(), Listing: listing, CheckoutsByStack: checkoutsByStack})
-	}
-	fmt.Printf("home: %s\n\n", controller.HomeURL())
+	fmt.Printf("every URL: %s\n\n", executor.Machine.HomeURL())
 	table := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(table, "STACK\tAPP\tSTATUS\tPORTS\tURL")
+	hasUndeclared := false
 	for _, app := range listing.Apps {
 		var formattedPorts []string
 		for _, portName := range slices.Sorted(maps.Keys(app.Ports)) {
 			formattedPorts = append(formattedPorts, fmt.Sprintf("%s=%d", portName, app.Ports[portName]))
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", app.Stack, app.App, app.Status, strings.Join(formattedPorts, " "), app.URL)
+		status := app.Status
+		if app.Undeclared {
+			status += ", undeclared"
+			hasUndeclared = true
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", app.Stack, app.App, status, strings.Join(formattedPorts, " "), app.URL)
 	}
 	for _, externalService := range listing.ExternalServices {
 		fmt.Fprintf(table, "external\t%s\t%s\t%d\t\n", externalService.Name, externalService.Status, externalService.Port)
 	}
 	if err := table.Flush(); err != nil {
 		return err
+	}
+	if hasUndeclared {
+		fmt.Println("\nno ilot.yaml declares an app marked undeclared: it keeps its ports until ilot stop <app>, in its stack, removes it")
+	}
+	if listing.Restore != "" {
+		fmt.Printf("\napps that a stack owns are down: %s starts them again\n", listing.Restore)
 	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -216,13 +216,13 @@ func (command *lsCommand) Run(ctx context.Context) error {
 }
 
 // The main checkouts are the same for every stack, so only the worktrees of a stack say something.
-func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[string]checkouts.Checkout, homeDir string) error {
+func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[string]workspace.Worktree, homeDir string) error {
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	hasRows := false
 	for _, stackName := range slices.Sorted(maps.Keys(checkoutsByStack)) {
 		for _, repoName := range slices.Sorted(maps.Keys(checkoutsByStack[stackName])) {
 			checkout := checkoutsByStack[stackName][repoName]
-			if checkout.IsMainCheckout {
+			if checkout.IsMain {
 				continue
 			}
 			if !hasRows {
@@ -241,168 +241,291 @@ func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[st
 }
 
 func (command *rmCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	executor, _, err := newExecutorFor(ctx, command.Selection.selection(), time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
-	return controller.Remove(ctx, command.Stack)
+	if err := executor.Remove(ctx, command.Stack); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "removed stack %s\n", command.Stack)
+	return nil
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	currentWorkspace, _, err := selectedWorkspace(command.Selection.Workspace)
 	if err != nil {
 		return err
 	}
-	stacksWithoutCheckouts, err := controller.StacksWithoutCheckouts()
+	currentWorkspace, store, err := withBindings(currentWorkspace)
 	if err != nil {
 		return err
 	}
-	for _, stackName := range stacksWithoutCheckouts {
-		if err := controller.Remove(ctx, stackName); err != nil {
+	executor, err := newExecutor(ctx, currentWorkspace, store, workspace.BaseStackName, time.Minute)
+	if err != nil {
+		return err
+	}
+	return cleanStacks(ctx, os.Stdout, currentWorkspace, store, executor, command.DryRun)
+}
+
+// cleanStacks keeps a stack whose worktree was moved with git worktree move: it binds the stack to the new folder.
+// A dry run prints what a clean would do, and changes nothing.
+func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspace.Workspace, store state.Store, executor *engine.Executor, isDryRun bool) error {
+	verb := func(done, planned string) string {
+		if isDryRun {
+			return "would " + planned
+		}
+		return done
+	}
+	stacksWithoutWorktrees, err := executor.StacksWithoutWorktrees()
+	if err != nil {
+		return err
+	}
+	for _, stackName := range stacksWithoutWorktrees {
+		movedByRepo, err := currentWorkspace.MovedWorktrees(stackName)
+		if err != nil {
 			return err
 		}
-		fmt.Printf("removed %s\n", stackName)
+		for _, repoName := range slices.Sorted(maps.Keys(movedByRepo)) {
+			if !isDryRun {
+				if currentWorkspace, _, err = bindWorktree(ctx, store, currentWorkspace, movedByRepo[repoName], stackName); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintf(output, "%s %s: its worktree of %s moved to %s\n", verb("kept", "keep"), stackName, repoName, movedByRepo[repoName].Dir)
+		}
+		if len(movedByRepo) > 0 {
+			continue
+		}
+		current, err := store.Load()
+		if err != nil {
+			return err
+		}
+		var wantedApps []string
+		for appName, app := range current.Stacks(currentWorkspace.Name)[stackName].Apps {
+			if app.Wanted {
+				wantedApps = append(wantedApps, appName)
+			}
+		}
+		if !isDryRun {
+			if err := executor.Remove(ctx, stackName); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(output, "%s %s\n", verb("removed", "remove"), stackName)
+		slices.Sort(wantedApps)
+		for _, appName := range wantedApps {
+			fmt.Fprintf(output, "  %s %s\n", verb("stopped", "stop"), appName)
+		}
 	}
 	return nil
 }
 
 func (command *startCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(command.Timeout, false)
+	switch {
+	case command.All && len(command.Apps) > 0:
+		return errors.New("--all starts every app that a stack owns: name no app with it")
+	case command.All && command.Selection.Stack != "":
+		return errors.New("--all starts the apps of every stack: give no --stack with it")
+	case command.All:
+		executor, _, err := newExecutorFor(ctx, command.Selection, command.Timeout, baseStack)
+		if err != nil {
+			return err
+		}
+		return executor.StartAll(ctx)
+	case len(command.Apps) == 0:
+		executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolder)
+		if err != nil {
+			return err
+		}
+		return executor.StartStack(ctx, stackName)
+	}
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err
 	}
-	return controller.Start(ctx, worktree, command.Apps, ilotctl.StartOptions{SkipDependencies: command.NoDeps})
+	return executor.Start(ctx, stackName, command.Apps, engine.StartOptions{SkipDependencies: command.NoDeps})
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	switch {
+	case command.All && len(command.Apps) > 0:
+		return errors.New("--all stops every app that the stack owns: name no app with it")
+	case !command.All && len(command.Apps) == 0:
+		return errors.New("name the apps to stop, or give --all to stop every app that the stack owns")
+	}
+	executor, stackName, err := newExecutorFor(ctx, command.Selection, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
-	return controller.Stop(ctx, worktree, command.Apps)
+	if command.All {
+		return executor.StopStack(ctx, stackName)
+	}
+	return executor.Stop(ctx, stackName, command.Apps)
 }
 
-func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, stack.Worktree, error) {
-	currentDir, err := os.Getwd()
-	if err != nil {
-		return nil, stack.Worktree{}, err
-	}
-	currentWorkspace, err := loadCurrentWorkspace()
-	if err != nil {
-		return nil, stack.Worktree{}, err
-	}
-	worktree, err := worktreeForCommand(currentWorkspace, currentDir, isCrossStack, os.Stderr)
-	if err != nil {
-		return nil, stack.Worktree{}, err
-	}
-	controller, err := newController(currentWorkspace, worktree, readyTimeout)
-	return controller, worktree, err
-}
+// Which stack a command works on.
+type stackChoice int
 
-func worktreeForCommand(currentWorkspace workspace, currentDir string, isCrossStack bool, notes io.Writer) (stack.Worktree, error) {
-	if isCrossStack {
-		return platformMainCheckout(currentWorkspace)
-	}
-	location := currentWorkspace.locationOf(currentDir)
-	if location == outsideAnyCheckout {
-		fmt.Fprintln(notes, "not in a checkout: using the master stack")
-		return platformMainCheckout(currentWorkspace)
-	}
-	if location == insideHomeCheckout {
-		fmt.Fprintln(notes, "the home folder is a checkout, not a known repo: using the master stack")
-		return platformMainCheckout(currentWorkspace)
-	}
-	if _, err := checkouts.RepoOf(currentWorkspace.repoPaths, currentDir); err != nil {
-		return stack.Worktree{}, err
-	}
-	return stack.Locate(currentDir)
-}
+const (
+	// For a command that works on every stack.
+	baseStack stackChoice = iota
+	stackOfCurrentFolder
+	// For ilot start: the first start in a worktree binds the worktree to its stack.
+	stackOfCurrentFolderWithBinding
+)
 
-func loadCurrentWorkspace() (workspace, error) {
-	homeDir, err := os.UserHomeDir()
+func newExecutorFor(ctx context.Context, chosen selection, readyTimeout time.Duration, choice stackChoice) (*engine.Executor, string, error) {
+	currentWorkspace, worktree, err := selectedWorkspace(chosen.Workspace)
 	if err != nil {
-		return workspace{}, err
+		return nil, "", err
 	}
-	return loadWorkspace(homeDir)
-}
-
-func newController(currentWorkspace workspace, worktree stack.Worktree, readyTimeout time.Duration) (*ilotctl.Controller, error) {
-	if _, err := os.Stat(devboxMarkerFile); err != nil {
-		return nil, errors.New("ilot runs inside devbox only for now: ssh into devbox and run it there")
-	}
-	config, err := currentWorkspace.configForStack(worktree.Name)
+	currentWorkspace, store, err := withBindings(currentWorkspace)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	processComposeBinary, err := exec.LookPath("process-compose")
-	if err != nil {
-		return nil, errors.New("process-compose is not on PATH: install the version pinned in devbox/README.md")
-	}
-	routesDir, err := findRoutesDir()
-	if err != nil {
-		return nil, err
-	}
-	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
-	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
-	controller := &ilotctl.Controller{
-		Config:                  config,
-		Store:                   state.Store{RootDir: stateDir},
-		Supervisor:              processcompose.Client{Binary: processComposeBinary, StateDir: filepath.Join(stateDir, "process-compose"), Env: shellEnv},
-		RunBuild:                runBuild,
-		EnsureImage:             ensureImage,
-		IsPortFreeOnHost:        ports.IsFreeOnHost,
-		IsExternalServiceUp:     isListeningOnLocalhost,
-		CheckoutsForStack:       currentWorkspace.checkoutsForStack,
-		ConfigForStack:          currentWorkspace.configForStack,
-		UsesMise:                hasMiseConfig,
-		ReposNotCloned:          currentWorkspace.reposNotCloned(),
-		HostPath:                hostPathFor(currentWorkspace.homeDir, os.Getenv("LC_DEVBOX_LOGIN")),
-		EnsureTemporalNamespace: ensureTemporalNamespace(temporalAddress(config)),
-		DeleteTemporalNamespace: deleteTemporalNamespace(temporalAddress(config)),
-		Personal:                currentWorkspace.settings,
-		KeyringFile:             filepath.Join(currentWorkspace.homeDir, ".keyring"),
-		ShellEnv:                shellEnv,
-		Login:                   os.Getenv("LC_DEVBOX_LOGIN"),
-		RoutesDir:               routesDir,
-		BackendHost:             "devbox",
-		ProxyPort:               cmp.Or(os.Getenv("ILOT_PROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
-		ReadyTimeout:            readyTimeout,
-		ProgressInterval:        10 * time.Second,
-		Output:                  os.Stdout,
-	}
-	return controller, nil
-}
-
-func findRoutesDir() (string, error) {
-	if routesDir := os.Getenv("ILOT_ROUTES_DIR"); routesDir != "" {
-		return routesDir, nil
-	}
-	proxyContainer := "ilotproxy_" + os.Getenv("LC_DEVBOX_LOGIN")
-	mountsJSON, err := exec.Command("docker", "inspect", "--format", "{{json .Mounts}}", proxyContainer).Output()
-	if err != nil {
-		return "", fmt.Errorf("find the routes folder of %s (set ILOT_ROUTES_DIR to skip this): %w", proxyContainer, err)
-	}
-	return routesDirFromMounts(mountsJSON)
-}
-
-func routesDirFromMounts(mountsJSON []byte) (string, error) {
-	var mounts []struct {
-		Source      string `json:"Source"`
-		Destination string `json:"Destination"`
-	}
-	if err := json.Unmarshal(mountsJSON, &mounts); err != nil {
-		return "", fmt.Errorf("read proxy mounts: %w", err)
-	}
-	for _, mount := range mounts {
-		if mount.Destination == traefikRoutesMountPath {
-			return mount.Source, nil
+	stackName := workspace.BaseStackName
+	if choice != baseStack {
+		currentWorkspace, stackName, err = chosen.stackOf(ctx, store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding)
+		if err != nil {
+			return nil, "", err
 		}
 	}
-	return "", fmt.Errorf("the proxy container mounts nothing at %s", traefikRoutesMountPath)
+	executor, err := newExecutor(ctx, currentWorkspace, store, stackName, readyTimeout)
+	return executor, stackName, err
 }
 
+// sourceFor is for a command that only reads: it records no binding.
+func sourceFor(ctx context.Context, chosen selection) (engine.Source, string, error) {
+	currentWorkspace, worktree, err := selectedWorkspace(chosen.Workspace)
+	if err != nil {
+		return engine.Source{}, "", err
+	}
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return engine.Source{}, "", err
+	}
+	currentWorkspace, stackName, err := chosen.stackOf(ctx, store, currentWorkspace, worktree, false)
+	if err != nil {
+		return engine.Source{}, "", err
+	}
+	source, err := newSource(ctx, currentWorkspace, store, stackName)
+	return source, stackName, err
+}
+
+func findCurrentWorkspace() (workspace.Workspace, workspace.Worktree, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return workspace.Workspace{}, workspace.Worktree{}, err
+	}
+	return findWorkspaceOf(currentDir)
+}
+
+func findWorkspaceOf(dir string) (workspace.Workspace, workspace.Worktree, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return workspace.Workspace{}, workspace.Worktree{}, err
+	}
+	global, err := config.LoadGlobal(homeDir)
+	if err != nil {
+		return workspace.Workspace{}, workspace.Worktree{}, err
+	}
+	return workspace.Find(dir, homeDir, global, workspace.NewGit())
+}
+
+func stateDirOf(homeDir string) string {
+	return filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(homeDir, ".local", "state")), "ilot")
+}
+
+// newSource gives what a command of a stack reads: the state, the files of its checkouts and the login shell.
+// A configuration that cannot be read is an error for a command that renders, and the Source keeps it for the others.
+func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string) (engine.Source, error) {
+	stackConfig, configErr := currentWorkspace.ConfigForStack(stackName)
+	global := currentWorkspace.Global
+	captureShell := sync.OnceValues(func() (map[string]string, error) {
+		return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
+	})
+	_, proxyPort, err := net.SplitHostPort(global.Proxy.Listen)
+	if err != nil {
+		return engine.Source{}, err
+	}
+	currentUser, err := user.Current()
+	if err != nil {
+		return engine.Source{}, fmt.Errorf("find the name of the current user, for the User template: %w", err)
+	}
+	ilotBinary, err := os.Executable()
+	if err != nil {
+		return engine.Source{}, fmt.Errorf("find the ilot binary, which the watcher of an app runs: %w", err)
+	}
+	store.OnLockWait = func(holder string) {
+		sayWhoHoldsTheLock(holder)
+		auditLog.Info("state lock wait", "workspace", currentWorkspace.Name, "stack", stackName, "holder", holder)
+	}
+	ilotEnv := map[string]string{}
+	for _, key := range []string{"XDG_STATE_HOME", "XDG_CONFIG_HOME"} {
+		if value, isSet := os.LookupEnv(key); isSet {
+			ilotEnv[key] = value
+		}
+	}
+	return engine.Source{
+		Workspace:         currentWorkspace.Name,
+		Root:              currentWorkspace.RootDir,
+		Config:            stackConfig,
+		ConfigErr:         configErr,
+		Store:             store,
+		CheckoutsForStack: currentWorkspace.CheckoutsForStack,
+		ConfigForStack:    currentWorkspace.ConfigForStack,
+		ReposNotCloned:    currentWorkspace.ReposNotCloned(),
+		Settings:          currentWorkspace.Settings,
+		Machine:           plan.Machine{StateDir: store.RootDir, Domain: global.Proxy.Domain, ProxyPort: proxyPort, Login: currentUser.Username, ShellEnv: nil, SessionEnv: nil, IlotBinary: ilotBinary, IlotEnv: ilotEnv},
+		ShellEnv: func() (map[string]string, map[string]string, error) {
+			environment, err := captureShell()
+			if err != nil {
+				return nil, nil, err
+			}
+			stable, session := shellenv.SplitSession(environment)
+			return stable, session, nil
+		},
+	}, nil
+}
+
+func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*engine.Executor, error) {
+	source, err := newSource(ctx, currentWorkspace, store, stackName)
+	if err != nil {
+		return nil, err
+	}
+	global := currentWorkspace.Global
+	logger := auditLog.With("workspace", currentWorkspace.Name, "stack", stackName)
+	return &engine.Executor{
+		Source:              source,
+		Supervisor:          engine.AuditedSupervisor{ProcessSupervisor: newDaemonSupervisor(source.Machine.IlotBinary, store.RootDir, global.Proxy.Listen), Logger: logger},
+		RunBuild:            runBuild,
+		EnsureImage:         ensureImage,
+		RemoveContainer:     removeContainer,
+		IsPortFreeOnHost:    ports.IsFreeOnLoopback,
+		IsExternalServiceUp: isListeningOnLocalhost,
+		PortRange:           ports.Range{First: global.Ports.First, Last: global.Ports.Last},
+		ReadyTimeout:        readyTimeout,
+		ProgressInterval:    10 * time.Second,
+		Output:              os.Stderr,
+		Data:                os.Stdout,
+		Logger:              logger,
+	}, nil
+}
+
+// newDaemonSupervisor gives the daemon of a state folder, which it starts with the proxy address of the global file.
+func newDaemonSupervisor(ilotBinary, stateDir, proxyListen string) *engine.DaemonSupervisor {
+	daemonPaths := daemon.Paths{StateDir: stateDir}
+	startDaemon := func() error {
+		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
+		return err
+	}
+	return &engine.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr}
+}
+
+// The same shell as the daemon gives an app, so a build and a run command read the same syntax.
 func runBuild(ctx context.Context, workingDir, shellCommand string, environ []string) error {
-	command := exec.CommandContext(ctx, "bash", "-c", shellCommand)
+	command := exec.CommandContext(ctx, "/bin/sh", "-c", shellCommand)
 	command.Dir = workingDir
 	command.Env = environ
 	command.Stdout = os.Stderr
@@ -416,6 +539,14 @@ func ensureImage(ctx context.Context, image string) (string, error) {
 	}
 	fmt.Fprintln(os.Stderr, "pulling "+image)
 	return runCapturingOutput(ctx, "docker", "pull", image)
+}
+
+func removeContainer(ctx context.Context, name string) error {
+	output, err := exec.CommandContext(ctx, "docker", "rm", "--force", name).CombinedOutput()
+	if err != nil && !strings.Contains(string(output), "No such container") {
+		return fmt.Errorf("docker rm --force %s: %w: %s", name, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func runCapturingOutput(ctx context.Context, name string, arguments ...string) (string, error) {
@@ -436,11 +567,27 @@ func isListeningOnLocalhost(port int) bool {
 	return connection.Close() == nil
 }
 
+// commandPath is the command without the placeholders of its arguments, which kong's Command adds: "start", not "start <apps>".
+func commandPath(commandLine *kong.Context) string {
+	var names []string
+	for _, step := range commandLine.Path {
+		if step.Command != nil {
+			names = append(names, step.Command.Name)
+		}
+	}
+	return strings.Join(names, " ")
+}
+
 func main() {
-	runCheckoutBinaryInstead(context.Background())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
-	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary(), "artifactory_host": defaultArtifactoryHost})
-	commandLine.FatalIfErrorf(commandLine.Run())
+	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the apps of each git worktree behind one local proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
+	closeAuditLog := openAuditLog(commandPath(commandLine))
+	err := commandLine.Run()
+	if err != nil {
+		auditLog.Warn("command failed", "error", err.Error())
+	}
+	closeAuditLog()
+	commandLine.FatalIfErrorf(err)
 }

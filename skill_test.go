@@ -1,13 +1,16 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alecthomas/kong"
+	"gopkg.in/yaml.v3"
 )
 
 func installedSkillPath(homeDir string) string {
@@ -17,7 +20,7 @@ func installedSkillPath(homeDir string) string {
 func TestInstallAgentSkillWritesTheEmbeddedFile(t *testing.T) {
 	homeDir := t.TempDir()
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -29,7 +32,7 @@ func TestInstallAgentSkillWritesTheEmbeddedFile(t *testing.T) {
 
 func TestInstallAgentSkillLeavesAnIdenticalFileAlone(t *testing.T) {
 	homeDir := t.TempDir()
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatal(err)
 	}
 	longAgo := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -37,7 +40,7 @@ func TestInstallAgentSkillLeavesAnIdenticalFileAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -57,7 +60,7 @@ func TestInstallAgentSkillKeepsOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -66,15 +69,21 @@ func TestInstallAgentSkillKeepsOtherFiles(t *testing.T) {
 	}
 }
 
-func TestAgentSkillPreApprovesEveryDevCommand(t *testing.T) {
+func TestAgentSkillPreApprovesOnlyTheCommandsOfDailyWork(t *testing.T) {
 	frontmatter, _, isFound := strings.Cut(strings.TrimPrefix(agentSkill, "---\n"), "\n---\n")
 	if !strings.HasPrefix(agentSkill, "---\n") || !isFound {
 		t.Fatalf("skill has no frontmatter:\n%s", agentSkill)
 	}
-	for _, wantLine := range []string{"name: ilot", "allowed-tools: Bash(ilot:*)"} {
-		if !strings.Contains(frontmatter, wantLine) {
-			t.Errorf("frontmatter lacks %q:\n%s", wantLine, frontmatter)
-		}
+	var fields struct {
+		Name         string `yaml:"name"`
+		AllowedTools string `yaml:"allowed-tools"`
+	}
+	if err := yaml.Unmarshal([]byte(frontmatter), &fields); err != nil {
+		t.Fatalf("frontmatter is not YAML: %v\n%s", err, frontmatter)
+	}
+	want := []string{"Bash(ilot ls:*)", "Bash(ilot apps:*)", "Bash(ilot logs:*)", "Bash(ilot env:*)", "Bash(ilot check:*)", "Bash(ilot start:*)", "Bash(ilot restart:*)", "Bash(ilot stop:*)"}
+	if fields.Name != "ilot" || !slices.Equal(strings.Split(fields.AllowedTools, ", "), want) {
+		t.Errorf("name = %q, allowed-tools = %q; want ilot and %v", fields.Name, fields.AllowedTools, want)
 	}
 }
 
@@ -91,26 +100,53 @@ func TestAgentSkillNamesEveryCommand(t *testing.T) {
 	}
 }
 
-func TestInstallAgentSkillOrWarnPrintsOneWarningWhenTheFolderCannotBeWritten(t *testing.T) {
+func TestInstallAgentSkillFailsWhenTheFolderCannotBeWritten(t *testing.T) {
 	homeDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude"), []byte("a file where the folder must be\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var warnings strings.Builder
 
-	installAgentSkillOrWarn(func() (string, error) { return homeDir, nil }, &warnings)
-
-	if lines := strings.Split(strings.TrimSpace(warnings.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "warning: install the ilot skill: ") {
-		t.Fatalf("warnings = %q, want one warning line", warnings.String())
+	if _, err := installAgentSkill(homeDir); err == nil {
+		t.Fatal("installAgentSkill = nil, want an error")
 	}
 }
 
-func TestInstallAgentSkillOrWarnPrintsOneWarningWithoutAHomeFolder(t *testing.T) {
-	var warnings strings.Builder
+func TestSkillHasAPrintAndAnInstallCommand(t *testing.T) {
+	for _, subcommand := range []string{"print", "install"} {
+		parser, err := kong.New(&cli{}, kong.Vars{"version": "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := parser.Parse([]string{"skill", subcommand})
+		if err != nil || parsed.Command() != "skill "+subcommand {
+			t.Errorf("parse skill %s = %v, %v", subcommand, parsed, err)
+		}
+	}
+}
 
-	installAgentSkillOrWarn(func() (string, error) { return "", errors.New("$HOME is not defined") }, &warnings)
+func runCommandLine(t *testing.T, arguments ...string) error {
+	t.Helper()
+	parsed, err := parse(t, arguments...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Run()
+}
 
-	if warnings.String() != "warning: install the ilot skill: $HOME is not defined\n" {
-		t.Fatalf("warnings = %q, want one warning naming the cause", warnings.String())
+func TestSkillPrintAndSkillInstallRunAgainstTheHomeFolder(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	printed, _, err := captureOutput(t, func() error { return runCommandLine(t, "skill", "print") })
+	if err != nil || printed != agentSkill {
+		t.Fatalf("ilot skill print = %d bytes, %v; want the embedded skill", len(printed), err)
+	}
+
+	said, _, err := captureOutput(t, func() error { return runCommandLine(t, "skill", "install") })
+	if err != nil || !strings.Contains(said, installedSkillPath(homeDir)) {
+		t.Fatalf("ilot skill install said %q, %v; want the path of the skill", said, err)
+	}
+	if installed, err := os.ReadFile(installedSkillPath(homeDir)); err != nil || string(installed) != agentSkill {
+		t.Errorf("installed skill = %d bytes, %v; want the embedded skill", len(installed), err)
 	}
 }

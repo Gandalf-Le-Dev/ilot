@@ -1,0 +1,20 @@
+repos:
+  - repo: local
+    hooks:
+      - id: no-secrets
+        name: reject staged secrets
+        language: pygrep
+        entry: 'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|eyJ[A-Za-z0-9_-]{10,}\.|-----BEGIN [A-Z ]*PRIVATE KEY-----'
+        types: [text]
+      - id: gofmt
+        name: gofmt
+        language: system
+        entry: sh -c 'test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }'
+        types: [go]
+        pass_filenames: false
+      - id: go-vet
+        name: go vet
+        language: system
+        entry: go vet ./...
+        types: [go]
+        pass_filenames: false

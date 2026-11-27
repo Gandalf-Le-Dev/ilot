@@ -1,0 +1,84 @@
+package plan
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+)
+
+func TestCheckRenderingAcceptsAValidConfig(t *testing.T) {
+	if problems := CheckRendering("payments", []string{"studio"}, testConfig()); len(problems) != 0 {
+		t.Fatalf("CheckRendering = %v, want no problem", errors.Join(problems...))
+	}
+}
+
+func TestCheckRenderingReportsATemplateTypoWithItsApp(t *testing.T) {
+	merged := testConfig()
+	merged.Apps["typo-api"] = config.App{Run: `api --port={{port "router" "htp"}}`}
+
+	problems := CheckRendering("payments", []string{"studio"}, merged)
+
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "typo-api") || !strings.Contains(problems[0].Error(), "htp") {
+		t.Fatalf("CheckRendering = %v, want one problem naming typo-api and htp", errors.Join(problems...))
+	}
+}
+
+func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
+	merged := testConfig()
+	merged.Apps["stoppable"] = config.App{Run: "docker run --name stoppable nginx", Stop: "docker stop {{.Stak}}"}
+
+	problems := CheckRendering("payments", []string{"studio"}, merged)
+
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "stoppable") || !strings.Contains(problems[0].Error(), "Stak") {
+		t.Fatalf("CheckRendering = %v, want one problem naming stoppable and Stak", errors.Join(problems...))
+	}
+}
+
+func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
+	merged := testConfig()
+	merged.Apps["mounting"] = config.App{
+		Container: config.Container{Image: "registry/mounting:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{`{{repo "nowhere"}}`: "/src"}},
+	}
+
+	problems := CheckRendering("payments", []string{"studio"}, merged)
+
+	if len(problems) == 0 || !strings.Contains(errors.Join(problems...).Error(), "nowhere") {
+		t.Fatalf("CheckRendering = %v, want a problem naming the unknown repo", errors.Join(problems...))
+	}
+}
+
+func TestCheckRenderingReportsEveryBrokenTemplateOfAnApp(t *testing.T) {
+	merged := testConfig()
+	merged.Apps["many-typos"] = config.App{
+		Env: map[string]string{"GOOD": "{{.Ports.http}}", "FIRST": `{{port "ghost" "http"}}`, "SECOND": "{{.Ports.nope}}"},
+		Container: config.Container{Image: "registry/many:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{
+			`{{repo "nowhere"}}`:   "/a",
+			`{{repo "elsewhere"}}`: "/b",
+		}, Args: []string{"--label={{.NoSuchField}}"}},
+	}
+
+	problems := CheckRendering("payments", []string{"studio"}, merged)
+
+	if len(problems) != 5 {
+		t.Fatalf("CheckRendering = %d problems, want 5 (two env values, two mounts, one flag of docker run):\n%v", len(problems), errors.Join(problems...))
+	}
+	for _, problem := range problems {
+		if !strings.HasPrefix(problem.Error(), "many-typos: ") {
+			t.Errorf("problem %q does not start with its app", problem)
+		}
+	}
+}
+
+func TestCheckRenderingTagsEachProblemWithTheRepoOfItsApp(t *testing.T) {
+	merged := testConfig()
+	merged.Apps["studio-typo"] = config.App{Repo: "studio", Run: `api --port={{port "router" "htp"}}`}
+
+	problems := CheckRendering("payments", []string{"studio"}, merged)
+
+	var renderProblem RenderProblem
+	if len(problems) != 1 || !errors.As(problems[0], &renderProblem) || renderProblem.Repo != "studio" {
+		t.Fatalf("CheckRendering = %v, want one RenderProblem of repo studio", errors.Join(problems...))
+	}
+}

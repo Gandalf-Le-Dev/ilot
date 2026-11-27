@@ -1,0 +1,92 @@
+package main
+
+import (
+	"context"
+	"io"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
+)
+
+// A supervisor that calls every process ready, for a test of what a command does before it reaches the daemon.
+type readySupervisor struct {
+	started map[string]bool
+	dirs    map[string]string
+}
+
+func (supervisor *readySupervisor) Put(_ context.Context, spec engine.ProcessSpec) error {
+	supervisor.started[spec.Name] = true
+	if supervisor.dirs != nil {
+		supervisor.dirs[spec.Name] = spec.Dir
+	}
+	return nil
+}
+
+func (supervisor *readySupervisor) Delete(context.Context, string) error { return nil }
+
+func (supervisor *readySupervisor) Up(context.Context) error { return nil }
+
+func (supervisor *readySupervisor) Restart(context.Context, engine.ProcessSpec) error { return nil }
+
+func (supervisor *readySupervisor) Processes(context.Context) (map[string]daemon.Process, error) {
+	return map[string]daemon.Process{}, nil
+}
+
+func (supervisor *readySupervisor) WaitReady(context.Context, string, time.Duration) error {
+	return nil
+}
+
+func (supervisor *readySupervisor) IsUp(context.Context) bool { return true }
+
+func (supervisor *readySupervisor) SetRoutes(context.Context, []daemon.Route) error { return nil }
+
+func (supervisor *readySupervisor) Shutdown(context.Context) error { return nil }
+
+func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
+	codeDir := canonicalTempDir(t)
+	gitRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n  jobs: ../jobs\nstack:\n  pattern: '[A-Z]+-[0-9]+'\napps:\n  api: {run: api, ports: [http], depends_on: [worker]}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  front: {run: front, depends_on: [api]}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "jobs"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  worker: {run: worker}\n"})
+	webWorktreeDir := filepath.Join(codeDir, "web-retry")
+	runGitInTest(t, filepath.Join(codeDir, "web"), "worktree", "add", "-q", "-b", "TASK-1-retry", webWorktreeDir)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	git, gitProcessCount := countingGit()
+
+	currentWorkspace, worktree, err := workspace.Find(webWorktreeDir, t.TempDir(), testGlobal, git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentWorkspace, stackName, err := stackOfWorktree(t.Context(), store, currentWorkspace, worktree, true, io.Discard)
+	if err != nil || stackName != "task-1" {
+		t.Fatalf("stackOfWorktree = %q, %v; want task-1", stackName, err)
+	}
+	executor, err := newExecutor(t.Context(), currentWorkspace, store, stackName, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor := &readySupervisor{started: map[string]bool{}}
+	executor.Supervisor = supervisor
+	executor.ShellEnv = func() (map[string]string, map[string]string, error) {
+		return map[string]string{}, map[string]string{}, nil
+	}
+	executor.Output = io.Discard
+	if err := executor.Start(t.Context(), stackName, []string{"front"}, engine.StartOptions{SkipDependencies: false}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(supervisor.started) != 3 {
+		t.Fatalf("the start reached %v, want front in task-1, with api and worker in base", supervisor.started)
+	}
+	if *gitProcessCount > 5 {
+		t.Errorf("ilot start ran %d git processes in a workspace of 3 repos, want 5 at most", *gitProcessCount)
+	}
+	t.Logf("git processes: %d", *gitProcessCount)
+}

@@ -1,0 +1,17 @@
+stack:
+  pattern: '[A-Za-z]+-[0-9]+'
+apps:
+  hello:
+    build: go build -o {{.BinDir}}/hello .
+    run: "{{.BinDir}}/hello --port={{.Ports.http}}"
+    env:
+      STACK: "{{.Stack}}"
+    ports: [http]
+    route: http
+    ready: {path: /health}
+  web:
+    container:
+      image: nginx:alpine
+      ports: {http: 80}
+    route: http
+    ready: {path: /}

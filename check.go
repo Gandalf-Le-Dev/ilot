@@ -3,17 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
-	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type checkCommand struct {
@@ -21,30 +19,34 @@ type checkCommand struct {
 }
 
 func (command *checkCommand) Run() error {
-	currentDir, err := os.Getwd()
+	checkedDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	var currentWorkspace *workspace
-	loadedWorkspace, err := loadCurrentWorkspace()
-	switch {
-	case err == nil:
-		currentWorkspace = &loadedWorkspace
-	case command.Path == "":
-		return err
-	}
-	checkedRepo, checkedFile, err := configFileToCheck(currentWorkspace, currentDir, command.Path)
-	if err != nil {
-		return err
-	}
-	otherFileByRepo := map[string]string{}
-	if currentWorkspace != nil {
-		otherFileByRepo, err = otherConfigFiles(*currentWorkspace, currentDir, checkedRepo)
-		if err != nil {
+	requestedFile := ""
+	if command.Path != "" {
+		if requestedFile, err = workspace.Canonical(command.Path); err != nil {
 			return err
 		}
+		checkedDir = filepath.Dir(requestedFile)
 	}
-	problems := checkConfigFile(checkedRepo, checkedFile, otherFileByRepo)
+	currentWorkspace, checkout, err := findWorkspaceOf(checkedDir)
+	if err != nil {
+		return err
+	}
+	// A check must work where the state cannot be read, and then the branch names the stack.
+	if boundWorkspace, _, err := withBindings(currentWorkspace); err == nil {
+		currentWorkspace = boundWorkspace
+	}
+	checkedFile, otherFileByRepo, err := configFilesToCheck(currentWorkspace, checkout, requestedFile)
+	if err != nil {
+		return err
+	}
+	problems, warnings := checkConfigFile(currentWorkspace.Name, slices.Sorted(maps.Keys(currentWorkspace.RepoPaths)), currentWorkspace.Global.Ports, checkout.Repo, checkedFile, otherFileByRepo)
+	warnings = append(warnings, unknownAppsOfTheGlobalFile(currentWorkspace.Name, currentWorkspace.Settings, checkedFile, otherFileByRepo)...)
+	for _, warning := range warnings {
+		fmt.Fprintln(os.Stderr, "warning: "+warning)
+	}
 	for _, problem := range problems {
 		fmt.Fprintln(os.Stderr, problem)
 	}
@@ -58,114 +60,87 @@ func (command *checkCommand) Run() error {
 	return nil
 }
 
-func checkConfigFile(checkedRepo, checkedFile string, otherFileByRepo map[string]string) []error {
+func checkConfigFile(workspaceName string, repoNames []string, allocatedPorts config.PortRange, checkedRepo, checkedFile string, otherFileByRepo map[string]string) (problems []error, warnings []string) {
 	fileByRepo := map[string]string{checkedRepo: checkedFile}
 	for repoName, configFile := range otherFileByRepo {
 		if repoName != checkedRepo {
 			fileByRepo[repoName] = configFile
 		}
 	}
-	configByRepo := map[string]appconfig.Config{}
-	var problems []error
+	configByRepo := map[string]config.Config{}
 	for _, repoName := range slices.Sorted(maps.Keys(fileByRepo)) {
-		config, err := appconfig.Parse(fileByRepo[repoName])
+		repoConfig, err := config.Parse(fileByRepo[repoName])
 		if err != nil {
 			problems = append(problems, err)
 			continue
 		}
-		configByRepo[repoName] = config
+		configByRepo[repoName] = repoConfig
 	}
 	if len(problems) > 0 {
-		return problems
+		return problems, nil
 	}
-	merged, err := appconfig.Merge(configByRepo)
+	merged, err := config.Merge(configByRepo, allocatedPorts)
 	if err != nil {
 		mergedFiles := slices.Sorted(maps.Values(fileByRepo))
 		problems = append(problems, fmt.Errorf("%s: %w", strings.Join(mergedFiles, " + "), err))
 	}
-	for _, problem := range ilotctl.CheckRendering(merged) {
-		var renderProblem ilotctl.RenderProblem
-		if errors.As(problem, &renderProblem) {
+	for _, problem := range plan.CheckRendering(workspaceName, repoNames, merged) {
+		if renderProblem, isRenderProblem := errors.AsType[plan.RenderProblem](problem); isRenderProblem {
 			problem = fmt.Errorf("%s: %w", fileByRepo[renderProblem.Repo], problem)
 		}
 		problems = append(problems, problem)
 	}
-	return problems
+	return problems, plan.CheckWarnings(workspaceName, merged)
 }
 
-// A nil workspace is CI: no repo layout, so a file is known only by its own repos: list.
-func configFileToCheck(currentWorkspace *workspace, currentDir, requestedPath string) (repoName, configFile string, err error) {
-	if requestedPath != "" {
-		return repoOfConfigFile(currentWorkspace, requestedPath)
-	}
-	if currentWorkspace.locationOf(currentDir) != insideCheckout {
-		mainCheckout, err := platformMainCheckout(*currentWorkspace)
+// The global file can name an app that only another stack declares, so an unknown app is a warning and not a problem.
+func unknownAppsOfTheGlobalFile(workspaceName string, settings config.WorkspaceSettings, checkedFile string, otherFileByRepo map[string]string) []string {
+	isDeclared := map[string]bool{}
+	for _, configFile := range append(slices.Collect(maps.Values(otherFileByRepo)), checkedFile) {
+		repoConfig, err := config.Parse(configFile)
 		if err != nil {
-			return "", "", err
+			return nil
 		}
-		return appconfig.DefaultRepo, filepath.Join(mainCheckout.WorktreeDir, platformConfigPath), nil
+		for appName := range repoConfig.Apps {
+			isDeclared[appName] = true
+		}
 	}
-	repoName, err = checkouts.RepoOf(currentWorkspace.repoPaths, currentDir)
-	if err != nil {
-		return "", "", err
+	var warnings []string
+	for _, appName := range slices.Sorted(maps.Keys(settings.Apps)) {
+		if !isDeclared[appName] {
+			warnings = append(warnings, fmt.Sprintf("%s: workspaces.%s.apps.%s gives env to an app that no %s of this stack declares", config.GlobalFileShown(), workspaceName, appName, config.FileName))
+		}
 	}
-	checkout, err := stack.Locate(currentDir)
-	if err != nil {
-		return "", "", err
-	}
-	relativeConfigPath := currentWorkspace.repoConfigs[repoName].Config
-	if relativeConfigPath == "" {
-		return "", "", fmt.Errorf("repo %s has no config file in the repos: list of %s", repoName, platformConfigPath)
-	}
-	return repoName, filepath.Join(checkout.WorktreeDir, relativeConfigPath), nil
+	return warnings
 }
 
-func repoOfConfigFile(currentWorkspace *workspace, requestedPath string) (repoName, configFile string, err error) {
-	configFile, err = filepath.Abs(requestedPath)
-	if err != nil {
-		return "", "", err
-	}
-	if currentWorkspace != nil {
-		if repoName, err := checkouts.RepoOf(currentWorkspace.repoPaths, filepath.Dir(configFile)); err == nil {
-			return repoName, configFile, nil
+// configFilesToCheck gives the file to check and the files that the stack of its checkout merges it with.
+// With no requested file, the checked file is the one that the checkout reads: its own, else the one of the main checkout.
+func configFilesToCheck(currentWorkspace workspace.Workspace, checkout workspace.Worktree, requestedFile string) (checkedFile string, otherFileByRepo map[string]string, err error) {
+	checkedFile = requestedFile
+	if checkedFile == "" {
+		ownFile, hasFile := workspace.ConfigFileOf(checkout)
+		if !hasFile {
+			return "", nil, fmt.Errorf("the repo %s has no %s in %s", checkout.Repo, config.FileName, checkout.Dir)
 		}
+		checkedFile = ownFile
 	}
-	config, err := appconfig.Parse(configFile)
+	stackName, _, err := currentWorkspace.StackOf(checkout)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
-	if len(config.Repos) == 0 {
-		return "", "", fmt.Errorf("%s is in no checkout that ilot knows and has no repos: list, so ilot cannot tell its repo", configFile)
+	checkoutByRepo, err := currentWorkspace.CheckoutsForStack(stackName)
+	if err != nil {
+		return "", nil, err
 	}
-	return appconfig.DefaultRepo, configFile, nil
-}
-
-func otherConfigFiles(currentWorkspace workspace, currentDir, checkedRepo string) (map[string]string, error) {
-	stackName := stack.MasterStackName
-	if currentWorkspace.locationOf(currentDir) == insideCheckout {
-		if _, err := checkouts.RepoOf(currentWorkspace.repoPaths, currentDir); err == nil {
-			checkout, err := stack.Locate(currentDir)
-			if err != nil {
-				return nil, err
-			}
-			stackName = checkout.Name
-		}
-	}
-	checkoutByRepo, err := currentWorkspace.checkoutsForStack(stackName)
-	if err != nil && !checkouts.IsSeveralWorktrees(err) {
-		return nil, err
-	}
-	fileByRepo := map[string]string{}
-	for repoName, checkout := range checkoutByRepo {
-		relativeConfigPath := currentWorkspace.repoConfigs[repoName].Config
-		if repoName == checkedRepo || relativeConfigPath == "" {
+	otherFileByRepo = map[string]string{}
+	for repoName, otherCheckout := range checkoutByRepo {
+		if repoName == checkout.Repo {
 			continue
 		}
-		configFile := filepath.Join(checkout.Dir, relativeConfigPath)
-		if _, err := os.Stat(configFile); errors.Is(err, fs.ErrNotExist) {
-			continue
+		if otherFile, hasFile := workspace.ConfigFileOf(otherCheckout); hasFile {
+			otherFileByRepo[repoName] = otherFile
 		}
-		fileByRepo[repoName] = configFile
 	}
-	return fileByRepo, nil
+	return checkedFile, otherFileByRepo, nil
 }

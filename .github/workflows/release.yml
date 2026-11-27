@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  tap-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that the tap token is set and can push
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+            echo "::error::the repository secret HOMEBREW_TAP_GITHUB_TOKEN is empty: GoReleaser would publish the release and then fail to push the cask"
+            exit 1
+          fi
+          can_push=$(GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN" gh api repos/Gandalf-Le-Dev/homebrew-tap --jq .permissions.push || echo false)
+          if [ "$can_push" != "true" ]; then
+            echo "::error::HOMEBREW_TAP_GITHUB_TOKEN cannot push to Gandalf-Le-Dev/homebrew-tap: renew it or give it write access"
+            exit 1
+          fi
+
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: [tap-token, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

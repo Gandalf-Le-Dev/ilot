@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,11 +11,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 type appsCommand struct {
-	JSON bool `help:"Print the apps and the external services as one JSON object, for tools and agents."`
+	JSON      bool      `help:"Print the apps and the external services as one JSON object, for tools and agents."`
+	Selection selection `embed:""`
 }
 
 type declaredServices struct {
@@ -34,31 +36,31 @@ type declaredExternalService struct {
 	Port int    `json:"port"`
 }
 
-func (command *appsCommand) Run() error {
-	currentDir, err := os.Getwd()
+func (command *appsCommand) Run(ctx context.Context) error {
+	currentWorkspace, worktree, err := selectedWorkspace(command.Selection.Workspace)
 	if err != nil {
 		return err
 	}
-	currentWorkspace, err := loadCurrentWorkspace()
+	currentWorkspace, store, err := withBindings(currentWorkspace)
 	if err != nil {
 		return err
 	}
-	worktree, err := worktreeForCommand(currentWorkspace, currentDir, false, os.Stderr)
+	currentWorkspace, stackName, err := command.Selection.stackOf(ctx, store, currentWorkspace, worktree, false)
 	if err != nil {
 		return err
 	}
-	config, err := currentWorkspace.configForStack(worktree.Name)
+	config, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return err
 	}
-	services := declaredServicesOf(worktree.Name, config)
+	services := declaredServicesOf(stackName, config)
 	if command.JSON {
 		return json.NewEncoder(os.Stdout).Encode(services)
 	}
 	return printDeclaredServices(os.Stdout, services)
 }
 
-func declaredServicesOf(stackName string, config appconfig.Config) declaredServices {
+func declaredServicesOf(stackName string, config config.Config) declaredServices {
 	services := declaredServices{Stack: stackName, Apps: []declaredApp{}, ExternalServices: []declaredExternalService{}}
 	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[appName]
