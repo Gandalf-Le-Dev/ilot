@@ -1,6 +1,9 @@
 package workspace
 
 import (
+	"bytes"
+	"errors"
+	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
@@ -54,5 +57,8 @@ func runGit(dir string, arguments ...string) (string, error) {
 	command := exec.Command("git", append([]string{"-C", dir}, arguments...)...)
 	command.Env = environmentWithoutRepositoryOverrides(command.Environ())
 	output, err := command.Output()
+	if exitError, isExitError := errors.AsType[*exec.ExitError](err); isExitError && len(bytes.TrimSpace(exitError.Stderr)) > 0 {
+		err = fmt.Errorf("%w: %s", err, bytes.TrimSpace(exitError.Stderr))
+	}
 	return string(output), err
 }
