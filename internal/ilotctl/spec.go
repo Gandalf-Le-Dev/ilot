@@ -11,33 +11,36 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 func (controller *Controller) binDir(stackName string) string {
-	return filepath.Join(controller.Store.StackDir(stackName), "bin")
+	return filepath.Join(controller.StackDir(stackName), "bin")
 }
 
 func (controller *Controller) LogFile(stackName string, appName string) (string, error) {
-	appInstances, err := controller.instancesOf(stackName, []string{appName})
+	snapshot, _ := controller.snapshotOf(state.New(), stackName)
+	appInstances, err := snapshot.Instances(stackName, []string{appName})
 	if err != nil {
 		return "", err
 	}
 	return controller.logFile(appInstances[0]), nil
 }
 
-func (controller *Controller) logFile(appInstance instance) string {
-	return filepath.Join(controller.Store.StackDir(appInstance.stackName), "logs", appInstance.appName+".log")
+func (controller *Controller) logFile(appInstance plan.Instance) string {
+	return filepath.Join(controller.StackDir(appInstance.Stack), "logs", appInstance.App+".log")
 }
 
-func (controller *Controller) processSpec(stacks stackSet, appInstance instance) (ProcessSpec, error) {
-	envEntries, err := controller.environmentOf(stacks, appInstance)
+func (controller *Controller) processSpec(snapshot plan.Snapshot, appInstance plan.Instance) (ProcessSpec, error) {
+	envEntries, err := controller.environmentOf(snapshot, appInstance)
 	if err != nil {
 		return ProcessSpec{}, err
 	}
 	// The daemon gives a process this environment and nothing else.
 	env := map[string]string{}
 	var command string
-	if controller.isContainer(appInstance) {
+	if controller.isContainer(snapshot, appInstance) {
 		// The docker command needs the shell values, for example PATH and HOME. The image gets only the -e values.
 		for _, entry := range envEntries {
 			if entry.Source == sourceShell {
@@ -45,9 +48,9 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 			}
 		}
 		envEntries = containerEnvEntries(envEntries)
-		command, err = controller.containerCommand(stacks, appInstance, envEntries)
+		command, err = controller.containerCommand(snapshot, appInstance, envEntries)
 	} else {
-		command, err = controller.processCommand(stacks, appInstance)
+		command, err = controller.processCommand(snapshot, appInstance)
 	}
 	if err != nil {
 		return ProcessSpec{}, err
@@ -58,11 +61,11 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 	if err := os.MkdirAll(filepath.Dir(controller.logFile(appInstance)), 0o700); err != nil {
 		return ProcessSpec{}, err
 	}
-	workingDir, err := controller.workingDir(stacks, appInstance)
+	workingDir, err := controller.workingDir(snapshot, appInstance)
 	if err != nil {
 		return ProcessSpec{}, err
 	}
-	shutdownCommand, err := controller.shutdownCommand(stacks, appInstance)
+	shutdownCommand, err := controller.shutdownCommand(snapshot, appInstance)
 	if err != nil {
 		return ProcessSpec{}, err
 	}
@@ -74,51 +77,51 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 			Env:     env,
 			LogFile: controller.logFile(appInstance),
 			Stop:    shutdownCommand,
-			Ready:   controller.readyProbe(stacks, appInstance),
+			Ready:   controller.readyProbe(snapshot, appInstance),
 		},
 	}, nil
 }
 
-func (controller *Controller) processCommand(stacks stackSet, appInstance instance) (string, error) {
-	command, err := controller.renderTemplate(stacks, appInstance, controller.app(appInstance).Run)
+func (controller *Controller) processCommand(snapshot plan.Snapshot, appInstance plan.Instance) (string, error) {
+	command, err := controller.renderTemplate(snapshot, appInstance, snapshot.App(appInstance).Run)
 	if err != nil {
 		return "", err
 	}
-	return controller.wrapped(appInstance, command), nil
+	return controller.wrapped(snapshot, appInstance, command), nil
 }
 
-func (controller *Controller) shutdownCommand(stacks stackSet, appInstance instance) (string, error) {
-	if controller.isContainer(appInstance) {
+func (controller *Controller) shutdownCommand(snapshot plan.Snapshot, appInstance plan.Instance) (string, error) {
+	if controller.isContainer(snapshot, appInstance) {
 		return controller.containerStopCommand(appInstance), nil
 	}
-	stop := controller.app(appInstance).Stop
+	stop := snapshot.App(appInstance).Stop
 	if stop == "" {
 		return "", nil
 	}
-	command, err := controller.renderTemplate(stacks, appInstance, stop)
+	command, err := controller.renderTemplate(snapshot, appInstance, stop)
 	if err != nil {
 		return "", err
 	}
-	return controller.wrapped(appInstance, command), nil
+	return controller.wrapped(snapshot, appInstance, command), nil
 }
 
 // The wrap of a repo, for example "mise exec --", gives its commands the tools of the repo.
 // The command goes to a shell as one word, because it can hold pipes and variables.
-func (controller *Controller) wrapped(appInstance instance, shellCommand string) string {
-	config, _ := controller.declaringConfig(appInstance)
-	wrap := config.RepoWrap[cmp.Or(controller.app(appInstance).Repo, controller.Workspace)]
+func (controller *Controller) wrapped(snapshot plan.Snapshot, appInstance plan.Instance, shellCommand string) string {
+	config, _ := snapshot.DeclaringConfig(appInstance)
+	wrap := config.RepoWrap[cmp.Or(snapshot.App(appInstance).Repo, controller.Workspace)]
 	if wrap == "" {
 		return shellCommand
 	}
 	return wrap + " sh -c " + shellQuote(shellCommand)
 }
 
-func (controller *Controller) workingDir(stacks stackSet, appInstance instance) (string, error) {
-	appDir := controller.app(appInstance).Dir
+func (controller *Controller) workingDir(snapshot plan.Snapshot, appInstance plan.Instance) (string, error) {
+	appDir := snapshot.App(appInstance).Dir
 	if filepath.IsAbs(appDir) {
 		return appDir, nil
 	}
-	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
+	checkoutDir, err := controller.checkoutDir(snapshot, appInstance)
 	if err != nil {
 		return "", err
 	}
@@ -127,8 +130,8 @@ func (controller *Controller) workingDir(stacks stackSet, appInstance instance) 
 
 // The watcher runs ilot restart, so a change of a file goes through the same build lock and the same steps as a command of the user.
 // It names the stack, because the folder of an app does not always tell it: a ticket stack can run an app from a main checkout.
-func (controller *Controller) watcherSpec(watchedInstance instance, workingDir, checkoutDir string) (ProcessSpec, bool, error) {
-	watch := controller.app(watchedInstance).Watch
+func (controller *Controller) watcherSpec(snapshot plan.Snapshot, watchedInstance plan.Instance, workingDir, checkoutDir string) (ProcessSpec, bool, error) {
+	watch := snapshot.App(watchedInstance).Watch
 	if len(watch.Paths) == 0 {
 		return ProcessSpec{}, false, nil
 	}
@@ -140,7 +143,7 @@ func (controller *Controller) watcherSpec(watchedInstance instance, workingDir, 
 		commandParts = append(commandParts, "--exts "+strings.Join(watch.Exts, ","))
 	}
 	// ilot finds the workspace from the repo of its folder, and the working folder of an app can be outside every repo.
-	onChange := "cd " + shellQuote(checkoutDir) + " && " + shellQuote(controller.IlotBinary) + " restart --stack " + shellQuote(watchedInstance.stackName) + " " + shellQuote(watchedInstance.appName)
+	onChange := "cd " + shellQuote(checkoutDir) + " && " + shellQuote(controller.IlotBinary) + " restart --stack " + shellQuote(watchedInstance.Stack) + " " + shellQuote(watchedInstance.App)
 	commandParts = append(commandParts, "--", shellQuote(onChange))
 	shellEnv, err := controller.shellEnvironment()
 	if err != nil {
@@ -151,7 +154,7 @@ func (controller *Controller) watcherSpec(watchedInstance instance, workingDir, 
 		env = map[string]string{}
 	}
 	maps.Copy(env, controller.IlotEnv)
-	watcherInstance := instance{stackName: watchedInstance.stackName, appName: watchedInstance.appName + "-watch"}
+	watcherInstance := plan.Instance{Stack: watchedInstance.Stack, App: watchedInstance.App + "-watch"}
 	return ProcessSpec{
 		Name: controller.processName(watcherInstance),
 		Spec: daemon.Spec{
@@ -194,12 +197,12 @@ type templateData struct {
 	WorktreeDir string
 }
 
-func (controller *Controller) renderTemplate(stacks stackSet, appInstance instance, templateText string) (string, error) {
+func (controller *Controller) renderTemplate(snapshot plan.Snapshot, appInstance plan.Instance, templateText string) (string, error) {
 	portOf := func(name string, portNames ...string) (int, error) {
 		if externalService, isExternal := controller.Config.External[name]; isExternal {
 			return externalService.Port, nil
 		}
-		app, isApp := controller.anyDeclaration(appInstance.stackName, name)
+		app, isApp := snapshot.AnyDeclaration(appInstance.Stack, name)
 		if !isApp {
 			return 0, fmt.Errorf("port %q: no such app or external service", name)
 		}
@@ -207,31 +210,31 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		if len(portNames) > 0 {
 			portName = portNames[0]
 		}
-		servingInstance := instance{stackName: controller.stackServing(stacks, appInstance.stackName, name), appName: name}
-		port := cmp.Or(stacks.app(servingInstance).Ports[portName], controller.fixedPortsOf(servingInstance)[portName])
+		servingInstance := plan.Instance{Stack: snapshot.Serving(appInstance.Stack, name), App: name}
+		port := cmp.Or(snapshot.Ports(servingInstance)[portName], snapshot.FixedPorts(servingInstance)[portName])
 		if port == 0 {
-			return 0, fmt.Errorf("%s needs the %s port of %q in stack %s, which is not started: start it or drop --no-deps", controller.processName(appInstance), portName, name, servingInstance.stackName)
+			return 0, fmt.Errorf("%s needs the %s port of %q in stack %s, which is not started: start it or drop --no-deps", controller.processName(appInstance), portName, name, servingInstance.Stack)
 		}
 		return port, nil
 	}
 	repoCheckoutDir := func(repoName string) (string, error) {
-		checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
+		checkoutDir := snapshot.Checkouts[appInstance.Stack][repoName]
 		if checkoutDir == "" {
-			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, controller.repoPathKey(repoName))
+			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, snapshot.RepoPathKey(repoName))
 		}
 		return checkoutDir, nil
 	}
 	urlOf := func(name string) (string, error) {
-		if _, isApp := controller.anyDeclaration(appInstance.stackName, name); !isApp {
+		if _, isApp := snapshot.AnyDeclaration(appInstance.Stack, name); !isApp {
 			return "", fmt.Errorf("url %q: no such app", name)
 		}
-		return controller.publicBaseURL(instance{stackName: controller.stackServing(stacks, appInstance.stackName, name), appName: name}), nil
+		return controller.publicBaseURL(plan.Instance{Stack: snapshot.Serving(appInstance.Stack, name), App: name}), nil
 	}
 	hostOf := func(name string) (string, error) {
-		if _, isApp := controller.anyDeclaration(appInstance.stackName, name); !isApp {
+		if _, isApp := snapshot.AnyDeclaration(appInstance.Stack, name); !isApp {
 			return "", fmt.Errorf("host %q: no such app", name)
 		}
-		return controller.hostFor(appInstance), nil
+		return controller.hostFor(snapshot, appInstance), nil
 	}
 	templateFunctions := template.FuncMap{"port": portOf, "repo": repoCheckoutDir, "url": urlOf, "host": hostOf}
 	parsed, err := template.New(controller.processName(appInstance)).Funcs(templateFunctions).Option("missingkey=error").Parse(templateText)
@@ -239,19 +242,19 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		return "", err
 	}
 	var rendered strings.Builder
-	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
+	checkoutDir, err := controller.checkoutDir(snapshot, appInstance)
 	if err != nil {
 		return "", err
 	}
 	err = parsed.Execute(&rendered, templateData{
 		Workspace:   controller.Workspace,
-		Stack:       appInstance.stackName,
+		Stack:       appInstance.Stack,
 		Domain:      controller.Domain,
 		ProxyPort:   controller.ProxyPort,
 		User:        controller.Login,
-		Ports:       stacks.app(appInstance).Ports,
-		BinDir:      controller.binDir(appInstance.stackName),
-		StackDir:    controller.Store.StackDir(appInstance.stackName),
+		Ports:       snapshot.Ports(appInstance),
+		BinDir:      controller.binDir(appInstance.Stack),
+		StackDir:    controller.StackDir(appInstance.Stack),
 		WorktreeDir: checkoutDir,
 	})
 	if err != nil {

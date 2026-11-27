@@ -14,15 +14,19 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type Controller struct {
 	// The name of the workspace, which is also the name of its root repo.
-	Workspace           string
+	Workspace string
+	// The main checkout of the root repo, which the state records for the workspace.
+	Root                string
 	Config              config.Config
-	Store               StackStore
+	Store               state.Store
 	Supervisor          ProcessSupervisor
 	RunBuild            func(ctx context.Context, workingDir, shellCommand string, environ []string) error
 	EnsureImage         func(ctx context.Context, image string) (pullOutput string, err error)
@@ -44,45 +48,38 @@ type Controller struct {
 	ReadyTimeout     time.Duration
 	ProgressInterval time.Duration
 	Output           io.Writer
-
-	configByStack map[string]config.Config
 }
 
 type StartOptions struct {
 	SkipDependencies bool
 }
 
-type instance struct {
-	stackName string
-	appName   string
-}
-
 // The workspace is in the name, because the daemon runs the apps of every workspace.
-func (controller *Controller) processName(appInstance instance) string {
-	return appInstance.appName + "." + appInstance.stackName + "." + controller.Workspace
+func (controller *Controller) processName(appInstance plan.Instance) string {
+	return appInstance.App + "." + appInstance.Stack + "." + controller.Workspace
 }
 
 func (controller *Controller) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) (err error) {
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(stackName)
+	snapshot, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	requestedInstances, err := controller.instancesOf(stackName, appNames)
+	requestedInstances, err := snapshot.Instances(stackName, appNames)
 	if err != nil {
 		return err
 	}
-	startOrder, err := controller.prepareStart(stacks, requestedInstances, options)
+	startOrder, err := controller.prepareStart(snapshot, requestedInstances, options)
 	if err != nil {
 		return err
 	}
 
-	isRequested := map[instance]bool{}
+	isRequested := map[plan.Instance]bool{}
 	for _, requestedInstance := range requestedInstances {
 		isRequested[requestedInstance] = true
 	}
@@ -90,50 +87,50 @@ func (controller *Controller) Start(ctx context.Context, stackName string, appNa
 	if err != nil {
 		return err
 	}
-	isReallyRunning := map[instance]bool{}
-	hasEndedProcess := map[instance]bool{}
+	isReallyRunning := map[plan.Instance]bool{}
+	hasEndedProcess := map[plan.Instance]bool{}
 	for _, appInstance := range startOrder {
 		process, isKnown := processByName[controller.processName(appInstance)]
-		isStoredAsRunning := stacks.isRunning(appInstance)
+		isStoredAsRunning := snapshot.IsWanted(appInstance)
 		isReallyRunning[appInstance] = isStoredAsRunning && isKnown && process.State != daemon.StateExited
 		hasEndedProcess[appInstance] = isKnown && process.State == daemon.StateExited
 	}
-	if failures := controller.ensureImages(ctx, startOrder, func(appInstance instance) bool { return !isReallyRunning[appInstance] }, true); len(failures) > 0 {
+	if failures := controller.ensureImages(snapshot, ctx, startOrder, func(appInstance plan.Instance) bool { return !isReallyRunning[appInstance] }, true); len(failures) > 0 {
 		return failures[0].err
 	}
-	needsBuild := func(appInstance instance) bool { return isRequested[appInstance] || !isReallyRunning[appInstance] }
-	if err := controller.buildApps(ctx, stacks, startOrder, needsBuild); err != nil {
+	needsBuild := func(appInstance plan.Instance) bool { return isRequested[appInstance] || !isReallyRunning[appInstance] }
+	if err := controller.buildApps(ctx, snapshot, startOrder, needsBuild); err != nil {
 		return err
 	}
 
 	for _, appInstance := range startOrder {
 		needsRestart := (isRequested[appInstance] && isReallyRunning[appInstance]) || hasEndedProcess[appInstance]
 		isStartedByThisRun := isRequested[appInstance] || !isReallyRunning[appInstance]
-		if err := controller.startInstance(ctx, stacks, appInstance, needsRestart, isStartedByThisRun); err != nil {
-			return errors.Join(err, controller.startAgainInItsStackHint(stacks, appInstance, requestedInstances, options))
+		if err := controller.startInstance(ctx, snapshot, appInstance, needsRestart, isStartedByThisRun); err != nil {
+			return errors.Join(err, controller.startAgainInItsStackHint(snapshot, appInstance, requestedInstances, options))
 		}
 	}
-	controller.printURLs(stacks, requestedInstances)
+	controller.printURLs(snapshot, requestedInstances)
 	return nil
 }
 
-func (controller *Controller) startAgainInItsStackHint(stacks stackSet, failedInstance instance, requestedInstances []instance, options StartOptions) error {
-	if stacks.isRunning(failedInstance) {
+func (controller *Controller) startAgainInItsStackHint(snapshot plan.Snapshot, failedInstance plan.Instance, requestedInstances []plan.Instance, options StartOptions) error {
+	if snapshot.IsWanted(failedInstance) {
 		return nil
 	}
-	retryStartOrder, _ := controller.planStart(stacks, requestedInstances, options)
+	retryStartOrder, _ := snapshot.StartOrder(requestedInstances, options.SkipDependencies)
 	if slices.Contains(retryStartOrder, failedInstance) {
 		return nil
 	}
-	appNamesToRequest := []string{failedInstance.appName}
+	appNamesToRequest := []string{failedInstance.App}
 	for _, requestedInstance := range requestedInstances {
-		appNamesToRequest = append(appNamesToRequest, requestedInstance.appName)
+		appNamesToRequest = append(appNamesToRequest, requestedInstance.App)
 	}
-	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.appName, failedInstance.stackName, strings.Join(appNamesToRequest, " "))
+	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.App, failedInstance.Stack, strings.Join(appNamesToRequest, " "))
 }
 
 func (controller *Controller) Boot(ctx context.Context, baseStackName string) (err error) {
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -149,26 +146,26 @@ func (controller *Controller) Boot(ctx context.Context, baseStackName string) (e
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
 func (controller *Controller) RestartApps(ctx context.Context, stackName string, appNames []string) (err error) {
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(stackName)
+	snapshot, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	restartedInstances, err := controller.instancesOf(stackName, appNames)
+	restartedInstances, err := snapshot.Instances(stackName, appNames)
 	if err != nil {
 		return err
 	}
 	for _, appInstance := range restartedInstances {
-		if !stacks.isRunning(appInstance) {
-			return fmt.Errorf("%s does not run: start it with ilot start %s", controller.processName(appInstance), appInstance.appName)
+		if !snapshot.IsWanted(appInstance) {
+			return fmt.Errorf("%s does not run: start it with ilot start %s", controller.processName(appInstance), appInstance.App)
 		}
 	}
-	if err := controller.buildApps(ctx, stacks, restartedInstances, func(instance) bool { return true }); err != nil {
+	if err := controller.buildApps(ctx, snapshot, restartedInstances, func(plan.Instance) bool { return true }); err != nil {
 		return err
 	}
 	processByName, err := controller.Supervisor.Processes(ctx)
@@ -178,17 +175,17 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 	for _, appInstance := range restartedInstances {
 		// A process that the daemon does not hold starts in the apply. A restart on top would start it twice.
 		_, isHeldByDaemon := processByName[controller.processName(appInstance)]
-		if err := controller.startInstance(ctx, stacks, appInstance, isHeldByDaemon, false); err != nil {
+		if err := controller.startInstance(ctx, snapshot, appInstance, isHeldByDaemon, false); err != nil {
 			return err
 		}
 	}
-	controller.printURLs(stacks, restartedInstances)
+	controller.printURLs(snapshot, restartedInstances)
 	return nil
 }
 
 // The only command that replaces the daemon, for example after an upgrade of ilot.
 func (controller *Controller) Restart(ctx context.Context, baseStackName string) (err error) {
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
@@ -204,38 +201,38 @@ func (controller *Controller) Restart(ctx context.Context, baseStackName string)
 }
 
 func (controller *Controller) bootApps(ctx context.Context, baseStackName string) error {
-	stacks, err := controller.loadStacks(baseStackName)
+	snapshot, err := controller.loadStacks(baseStackName)
 	if err != nil {
 		return err
 	}
-	var bootInstances []instance
+	var bootInstances []plan.Instance
 	for _, appName := range slices.Sorted(maps.Keys(controller.Config.Apps)) {
 		if controller.Config.Apps[appName].Autostart {
-			bootInstances = append(bootInstances, instance{stackName: controller.stackOf(workspace.BaseStackName, appName), appName: appName})
+			bootInstances = append(bootInstances, plan.Instance{Stack: snapshot.StackOf(plan.BaseStack, appName), App: appName})
 		}
 	}
-	for _, instanceRunningBeforeBoot := range stacks.runningInstances() {
+	for _, instanceRunningBeforeBoot := range snapshot.Wanted() {
 		if !slices.Contains(bootInstances, instanceRunningBeforeBoot) {
 			bootInstances = append(bootInstances, instanceRunningBeforeBoot)
 		}
-		stacks.setRunning(instanceRunningBeforeBoot, false)
+		snapshot.SetWanted(instanceRunningBeforeBoot, false)
 	}
-	startOrder, err := controller.prepareStart(stacks, bootInstances, StartOptions{SkipDependencies: false})
+	startOrder, err := controller.prepareStart(snapshot, bootInstances, StartOptions{SkipDependencies: false})
 	if err != nil {
 		return err
 	}
-	imageFailures := controller.ensureImages(ctx, startOrder, func(instance) bool { return true }, false)
-	needsBuild := func(appInstance instance) bool { return controller.binDirIsEmpty(appInstance.stackName) }
-	if err := controller.buildApps(ctx, stacks, startOrder, needsBuild); err != nil {
+	imageFailures := controller.ensureImages(snapshot, ctx, startOrder, func(plan.Instance) bool { return true }, false)
+	needsBuild := func(appInstance plan.Instance) bool { return controller.binDirIsEmpty(appInstance.Stack) }
+	if err := controller.buildApps(ctx, snapshot, startOrder, needsBuild); err != nil {
 		return err
 	}
-	return controller.startEachUnlessADependencyFailed(ctx, stacks, startOrder, imageFailures)
+	return controller.startEachUnlessADependencyFailed(ctx, snapshot, startOrder, imageFailures)
 }
 
 // One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
-func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Context, stacks stackSet, startOrder []instance, imageFailures []imageFailure) error {
+func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, imageFailures []imageFailure) error {
 	var problems []error
-	isFailed := map[instance]bool{}
+	isFailed := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
 		isFailed[failure.appInstance] = true
 		problems = append(problems, fmt.Errorf("%s: %w", controller.processName(failure.appInstance), failure.err))
@@ -244,12 +241,12 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 		if isFailed[appInstance] {
 			continue
 		}
-		if failedDependency, hasFailedDependency := controller.failedDependencyOf(stacks, appInstance, isFailed); hasFailedDependency {
+		if failedDependency, hasFailedDependency := controller.failedDependencyOf(snapshot, appInstance, isFailed); hasFailedDependency {
 			isFailed[appInstance] = true
 			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", controller.processName(appInstance), controller.processName(failedDependency)))
 			continue
 		}
-		if err := controller.startInstance(ctx, stacks, appInstance, false, true); err != nil {
+		if err := controller.startInstance(ctx, snapshot, appInstance, false, true); err != nil {
 			isFailed[appInstance] = true
 			problems = append(problems, err)
 		}
@@ -260,74 +257,43 @@ func (controller *Controller) startEachUnlessADependencyFailed(ctx context.Conte
 	return errors.Join(problems...)
 }
 
-func (controller *Controller) failedDependencyOf(stacks stackSet, appInstance instance, isFailed map[instance]bool) (instance, bool) {
-	for _, dependency := range controller.app(appInstance).DependsOn {
-		if _, isApp := controller.anyDeclaration(appInstance.stackName, dependency); !isApp {
+func (controller *Controller) failedDependencyOf(snapshot plan.Snapshot, appInstance plan.Instance, isFailed map[plan.Instance]bool) (plan.Instance, bool) {
+	for _, dependency := range snapshot.App(appInstance).DependsOn {
+		if _, isApp := snapshot.AnyDeclaration(appInstance.Stack, dependency); !isApp {
 			continue
 		}
-		dependencyInStackOfDependent := instance{stackName: appInstance.stackName, appName: dependency}
+		dependencyInStackOfDependent := plan.Instance{Stack: appInstance.Stack, App: dependency}
 		if isFailed[dependencyInStackOfDependent] {
 			return dependencyInStackOfDependent, true
 		}
-		dependencyInstance := instance{stackName: controller.stackServing(stacks, appInstance.stackName, dependency), appName: dependency}
+		dependencyInstance := plan.Instance{Stack: snapshot.Serving(appInstance.Stack, dependency), App: dependency}
 		if isFailed[dependencyInstance] {
 			return dependencyInstance, true
 		}
 	}
-	return instance{}, false
+	return plan.Instance{}, false
 }
 
-func (controller *Controller) prepareStart(stacks stackSet, requestedInstances []instance, options StartOptions) ([]instance, error) {
-	startOrder, externalDependencies := controller.planStart(stacks, requestedInstances, options)
-	if err := controller.checkExternalServicesUp(externalDependencies); err != nil {
+func (controller *Controller) prepareStart(snapshot plan.Snapshot, requestedInstances []plan.Instance, options StartOptions) ([]plan.Instance, error) {
+	start := snapshot.PlanStart(requestedInstances, options.SkipDependencies)
+	if err := controller.checkExternalServicesUp(start.Externals); err != nil {
 		return nil, err
 	}
-	if err := controller.allocatePorts(stacks, startOrder); err != nil {
+	if err := controller.allocatePorts(snapshot, start); err != nil {
 		return nil, err
 	}
-	if err := controller.checkEveryProcessRenders(stacks, startOrder); err != nil {
+	if err := controller.checkEveryProcessRenders(snapshot, start.Order); err != nil {
 		return nil, err
 	}
-	return startOrder, controller.saveStacks(stacks)
+	return start.Order, controller.saveStacks(snapshot)
 }
 
-func (controller *Controller) instancesOf(stackName string, appNames []string) ([]instance, error) {
-	var instances []instance
-	for _, appName := range appNames {
-		if _, isApp := controller.Config.Apps[appName]; !isApp {
-			return nil, errors.Join(fmt.Errorf("unknown app %q, known apps: %v", appName, slices.Sorted(maps.Keys(controller.Config.Apps))), controller.reposNotClonedHint())
-		}
-		instances = append(instances, instance{stackName: controller.stackOf(stackName, appName), appName: appName})
-	}
-	return instances, nil
-}
-
-func (controller *Controller) reposNotClonedHint() error {
-	var hints []error
-	for _, repoName := range slices.Sorted(maps.Keys(controller.ReposNotCloned)) {
-		hints = append(hints, fmt.Errorf("repo %s is not at %s: clone it, or set %s", repoName, controller.ReposNotCloned[repoName], controller.repoPathKey(repoName)))
-	}
-	return errors.Join(hints...)
-}
-
-// Where the user gives the path of a repo that is cloned at another place.
-func (controller *Controller) repoPathKey(repoName string) string {
-	return fmt.Sprintf("workspaces.%s.repos.%s in ~/%s", controller.Workspace, repoName, config.GlobalFilePath)
-}
-
-func (controller *Controller) stackOf(requestedStackName, appName string) string {
-	if controller.Config.Apps[appName].Scope == config.ScopeBase {
-		return workspace.BaseStackName
-	}
-	return requestedStackName
-}
-
-func (controller *Controller) startInstance(ctx context.Context, stacks stackSet, appInstance instance, needsRestart bool, isStartedByThisRun bool) error {
-	stacks.setRunning(appInstance, true)
-	if err := controller.saveStacks(stacks); err != nil {
+func (controller *Controller) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, needsRestart bool, isStartedByThisRun bool) error {
+	snapshot.SetWanted(appInstance, true)
+	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}
-	if err := controller.applyAll(ctx, stacks); err != nil {
+	if err := controller.applyAll(ctx, snapshot); err != nil {
 		return err
 	}
 	if needsRestart {
@@ -344,7 +310,7 @@ func (controller *Controller) startInstance(ctx context.Context, stacks stackSet
 		_, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err)
 		switch {
 		case hasEnded && isStartedByThisRun && ctx.Err() == nil:
-			return errors.Join(failure, controller.stopFailedInstance(ctx, stacks, appInstance))
+			return errors.Join(failure, controller.stopFailedInstance(ctx, snapshot, appInstance))
 		case isNotReadyInTime:
 			return fmt.Errorf("%w; it still starts: ilot keeps it", failure)
 		}
@@ -353,12 +319,12 @@ func (controller *Controller) startInstance(ctx context.Context, stacks stackSet
 	return nil
 }
 
-func (controller *Controller) stopFailedInstance(ctx context.Context, stacks stackSet, failedInstance instance) error {
+func (controller *Controller) stopFailedInstance(ctx context.Context, snapshot plan.Snapshot, failedInstance plan.Instance) error {
 	cleanupCtx := context.WithoutCancel(ctx)
-	stacks.setRunning(failedInstance, false)
-	err := controller.saveStacks(stacks)
+	snapshot.SetWanted(failedInstance, false)
+	err := controller.saveStacks(snapshot)
 	if err == nil {
-		err = controller.applyAll(cleanupCtx, stacks)
+		err = controller.applyAll(cleanupCtx, snapshot)
 	}
 	if err != nil {
 		return fmt.Errorf("stop %s after its failure: %w", controller.processName(failedInstance), err)
@@ -418,41 +384,41 @@ func (writer *linePrefixWriter) Write(content []byte) (int, error) {
 }
 
 func (controller *Controller) Stop(ctx context.Context, stackName string, appNames []string) (err error) {
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadStacks(stackName)
+	snapshot, err := controller.loadStacks(stackName)
 	if err != nil {
 		return err
 	}
-	stoppedInstances, err := controller.instancesOf(stackName, appNames)
+	stoppedInstances, err := snapshot.Instances(stackName, appNames)
 	if err != nil {
 		return err
 	}
-	stacksBeforeStop := stacks.clone()
+	stacksBeforeStop := snapshot.Clone()
 	for _, stoppedInstance := range stoppedInstances {
-		if !stacks.isRunning(stoppedInstance) {
+		if !snapshot.IsWanted(stoppedInstance) {
 			fmt.Fprintf(controller.Output, "%s is not running\n", controller.processName(stoppedInstance))
 			continue
 		}
-		stacks.setRunning(stoppedInstance, false)
+		snapshot.SetWanted(stoppedInstance, false)
 		controller.warnAboutDependents(stacksBeforeStop, stoppedInstance)
 	}
-	if err := controller.saveStacks(stacks); err != nil {
+	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}
-	return controller.applyAll(ctx, stacks)
+	return controller.applyAll(ctx, snapshot)
 }
 
-func (controller *Controller) warnAboutDependents(stacksBeforeStop stackSet, stoppedInstance instance) {
-	for _, runningInstance := range stacksBeforeStop.runningInstances() {
-		if runningInstance == stoppedInstance || !slices.Contains(controller.app(runningInstance).DependsOn, stoppedInstance.appName) {
+func (controller *Controller) warnAboutDependents(snapshotBeforeStop plan.Snapshot, stoppedInstance plan.Instance) {
+	for _, runningInstance := range snapshotBeforeStop.Wanted() {
+		if runningInstance == stoppedInstance || !slices.Contains(snapshotBeforeStop.App(runningInstance).DependsOn, stoppedInstance.App) {
 			continue
 		}
-		if controller.stackServing(stacksBeforeStop, runningInstance.stackName, stoppedInstance.appName) == stoppedInstance.stackName {
+		if snapshotBeforeStop.Serving(runningInstance.Stack, stoppedInstance.App) == stoppedInstance.Stack {
 			fmt.Fprintf(controller.Output, "warning: %s depends on %s and keeps running\n", controller.processName(runningInstance), controller.processName(stoppedInstance))
 		}
 	}

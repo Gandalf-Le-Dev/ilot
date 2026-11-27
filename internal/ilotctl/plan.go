@@ -5,64 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
-	"slices"
 	"syscall"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/config"
-	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
-
-func (controller *Controller) planStart(stacks stackSet, requestedInstances []instance, options StartOptions) ([]instance, []string) {
-	isRequested := map[instance]bool{}
-	for _, requestedInstance := range requestedInstances {
-		isRequested[requestedInstance] = true
-	}
-	var startOrder []instance
-	isPlanned := map[instance]bool{}
-	isExternalDependency := map[string]bool{}
-	var plan func(appInstance instance)
-	plan = func(appInstance instance) {
-		if isPlanned[appInstance] {
-			return
-		}
-		isPlanned[appInstance] = true
-		if !options.SkipDependencies {
-			for _, dependency := range controller.app(appInstance).DependsOn {
-				if _, isExternal := controller.Config.External[dependency]; isExternal {
-					isExternalDependency[dependency] = true
-					continue
-				}
-				dependencyStack := controller.stackServing(stacks, appInstance.stackName, dependency)
-				if isRequested[instance{stackName: appInstance.stackName, appName: dependency}] || controller.Config.Apps[dependency].Scope == config.ScopeStack {
-					dependencyStack = appInstance.stackName
-				}
-				plan(instance{stackName: dependencyStack, appName: dependency})
-			}
-		}
-		startOrder = append(startOrder, appInstance)
-	}
-	for _, requestedInstance := range requestedInstances {
-		plan(requestedInstance)
-	}
-	return startOrder, slices.Sorted(maps.Keys(isExternalDependency))
-}
-
-// The apps of a stack use its own copy of an app when it runs one, and the copy of the base stack otherwise.
-// The scope of the app can fix the answer: always the own stack, or always the base stack.
-func (controller *Controller) stackServing(stacks stackSet, stackName, appName string) string {
-	app, _ := controller.anyDeclaration(stackName, appName)
-	switch {
-	case app.Scope == config.ScopeBase:
-		return workspace.BaseStackName
-	case app.Scope == config.ScopeStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
-		return stackName
-	}
-	return workspace.BaseStackName
-}
 
 func (controller *Controller) checkExternalServicesUp(externalNames []string) error {
 	var problems []error
@@ -75,46 +25,28 @@ func (controller *Controller) checkExternalServicesUp(externalNames []string) er
 	return errors.Join(problems...)
 }
 
-func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instance) error {
-	portsInUse := stacks.portsInUse()
-	for _, appInstance := range startOrder {
-		appState := stacks.app(appInstance)
-		for portName, fixedPort := range controller.fixedPortsOf(appInstance) {
-			if !stacks.isRunning(appInstance) && !controller.IsPortFreeOnHost(fixedPort) {
-				return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort, controller.processName(appInstance))
-			}
-			appState.Ports[portName] = fixedPort
+// allocatePorts gives each instance of the start its fixed ports and a free port for each port that has no number yet.
+func (controller *Controller) allocatePorts(snapshot plan.Snapshot, start plan.Start) error {
+	for _, fixedPort := range start.FixedPorts {
+		if !snapshot.IsWanted(fixedPort.Instance) && !controller.IsPortFreeOnHost(fixedPort.Port) {
+			return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort.Port, controller.processName(fixedPort.Instance))
 		}
-		var portNamesWithoutPort []string
-		for _, portName := range controller.app(appInstance).PortNames() {
-			if appState.Ports[portName] == 0 {
-				portNamesWithoutPort = append(portNamesWithoutPort, portName)
-			}
-		}
-		allocated, err := controller.PortRange.Allocate(len(portNamesWithoutPort), portsInUse, controller.IsPortFreeOnHost)
-		if err != nil {
-			return err
-		}
-		for index, portName := range portNamesWithoutPort {
-			appState.Ports[portName] = allocated[index]
-			portsInUse[allocated[index]] = true
-		}
-		stacks.setApp(appInstance, appState)
+		snapshot.SetPort(fixedPort.Instance, fixedPort.PortName, fixedPort.Port)
+	}
+	allocated, err := controller.PortRange.Allocate(len(start.PortNeeds), snapshot.State.PortsInUse(), controller.IsPortFreeOnHost)
+	if err != nil {
+		return err
+	}
+	for index, need := range start.PortNeeds {
+		snapshot.SetPort(need.Instance, need.PortName, allocated[index])
 	}
 	return nil
 }
 
-func (controller *Controller) fixedPortsOf(appInstance instance) map[string]int {
-	if appInstance.stackName == workspace.BaseStackName {
-		return controller.app(appInstance).FixedPorts
-	}
-	return nil
-}
-
-func (controller *Controller) checkEveryProcessRenders(stacks stackSet, startOrder []instance) error {
-	stacksWithPlanRunning := stacks.clone()
+func (controller *Controller) checkEveryProcessRenders(snapshot plan.Snapshot, startOrder []plan.Instance) error {
+	stacksWithPlanRunning := snapshot.Clone()
 	for _, appInstance := range startOrder {
-		stacksWithPlanRunning.setRunning(appInstance, true)
+		stacksWithPlanRunning.SetWanted(appInstance, true)
 	}
 	for _, appInstance := range startOrder {
 		if _, err := controller.processSpec(stacksWithPlanRunning, appInstance); err != nil {
@@ -124,38 +56,38 @@ func (controller *Controller) checkEveryProcessRenders(stacks stackSet, startOrd
 	return nil
 }
 
-func (controller *Controller) buildApps(ctx context.Context, stacks stackSet, startOrder []instance, needsBuild func(instance) bool) error {
+func (controller *Controller) buildApps(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, needsBuild func(plan.Instance) bool) error {
 	type buildInWorktree struct {
 		workingDir string
 		command    string
 	}
 	isBuilt := map[buildInWorktree]bool{}
 	for _, appInstance := range startOrder {
-		app := controller.app(appInstance)
+		app := snapshot.App(appInstance)
 		if app.Build == "" || !needsBuild(appInstance) {
 			continue
 		}
-		buildCommand, err := controller.renderTemplate(stacks, appInstance, app.Build)
+		buildCommand, err := controller.renderTemplate(snapshot, appInstance, app.Build)
 		if err != nil {
 			return err
 		}
-		workingDir, err := controller.checkoutDir(stacks, appInstance)
+		workingDir, err := controller.checkoutDir(snapshot, appInstance)
 		if err != nil {
 			return err
 		}
-		build := buildInWorktree{workingDir: workingDir, command: controller.wrapped(appInstance, buildCommand)}
+		build := buildInWorktree{workingDir: workingDir, command: controller.wrapped(snapshot, appInstance, buildCommand)}
 		if isBuilt[build] {
 			continue
 		}
 		isBuilt[build] = true
-		if err := os.MkdirAll(controller.binDir(appInstance.stackName), 0o755); err != nil {
+		if err := os.MkdirAll(controller.binDir(appInstance.Stack), 0o755); err != nil {
 			return err
 		}
 		environ, err := controller.shellEnviron()
 		if err != nil {
 			return err
 		}
-		releaseBuilds, err := controller.lockBuilds(ctx, appInstance.stackName)
+		releaseBuilds, err := controller.lockBuilds(ctx, appInstance.Stack)
 		if err != nil {
 			return err
 		}
@@ -175,10 +107,10 @@ const buildLockPollInterval = 100 * time.Millisecond
 // lockBuilds lets one build run in a stack at a time: two apps of a stack can write the same binary.
 // ilot start, ilot restart and the watcher of an app all build through it.
 func (controller *Controller) lockBuilds(ctx context.Context, stackName string) (release func() error, err error) {
-	if err := os.MkdirAll(controller.Store.StackDir(stackName), 0o700); err != nil {
+	if err := os.MkdirAll(controller.StackDir(stackName), 0o700); err != nil {
 		return nil, err
 	}
-	lockFile, err := os.OpenFile(filepath.Join(controller.Store.StackDir(stackName), "build.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lockFile, err := os.OpenFile(filepath.Join(controller.StackDir(stackName), "build.lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -204,59 +136,61 @@ func (controller *Controller) lockBuilds(ctx context.Context, stackName string) 
 	}
 }
 
-func (controller *Controller) loadSavedStacks() (stackSet, error) {
-	allStacks, err := controller.Store.All()
-	if err != nil {
-		return stackSet{}, err
-	}
-	stacks := stackSet{byName: map[string]*StackState{}}
-	for _, stackState := range allStacks {
-		stacks.byName[stackState.Name] = &stackState
-	}
-	return stacks, nil
+func (controller *Controller) loadState() (state.State, error) {
+	return controller.Store.Load()
 }
 
-func (controller *Controller) loadStacks(stackName string) (stackSet, error) {
-	stacks, err := controller.loadSavedStacks()
+// loadStacks gives the snapshot of a command of a stack: the state, the configuration of each stack, and the checkouts that the bindings give.
+func (controller *Controller) loadStacks(stackName string) (plan.Snapshot, error) {
+	current, err := controller.loadState()
 	if err != nil {
-		return stackSet{}, err
+		return plan.Snapshot{}, err
 	}
-	stacks.ensure(workspace.BaseStackName)
-	stacks.ensure(stackName)
-	if err := controller.deriveCheckouts(stacks); err != nil {
-		return stackSet{}, err
+	current.Stack(controller.Workspace, plan.BaseStack)
+	current.Stack(controller.Workspace, stackName)
+	snapshot, problems := controller.snapshotOf(current, stackName)
+	if err := errors.Join(problems...); err != nil {
+		return plan.Snapshot{}, err
 	}
-	return stacks, controller.prepareStacks(stacks)
+	if err := controller.deriveCheckouts(snapshot); err != nil {
+		return plan.Snapshot{}, err
+	}
+	controller.prepareStacks(snapshot)
+	return snapshot, nil
 }
 
 // A bound worktree that is deleted gives its repo back to the main checkout.
-func (controller *Controller) deriveCheckouts(stacks stackSet) error {
-	for stackName, stackState := range stacks.byName {
+func (controller *Controller) deriveCheckouts(snapshot plan.Snapshot) error {
+	for stackName := range snapshot.State.Stacks(controller.Workspace) {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
 		if err != nil {
 			return err
 		}
-		clear(stackState.CheckoutDirs)
+		snapshot.Checkouts[stackName] = map[string]string{}
 		for repoName, checkout := range checkoutByRepo {
-			stackState.CheckoutDirs[repoName] = checkout.Dir
+			snapshot.Checkouts[stackName][repoName] = checkout.Dir
 		}
 	}
 	return nil
 }
 
-func (controller *Controller) checkoutDir(stacks stackSet, appInstance instance) (string, error) {
-	repoName := cmp.Or(controller.app(appInstance).Repo, controller.Workspace)
-	checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
+func (controller *Controller) checkoutDir(snapshot plan.Snapshot, appInstance plan.Instance) (string, error) {
+	repoName := cmp.Or(snapshot.App(appInstance).Repo, controller.Workspace)
+	checkoutDir := snapshot.Checkouts[appInstance.Stack][repoName]
 	if checkoutDir == "" {
-		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, controller.repoPathKey(repoName))
+		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, snapshot.RepoPathKey(repoName))
 	}
 	return checkoutDir, nil
 }
 
-func (controller *Controller) saveStacks(stacks stackSet) error {
-	var stackStates []StackState
-	for _, stackName := range slices.Sorted(maps.Keys(stacks.byName)) {
-		stackStates = append(stackStates, *stacks.byName[stackName])
+func (controller *Controller) saveStacks(snapshot plan.Snapshot) error {
+	if err := snapshot.State.Claim(controller.Workspace, controller.Root); err != nil {
+		return err
 	}
-	return controller.Store.SaveAll(stackStates)
+	return controller.Store.Save(snapshot.State)
+}
+
+// StackDir holds the logs and the binaries of a stack.
+func (controller *Controller) StackDir(stackName string) string {
+	return controller.Store.StackDir(controller.Workspace, stackName)
 }

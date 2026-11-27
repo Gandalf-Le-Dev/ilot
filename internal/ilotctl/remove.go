@@ -5,67 +5,71 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
+	"slices"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
 func (controller *Controller) Remove(ctx context.Context, stackName string) (err error) {
-	if stackName == workspace.BaseStackName {
+	if stackName == plan.BaseStack {
 		return fmt.Errorf("cannot remove stack %s: ilot needs it, stop its apps with ilot stop", stackName)
 	}
-	release, err := controller.Store.Lock()
+	release, err := controller.Store.Lock(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, release()) }()
 
-	stacks, err := controller.loadSavedStacks()
+	current, err := controller.loadState()
 	if err != nil {
 		return err
 	}
-	_, isKnown := stacks.byName[stackName]
-	if !isKnown {
+	if _, isKnown := current.Stacks(controller.Workspace)[stackName]; !isKnown {
 		return fmt.Errorf("no stack %q, see ilot ls", stackName)
 	}
-	delete(stacks.byName, stackName)
-	if err := controller.deriveCheckouts(stacks); err != nil {
+	current.RemoveStack(controller.Workspace, stackName)
+	snapshot, problems := controller.snapshotOf(current, plan.BaseStack)
+	if err := errors.Join(problems...); err != nil {
 		return err
 	}
-	if err := controller.prepareStacks(stacks); err != nil {
+	if err := controller.deriveCheckouts(snapshot); err != nil {
 		return err
 	}
-	if err := controller.saveStacks(stacks); err != nil {
+	controller.prepareStacks(snapshot)
+	if err := controller.saveStacks(snapshot); err != nil {
 		return err
 	}
-	if err := controller.applyAll(ctx, stacks); err != nil {
+	if err := controller.applyAll(ctx, snapshot); err != nil {
 		return err
 	}
-	return controller.Store.Delete(stackName)
+	return os.RemoveAll(controller.StackDir(stackName))
 }
 
 // StacksWithoutWorktrees lists the stacks that ilot clean removes: each one whose bound worktrees are all deleted.
 // A stack that lost its last worktree to ilot stack bind has none, so it is listed too.
 func (controller *Controller) StacksWithoutWorktrees() ([]string, error) {
-	allStacks, err := controller.Store.All()
+	current, err := controller.loadState()
 	if err != nil {
 		return nil, err
 	}
 	var stacksWithoutWorktrees []string
-	for _, stackState := range allStacks {
-		if stackState.Name == workspace.BaseStackName {
+	stacks := current.Stacks(controller.Workspace)
+	for _, stackName := range slices.Sorted(maps.Keys(stacks)) {
+		if stackName == plan.BaseStack {
 			continue
 		}
 		hasWorktree := false
-		for _, worktreeDir := range stackState.BoundWorktrees {
+		for _, worktreeDir := range stacks[stackName].Checkouts {
 			_, err := os.Stat(worktreeDir)
 			if err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return nil, fmt.Errorf("look for the worktree of the stack %s: %w", stackState.Name, err)
+				return nil, fmt.Errorf("look for the worktree of the stack %s: %w", stackName, err)
 			}
 			hasWorktree = hasWorktree || err == nil
 		}
 		if !hasWorktree {
-			stacksWithoutWorktrees = append(stacksWithoutWorktrees, stackState.Name)
+			stacksWithoutWorktrees = append(stacksWithoutWorktrees, stackName)
 		}
 	}
 	return stacksWithoutWorktrees, nil

@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
 type imageFailure struct {
-	appInstance instance
+	appInstance plan.Instance
 	err         error
 }
 
@@ -40,14 +42,14 @@ func imagePullError(image, pullOutput string, pullErr error) error {
 }
 
 // An image shared by several apps is checked once, and its failure is reported for each of them.
-func (controller *Controller) ensureImages(ctx context.Context, startOrder []instance, needsImage func(instance) bool, stopAtFirstFailure bool) []imageFailure {
+func (controller *Controller) ensureImages(snapshot plan.Snapshot, ctx context.Context, startOrder []plan.Instance, needsImage func(plan.Instance) bool, stopAtFirstFailure bool) []imageFailure {
 	errByImage := map[string]error{}
 	var failures []imageFailure
 	for _, appInstance := range startOrder {
-		if !controller.isContainer(appInstance) || !needsImage(appInstance) {
+		if !controller.isContainer(snapshot, appInstance) || !needsImage(appInstance) {
 			continue
 		}
-		image := controller.app(appInstance).Container.Image
+		image := snapshot.App(appInstance).Container.Image
 		imageErr, isChecked := errByImage[image]
 		if !isChecked {
 			pullOutput, err := controller.EnsureImage(ctx, image)

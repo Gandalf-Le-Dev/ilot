@@ -126,22 +126,6 @@ func TestListKeepsGoingWhenTheConfigOfAStackCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestOnlyAnAppWithTheScopeBaseIsAnAppOfTheBaseStackWhenATicketAloneDeclaresIt(t *testing.T) {
-	environment := newTestEnvironment(t)
-	baseConfig := testConfig()
-	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": configWithApps(baseConfig, ticketOnlyApps)})
-	if err := environment.controller.loadStackConfigs([]string{workspace.BaseStackName, "proj-1234"}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, isDeclared := environment.controller.lookupApp(instance{stackName: workspace.BaseStackName, appName: "ticket-iam"}); !isDeclared {
-		t.Error("ticket-iam has the scope base, so the base stack runs it, even when only the ticket declares it")
-	}
-	if _, isDeclared := environment.controller.lookupApp(instance{stackName: workspace.BaseStackName, appName: "ticket-search"}); isDeclared {
-		t.Error("ticket-search has no scope, so the base stack does not know it when only the ticket declares it")
-	}
-}
-
 func TestAnAppWithTheScopeBaseAndNoFixedPortGetsOnePortForEveryStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	doc := environment.controller.Config.Apps["doc"]

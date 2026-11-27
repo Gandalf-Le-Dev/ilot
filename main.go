@@ -378,7 +378,6 @@ func newController(ctx context.Context, currentWorkspace workspace.Workspace, st
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	stateDir := store.RootDir
-	stackStore := ilotctl.StackStore{Files: store, Workspace: currentWorkspace.Name, Root: currentWorkspace.RootDir}
 	shellEnv := sync.OnceValues(func() (map[string]string, error) {
 		return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
 	})
@@ -397,8 +396,9 @@ func newController(ctx context.Context, currentWorkspace workspace.Workspace, st
 	}
 	controller := &ilotctl.Controller{
 		Workspace:           currentWorkspace.Name,
+		Root:                currentWorkspace.RootDir,
 		Config:              stackConfig,
-		Store:               stackStore,
+		Store:               store,
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
