@@ -166,7 +166,8 @@ Replace the commands, the paths and the services with the ones of your repos.
 Every command finds the workspace from the repo of the folder that you are in, so run `ilot` inside a repo of the workspace.
 `ilot start`, `stop`, `restart`, `logs`, `apps`, `env` and `stack` act on the stack of that folder.
 `ilot ls`, `rm` and `clean` act on every stack.
-`--workspace <name>` selects a workspace from any folder, and `--stack <name>` selects a stack of it. `ilot ls`, `rm` and `clean` take `--workspace`. `ilot start`, `stop`, `restart`, `logs`, `apps` and `env` take both; with `--workspace` and no `--stack`, they act on `base`. The workspace must have had one `ilot start`, which records its root repo, and the stack must exist.
+`--workspace <name>` selects a workspace from any folder, and `--stack <name>` selects a stack of it. `ilot ls`, `rm`, `clean` and `doctor` take `--workspace`. `ilot start`, `stop`, `restart`, `logs`, `apps` and `env` take both; with `--workspace` and no `--stack`, they act on `base`. The workspace must have had one `ilot start`, which records its root repo, and the stack must exist.
+`ilot stack show` and `ilot stack bind` take neither: they work on the worktree of the current folder only.
 
 ```bash
 ilot ls                       # every app of every stack: status, ports, URL; then the worktree of each stack other than base
@@ -188,7 +189,7 @@ ilot check path/to/ilot.yaml  # check that file
 ilot rm retry-jobs            # stop a stack and delete its state, its logs and its routes
 ilot clean                    # ilot rm on each stack whose bound worktrees are all deleted
 ilot clean --dry-run          # print what ilot clean would do, and change nothing
-ilot ls --workspace shop      # the same from any folder; rm and clean take --workspace too
+ilot ls --workspace shop      # the same from any folder; rm, clean and doctor take --workspace too
 ilot logs --workspace shop --stack retry-jobs api  # the log of api in the stack retry-jobs, from any folder
 ilot stack show               # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs    # put this worktree in the stack retry-jobs

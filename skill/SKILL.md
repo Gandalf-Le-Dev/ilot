@@ -31,7 +31,7 @@ A stack is the set of apps that run for one branch of work.
 - A stack takes each repo's worktree that is bound to it. If a repo has no such worktree, the stack takes that repo's main checkout.
 - If a worktree does not start an app, the app comes from the `base` stack, and `ilot` starts it there if necessary. An app with `scope: stack` is the exception: an app that depends on it always gets the copy of its own stack.
 
-Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot restart`, `ilot logs`, `ilot apps`, `ilot env` and `ilot stack` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack. From another folder, give `--workspace <name>`, and `--stack <name>` for a stack other than `base`.
+Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot restart`, `ilot logs`, `ilot apps`, `ilot env` and `ilot stack` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack. From another folder, give `--workspace <name>`, and `--stack <name>` for a stack other than `base`. `ilot doctor` takes `--workspace` too. `ilot stack show` and `ilot stack bind` take neither: run them in the worktree.
 
 ## Commands
 
