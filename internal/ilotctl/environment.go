@@ -1,12 +1,9 @@
 package ilotctl
 
 import (
-	"bufio"
 	"cmp"
 	"context"
-	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 
@@ -23,8 +20,6 @@ type EnvEntry struct {
 
 const (
 	sourceShell       = "shell"
-	sourceDefault     = "default"
-	sourceKeyring     = "~/.keyring"
 	sourceRepo        = "repo"
 	sourceApp         = "app"
 	sourcePersonal    = "personal"
@@ -91,10 +86,6 @@ func (controller *Controller) shellEnviron() ([]string, error) {
 // A value written with a template is computed by ilot (ports, addresses, the stack), so a personal value cannot override it.
 func (controller *Controller) environmentOf(stacks stackSet, appInstance instance) ([]EnvEntry, error) {
 	app := controller.app(appInstance)
-	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
-	if err != nil {
-		return nil, err
-	}
 	shellEnv, err := controller.shellEnvironment()
 	if err != nil {
 		return nil, err
@@ -106,14 +97,6 @@ func (controller *Controller) environmentOf(stacks stackSet, appInstance instanc
 		}
 	}
 	setAll(sourceShell, shellEnv)
-	defaults := map[string]string{"VSCODE_REPO_PATH": checkoutDir}
-	if controller.Login != "" {
-		defaults["APP_NAME"] = controller.Login
-	}
-	setAll(sourceDefault, defaults)
-	if keyringKey := readKeyringAppKey(controller.KeyringFile); keyringKey != "" {
-		setAll(sourceKeyring, map[string]string{keyringAppKeyName: keyringKey})
-	}
 	literalRepoEnv, templatedRepoEnv := splitByTemplate(controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, appconfig.DefaultRepo)])
 	literalAppEnv, templatedAppEnv := splitByTemplate(app.Env)
 	setAll(sourceRepo, literalRepoEnv)
@@ -146,36 +129,4 @@ func splitByTemplate(valueByKey map[string]string) (literalValues, templatedValu
 		literalValues[key] = value
 	}
 	return literalValues, templatedValues
-}
-
-const keyringAppKeyName = "KEYRING_APP_KEY"
-
-// The keyring file is a shell file holding `export KEYRING_APP_KEY=...`; a missing or unreadable file means no key.
-func readKeyringAppKey(keyringFile string) string {
-	if keyringFile == "" {
-		return ""
-	}
-	file, err := os.Open(keyringFile)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	keyringKey := ""
-	for scanner.Scan() {
-		line := strings.TrimPrefix(strings.TrimSpace(scanner.Text()), "export ")
-		value, isKeyringKeyLine := strings.CutPrefix(line, keyringAppKeyName+"=")
-		if !isKeyringKeyLine {
-			continue
-		}
-		keyringKey = strings.Trim(strings.TrimSpace(value), `"'`)
-	}
-	return keyringKey
-}
-
-func (controller *Controller) warnWhenKeyringKeyIsMissing() {
-	if controller.KeyringFile == "" || readKeyringAppKey(controller.KeyringFile) != "" {
-		return
-	}
-	fmt.Fprintf(controller.Output, "warning: %s has no %s: apps start without it\n", controller.KeyringFile, keyringAppKeyName)
 }

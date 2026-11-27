@@ -59,7 +59,7 @@ func containerStopCommand(appInstance instance) string {
 // Personal top-level env is for processes: it can hold tokens that third-party images have no business reading. The shell is the daemon's, not the image's.
 func containerEnvEntries(envEntries []EnvEntry) []EnvEntry {
 	return slices.DeleteFunc(slices.Clone(envEntries), func(entry EnvEntry) bool {
-		return entry.Source == sourceShell || entry.Source == sourceDefault || entry.Source == sourcePersonal
+		return entry.Source == sourceShell || entry.Source == sourcePersonal
 	})
 }
 

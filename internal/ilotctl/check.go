@@ -47,7 +47,6 @@ func CheckRendering(config appconfig.Config) []error {
 		UsesMise:            func(string) bool { return false },
 		ReposNotCloned:      nil,
 		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
-		KeyringFile:         "",
 		ShellEnv:            nil,
 		Login:               checkStackName,
 		RoutesDir:           "",
