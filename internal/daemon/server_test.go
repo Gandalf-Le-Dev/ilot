@@ -38,7 +38,7 @@ func serveOnSocket(t *testing.T) *socketServer {
 	}
 	served := &socketServer{
 		client:       NewClient(socketPath),
-		supervisor:   newTestSupervisor(t, SupervisorOptions{ProbeInterval: 20 * time.Millisecond}),
+		supervisor:   newTestSupervisor(t, quickProbes),
 		routes:       &RouteTable{},
 		shutdownSeen: make(chan struct{}),
 	}

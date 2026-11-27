@@ -81,13 +81,7 @@ func (supervisor *Supervisor) probeUntilReady(name string, spec Spec, probed *ru
 		err := spec.Ready.check(attempt, spec)
 		cancel()
 		if err == nil {
-			supervisor.mu.Lock()
-			if probed.state == StateStarting {
-				probed.state = StateReady
-			}
-			supervisor.mu.Unlock()
-			close(probed.ready)
-			supervisor.logger.Info("process ready", "process", name, "pid", probed.pid)
+			supervisor.markReady(name, probed)
 			return
 		}
 		select {
@@ -96,6 +90,24 @@ func (supervisor *Supervisor) probeUntilReady(name string, spec Spec, probed *ru
 		case <-ticker.C:
 		}
 	}
+}
+
+func (supervisor *Supervisor) readyIfStillAlive(name string, started *run) {
+	select {
+	case <-started.exited.Done():
+	case <-time.After(supervisor.aliveWindow):
+		supervisor.markReady(name, started)
+	}
+}
+
+func (supervisor *Supervisor) markReady(name string, target *run) {
+	supervisor.mu.Lock()
+	if target.state == StateStarting {
+		target.state = StateReady
+	}
+	supervisor.mu.Unlock()
+	close(target.ready)
+	supervisor.logger.Info("process ready", "process", name, "pid", target.pid)
 }
 
 type ExitedError struct {
@@ -124,12 +136,15 @@ func (supervisor *Supervisor) WaitReady(ctx context.Context, name string) error 
 	}
 	select {
 	case <-waited.ready:
-		return nil
 	case <-waited.exited.Done():
-		supervisor.mu.Lock()
-		defer supervisor.mu.Unlock()
-		return &ExitedError{Name: name, ExitCode: waited.exitCode}
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	// A process that was ready and then exited is of no use to the caller.
+	if waited.exited.Err() != nil {
+		supervisor.mu.Lock()
+		defer supervisor.mu.Unlock()
+		return &ExitedError{Name: name, ExitCode: waited.exitCode}
+	}
+	return nil
 }

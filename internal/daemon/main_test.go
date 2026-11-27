@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 	err := Run(ctx, Options{
 		Paths:      Paths{StateDir: stateDir},
 		Version:    "v-test",
-		Supervisor: SupervisorOptions{ProbeInterval: 20 * time.Millisecond},
+		Supervisor: quickProbes,
 	})
 	stop()
 	if err != nil {

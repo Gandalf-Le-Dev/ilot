@@ -77,8 +77,8 @@ func TestOutputAndExitCodeOfAProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started.PID == 0 || started.State != StateReady {
-		t.Fatalf("a started process has a process ID and is ready, got %+v", started)
+	if started.PID == 0 || started.State != StateStarting {
+		t.Fatalf("a started process has a process ID and is not ready yet, got %+v", started)
 	}
 
 	exited := waitForState(t, supervisor, "api", StateExited)
@@ -311,7 +311,7 @@ func TestRestartStartsTheStoredSpecificationAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.PID == first.PID || second.Hash != first.Hash || second.State != StateReady {
+	if second.PID == first.PID || second.Hash != first.Hash || second.State != StateStarting {
 		t.Fatalf("got %+v after a restart of %+v", second, first)
 	}
 	waitUntil(t, "the first process is dead", func() bool { return !isProcessAlive(first.PID) })

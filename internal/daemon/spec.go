@@ -16,7 +16,7 @@ type Spec struct {
 	LogFile string            `json:"log_file"`
 	// Runs instead of SIGTERM when the process stops.
 	Stop string `json:"stop,omitempty"`
-	// With no probe, a process is ready as soon as it runs.
+	// With no probe, a process is ready when it still runs after a short time.
 	Ready *Probe `json:"ready,omitempty"`
 }
 

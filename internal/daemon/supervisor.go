@@ -25,6 +25,8 @@ const (
 	// A grandchild that left the process group can hold the output pipe open for ever.
 	outputDrainTimeout = 2 * time.Second
 	exitCodeNotStarted = -1
+	// A command with a mistake exits within this time, and must not look ready to a caller that waits.
+	defaultAliveWindow = 500 * time.Millisecond
 )
 
 type SupervisorOptions struct {
@@ -34,6 +36,8 @@ type SupervisorOptions struct {
 	// The time between two readiness probes, and the longest time of one probe.
 	ProbeInterval time.Duration
 	ProbeTimeout  time.Duration
+	// How long a process with no probe must live before it is ready.
+	AliveWindow time.Duration
 	// Where the supervisor records its live processes, for the daemon that comes after a crash. Empty: no record.
 	RecordFile string
 }
@@ -44,6 +48,7 @@ type Supervisor struct {
 	logMaxBytes   int64
 	probeInterval time.Duration
 	probeTimeout  time.Duration
+	aliveWindow   time.Duration
 	recordFile    string
 	recordMu      sync.Mutex
 	bootID        string
@@ -73,7 +78,7 @@ type run struct {
 	output    *rotatingFile
 	// Cancelled when the process has exited and its output is in the log file.
 	exited context.Context
-	// Closed at the first probe that passes, or at the start when the specification has no probe.
+	// Closed at the first probe that passes, or after the alive window when the specification has no probe.
 	ready chan struct{}
 
 	// Guarded by Supervisor.mu.
@@ -91,6 +96,7 @@ func NewSupervisor(options SupervisorOptions) *Supervisor {
 		logMaxBytes:   cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
 		probeInterval: cmp.Or(options.ProbeInterval, defaultProbeInterval),
 		probeTimeout:  cmp.Or(options.ProbeTimeout, defaultProbeTimeout),
+		aliveWindow:   cmp.Or(options.AliveWindow, defaultAliveWindow),
 		recordFile:    options.RecordFile,
 		entries:       map[string]*entry{},
 	}
@@ -282,16 +288,14 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 	exited, markExited := context.WithCancel(context.Background())
 	started := &run{pid: command.Process.Pid, output: output, exited: exited, ready: make(chan struct{}), state: StateStarting}
 	started.startedAt, _ = processStartTime(started.pid)
-	if spec.Ready == nil {
-		started.state = StateReady
-		close(started.ready)
-	}
 	supervisor.mu.Lock()
 	target.run = started
 	supervisor.mu.Unlock()
 	supervisor.saveRecord()
 	if spec.Ready != nil {
 		supervisor.background.Go(func() { supervisor.probeUntilReady(name, spec, started) })
+	} else {
+		supervisor.background.Go(func() { supervisor.readyIfStillAlive(name, started) })
 	}
 	supervisor.background.Go(func() {
 		supervisor.watch(name, started, command, pipeReader, markExited)
