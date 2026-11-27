@@ -1,0 +1,9 @@
+apps:
+  hello:
+    build: go build -o {{.BinDir}}/hello .
+    run: "{{.BinDir}}/hello --port={{.Ports.http}}"
+    env:
+      STACK: "{{.Stack}}"
+    ports: [http]
+    route: http
+    ready: {path: /health}
