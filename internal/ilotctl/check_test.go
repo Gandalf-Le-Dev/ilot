@@ -25,6 +25,17 @@ func TestCheckRenderingReportsATemplateTypoWithItsApp(t *testing.T) {
 	}
 }
 
+func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
+	config := testConfig()
+	config.Apps["stoppable"] = appconfig.App{Run: "docker run --name stoppable nginx", Stop: "docker stop {{.Stak}}"}
+
+	problems := CheckRendering(config)
+
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "stoppable") || !strings.Contains(problems[0].Error(), "Stak") {
+		t.Fatalf("CheckRendering = %v, want one problem naming stoppable and Stak", errors.Join(problems...))
+	}
+}
+
 func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
 	config := testConfig()
 	config.Apps["mounting"] = appconfig.App{

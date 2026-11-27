@@ -41,6 +41,7 @@ type ExternalService struct {
 type App struct {
 	Build      string            `yaml:"build"`
 	Run        string            `yaml:"run"`
+	Stop       string            `yaml:"stop"`
 	Env        map[string]string `yaml:"env"`
 	Ports      []string          `yaml:"ports"`
 	Route      string            `yaml:"route"`
@@ -240,6 +241,9 @@ func (config Config) validateApps() error {
 		app := config.Apps[name]
 		if app.Run == "" && app.Container.IsZero() {
 			problems = append(problems, fmt.Errorf("app %q: missing run command", name))
+		}
+		if app.Stop != "" && !app.Container.IsZero() {
+			problems = append(problems, fmt.Errorf("app %q: stop is for an app with a run command: ilot stops a container app itself", name))
 		}
 		if app.Route != "" && !slices.Contains(app.Ports, app.Route) {
 			problems = append(problems, fmt.Errorf("app %q: route %q is not one of its ports %v", name, app.Route, app.Ports))

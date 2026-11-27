@@ -124,6 +124,9 @@ func (controller *Controller) renderEveryTemplateOf(stacks stackSet, appInstance
 	if !controller.isContainer(appInstance) {
 		templates = append(templates, app.Run)
 	}
+	if app.Stop != "" {
+		templates = append(templates, app.Stop)
+	}
 	repoEnv := controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, appconfig.DefaultRepo)]
 	for _, valueByKey := range []map[string]string{repoEnv, app.Env} {
 		for _, key := range slices.Sorted(maps.Keys(valueByKey)) {

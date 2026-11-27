@@ -1497,6 +1497,20 @@ func TestProxyPortTemplateGivesTheProxyPort(t *testing.T) {
 	}
 }
 
+func TestAnAppWithAStopCommandStopsWithItRendered(t *testing.T) {
+	environment := newTestEnvironment(t)
+	standalone := environment.controller.Config.Apps["standalone"]
+	standalone.Run = "docker run --rm --name standalone-{{.Stack}} -p {{.Ports.http}}:80 nginx"
+	standalone.Stop = "docker stop standalone-{{.Stack}}"
+	environment.controller.Config.Apps["standalone"] = standalone
+
+	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
+
+	if got, want := environment.supervisor.runningSpecs["standalone.proj-1234"].ShutdownCommand, "docker stop standalone-proj-1234"; got != want {
+		t.Errorf("ShutdownCommand = %q, want %q", got, want)
+	}
+}
+
 func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 	environment := newTestEnvironment(t)
 

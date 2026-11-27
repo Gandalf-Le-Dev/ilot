@@ -57,6 +57,10 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 	if err != nil {
 		return processcompose.ProcessSpec{}, err
 	}
+	shutdownCommand, err := controller.shutdownCommand(stacks, appInstance)
+	if err != nil {
+		return processcompose.ProcessSpec{}, err
+	}
 	return processcompose.ProcessSpec{
 		Name:            appInstance.processName(),
 		Command:         command,
@@ -64,12 +68,31 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 		Env:             env,
 		LogFile:         controller.logFile(appInstance),
 		Ready:           controller.readyProbe(stacks, appInstance),
-		ShutdownCommand: controller.shutdownCommand(appInstance),
+		ShutdownCommand: shutdownCommand,
 	}, nil
 }
 
 func (controller *Controller) processCommand(stacks stackSet, appInstance instance) (string, error) {
 	command, err := controller.renderTemplate(stacks, appInstance, controller.app(appInstance).Run)
+	if err != nil {
+		return "", err
+	}
+	checkoutDir, err := controller.checkoutDir(stacks, appInstance)
+	if err != nil {
+		return "", err
+	}
+	return controller.withRepoTools(checkoutDir, command), nil
+}
+
+func (controller *Controller) shutdownCommand(stacks stackSet, appInstance instance) (string, error) {
+	if controller.isContainer(appInstance) {
+		return containerStopCommand(appInstance), nil
+	}
+	stop := controller.app(appInstance).Stop
+	if stop == "" {
+		return "", nil
+	}
+	command, err := controller.renderTemplate(stacks, appInstance, stop)
 	if err != nil {
 		return "", err
 	}
