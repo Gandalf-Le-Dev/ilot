@@ -58,7 +58,7 @@ type cli struct {
 type daemonCommand struct {
 	Status  daemonStatusCommand  `cmd:"" help:"Print the version, the process ID and the proxy address of the ilot daemon."`
 	Stop    daemonStopCommand    `cmd:"" help:"Stop every app of every stack, then the ilot daemon. The stacks keep their apps: ilot start --all starts them again."`
-	Restart daemonRestartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start again every app that a stack of the current workspace owns. Use it after an upgrade of ilot or a change of proxy in the global file."`
+	Restart daemonRestartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start again every app that a stack of any workspace owns. A workspace that fails stays down, and the error names it. Use it after an upgrade of ilot or a change of proxy in the global file."`
 	Run     daemonRunCommand     `cmd:"" hidden:"" help:"Run the daemon that supervises the apps, until a signal or a shutdown call stops it. ilot runs it by itself."`
 }
 

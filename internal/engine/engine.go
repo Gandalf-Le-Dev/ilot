@@ -237,17 +237,6 @@ func (executor *Executor) RestartApps(ctx context.Context, stackName string, app
 	return nil
 }
 
-// RestartDaemon replaces the daemon, for example after an upgrade of ilot or a change of proxy, then starts again every app that a stack of the workspace owns.
-func (executor *Executor) RestartDaemon(ctx context.Context) error {
-	if executor.Supervisor.IsUp(ctx) {
-		fmt.Fprintln(executor.Output, "stopping every app of every stack, and the ilot daemon")
-	}
-	if err := executor.Supervisor.Shutdown(ctx); err != nil {
-		return err
-	}
-	return executor.StartAll(ctx)
-}
-
 // StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
 // A member that runs gets no call.
 func (executor *Executor) StartAll(ctx context.Context) error {

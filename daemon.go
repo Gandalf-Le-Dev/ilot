@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/engine"
+	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 type daemonStatusCommand struct{}
@@ -95,25 +98,77 @@ func (daemonStopCommand) Run(ctx context.Context) error {
 	return nil
 }
 
-// Outside a workspace, the restart starts no app: only the files of a workspace say how to start its apps.
+// The shutdown stops the apps of every workspace, so the restart starts again the members of every workspace that the state records, from any folder.
 func (command *daemonRestartCommand) Run(ctx context.Context) error {
-	executor, _, findErr := newExecutorFor(ctx, selection{Workspace: "", Stack: ""}, command.Timeout, baseStack)
-	if findErr == nil {
-		return executor.RestartDaemon(ctx)
-	}
 	supervisor, _, err := daemonOfThisMachine()
 	if err != nil {
 		return err
 	}
-	if supervisor.IsUp(ctx) {
-		fmt.Fprintln(os.Stderr, "stopping every app of every stack, and the ilot daemon")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
 	}
-	if err := (engine.AuditedSupervisor{ProcessSupervisor: supervisor, Logger: auditLog}).Shutdown(ctx); err != nil {
+	current, err := state.Store{RootDir: stateDirOf(homeDir)}.Load()
+	if err != nil {
+		return err
+	}
+	startAllOf := func(ctx context.Context, workspaceName string) error {
+		executor, _, err := newExecutorFor(ctx, selection{Workspace: workspaceName, Stack: ""}, command.Timeout, baseStack)
+		if err != nil {
+			return err
+		}
+		return executor.StartAll(ctx)
+	}
+	return restartDaemon(ctx, os.Stderr, engine.AuditedSupervisor{ProcessSupervisor: supervisor, Logger: auditLog}, workspacesWithMembers(current), startAllOf)
+}
+
+type daemonRestarter interface {
+	IsUp(ctx context.Context) bool
+	Shutdown(ctx context.Context) error
+	Up(ctx context.Context) error
+}
+
+// restartDaemon goes on after a workspace that fails, so that one broken ilot.yaml does not keep the other workspaces down.
+func restartDaemon(ctx context.Context, output io.Writer, supervisor daemonRestarter, workspaceNames []string, startAllOf func(context.Context, string) error) error {
+	if supervisor.IsUp(ctx) {
+		fmt.Fprintln(output, "stopping every app of every stack, and the ilot daemon")
+	}
+	if err := supervisor.Shutdown(ctx); err != nil {
 		return err
 	}
 	if err := supervisor.Up(ctx); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "the new ilot daemon runs, and it started no app, because the current folder gives no workspace: %v\nRun ilot start --all in a repo of each workspace to start its apps again\n", findErr)
-	return nil
+	if len(workspaceNames) == 0 {
+		fmt.Fprintln(output, "the new ilot daemon runs. No stack owns an app, so it started none")
+		return nil
+	}
+	var problems []error
+	for _, workspaceName := range workspaceNames {
+		fmt.Fprintf(output, "starting the apps of the workspace %s again\n", workspaceName)
+		if err := startAllOf(ctx, workspaceName); err != nil {
+			problems = append(problems, fmt.Errorf("the apps of the workspace %s stay down: %w\nFix the cause, then run: ilot start --all --workspace %s", workspaceName, err, workspaceName))
+		}
+	}
+	return errors.Join(problems...)
+}
+
+func workspacesWithMembers(current state.State) []string {
+	var names []string
+	for _, workspaceName := range slices.Sorted(maps.Keys(current.Workspaces)) {
+		known := current.Workspaces[workspaceName]
+		if known.Root == "" {
+			continue
+		}
+		hasMember := false
+		for _, stack := range known.Stacks {
+			for _, app := range stack.Apps {
+				hasMember = hasMember || app.Wanted
+			}
+		}
+		if hasMember {
+			names = append(names, workspaceName)
+		}
+	}
+	return names
 }
