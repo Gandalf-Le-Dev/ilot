@@ -108,27 +108,6 @@ func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 	}
 }
 
-func TestRemoveDeletesTheNamespaceEvenWhenNoConfigDeclaresTheAppAnyMore(t *testing.T) {
-	environment := newTestEnvironment(t)
-	masterConfig := testConfig()
-	delete(masterConfig.Apps, "namespaced-worker")
-	ticketConfig := testConfig()
-	configByStack := map[string]appconfig.Config{stack.MasterStackName: masterConfig, "proj-1234": ticketConfig}
-	useConfigPerStack(environment, configByStack)
-	environment.controller.Config = ticketConfig
-	environment.start(t, environment.featureStack, StartOptions{}, "namespaced-worker")
-
-	configByStack["proj-1234"] = masterConfig
-	environment.controller.Config = masterConfig
-	if err := environment.controller.Remove(t.Context(), "proj-1234"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-
-	if want := []string{"proj-1234"}; !slices.Equal(*environment.deletedNamespaces, want) {
-		t.Errorf("deleted namespaces = %v, want %v", *environment.deletedNamespaces, want)
-	}
-}
-
 func TestListKeepsGoingWhenTheConfigOfAStackCannotBeRead(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")

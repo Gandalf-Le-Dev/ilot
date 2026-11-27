@@ -176,16 +176,14 @@ type recordedBuild struct {
 }
 
 type testEnvironment struct {
-	ensuredNamespaces *[]string
-	deletedNamespaces *[]string
-	controller        *Controller
-	supervisor        *fakeSupervisor
-	builds            *[]recordedBuild
-	buildEnvirons     *[][]string
-	output            *bytes.Buffer
-	master            stack.Worktree
-	featureStack      stack.Worktree
-	routesDir         string
+	controller    *Controller
+	supervisor    *fakeSupervisor
+	builds        *[]recordedBuild
+	buildEnvirons *[][]string
+	output        *bytes.Buffer
+	master        stack.Worktree
+	featureStack  stack.Worktree
+	routesDir     string
 }
 
 // Every ilot command builds its own controller, and gives its shell to the daemon client too: this one sees the daemon as it is now.
@@ -292,10 +290,6 @@ func testConfig() appconfig.Config {
 				Ports:     []string{"http"},
 				DependsOn: []string{"search"},
 			},
-			"namespaced-worker": {
-				Run:               "worker --namespace={{.Stack}}",
-				TemporalNamespace: true,
-			},
 			"portal-standalone": {
 				Repo:  "portal",
 				Build: "go build ./cmd/api",
@@ -324,8 +318,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
 	routesDir := t.TempDir()
-	ensuredNamespaces := &[]string{}
-	deletedNamespaces := &[]string{}
 	controller := &Controller{
 		Config:     testConfig(),
 		Store:      state.Store{RootDir: t.TempDir()},
@@ -346,14 +338,6 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 			}
 			return devboxPath
 		},
-		EnsureTemporalNamespace: func(_ context.Context, namespace string) error {
-			*ensuredNamespaces = append(*ensuredNamespaces, namespace)
-			return nil
-		},
-		DeleteTemporalNamespace: func(_ context.Context, namespace string) error {
-			*deletedNamespaces = append(*deletedNamespaces, namespace)
-			return nil
-		},
 		KeyringFile:      "",
 		RoutesDir:        routesDir,
 		BackendHost:      "devbox",
@@ -363,16 +347,14 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	}
 	supervisor.envAtStart = shellEnvOf(controller)
 	return testEnvironment{
-		ensuredNamespaces: ensuredNamespaces,
-		deletedNamespaces: deletedNamespaces,
-		controller:        controller,
-		supervisor:        supervisor,
-		builds:            builds,
-		buildEnvirons:     buildEnvirons,
-		output:            output,
-		master:            stack.Worktree{Name: "master", WorktreeDir: "/src/platform", MainCheckoutDir: "/src/platform"},
-		featureStack:      stack.Worktree{Name: "proj-1234", WorktreeDir: "/worktrees/proj-1234", MainCheckoutDir: "/src/platform"},
-		routesDir:         routesDir,
+		controller:    controller,
+		supervisor:    supervisor,
+		builds:        builds,
+		buildEnvirons: buildEnvirons,
+		output:        output,
+		master:        stack.Worktree{Name: "master", WorktreeDir: "/src/platform", MainCheckoutDir: "/src/platform"},
+		featureStack:  stack.Worktree{Name: "proj-1234", WorktreeDir: "/worktrees/proj-1234", MainCheckoutDir: "/src/platform"},
+		routesDir:     routesDir,
 	}
 }
 
@@ -1476,30 +1458,6 @@ func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 	want := "run proj-1234 jdoe /src/portal http://temporal.devbox.dev.example.net:18080 http://internalapi.master.dev.example.net:18080"
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
-	}
-}
-
-func TestNamespaceIsEnsuredOnEveryStart(t *testing.T) {
-	environment := newTestEnvironment(t)
-
-	environment.start(t, environment.featureStack, StartOptions{}, "namespaced-worker")
-	if err := environment.controller.Stop(t.Context(), environment.featureStack, []string{"namespaced-worker"}); err != nil {
-		t.Fatalf("Stop: %v", err)
-	}
-	environment.start(t, environment.featureStack, StartOptions{}, "namespaced-worker")
-
-	if want := []string{"proj-1234", "proj-1234"}; !slices.Equal(*environment.ensuredNamespaces, want) {
-		t.Errorf("ensured namespaces = %v, want %v", *environment.ensuredNamespaces, want)
-	}
-}
-
-func TestNoNamespaceForAnAppWithoutTheFlag(t *testing.T) {
-	environment := newTestEnvironment(t)
-
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-
-	if len(*environment.ensuredNamespaces) != 0 {
-		t.Errorf("ensured namespaces = %v, want none", *environment.ensuredNamespaces)
 	}
 }
 

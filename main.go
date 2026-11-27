@@ -51,7 +51,7 @@ type cli struct {
 	Restart restartCommand `cmd:"" help:"Stop every app of every stack, start ilot again with a fresh environment from the shell files, then start the apps that ran and the autostart apps."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
-	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs, routes and Temporal namespace."`
+	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs and routes."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
 }
@@ -343,30 +343,28 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
 	controller := &ilotctl.Controller{
-		Config:                  config,
-		Store:                   state.Store{RootDir: stateDir},
-		Supervisor:              processcompose.Client{Binary: processComposeBinary, StateDir: filepath.Join(stateDir, "process-compose"), Env: shellEnv},
-		RunBuild:                runBuild,
-		EnsureImage:             ensureImage,
-		IsPortFreeOnHost:        ports.IsFreeOnHost,
-		IsExternalServiceUp:     isListeningOnLocalhost,
-		CheckoutsForStack:       currentWorkspace.checkoutsForStack,
-		ConfigForStack:          currentWorkspace.configForStack,
-		UsesMise:                hasMiseConfig,
-		ReposNotCloned:          currentWorkspace.reposNotCloned(),
-		HostPath:                hostPathFor(currentWorkspace.homeDir, os.Getenv("LC_DEVBOX_LOGIN")),
-		EnsureTemporalNamespace: ensureTemporalNamespace(temporalAddress(config)),
-		DeleteTemporalNamespace: deleteTemporalNamespace(temporalAddress(config)),
-		Personal:                currentWorkspace.settings,
-		KeyringFile:             filepath.Join(currentWorkspace.homeDir, ".keyring"),
-		ShellEnv:                shellEnv,
-		Login:                   os.Getenv("LC_DEVBOX_LOGIN"),
-		RoutesDir:               routesDir,
-		BackendHost:             "devbox",
-		ProxyPort:               cmp.Or(os.Getenv("ILOT_PROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
-		ReadyTimeout:            readyTimeout,
-		ProgressInterval:        10 * time.Second,
-		Output:                  os.Stdout,
+		Config:              config,
+		Store:               state.Store{RootDir: stateDir},
+		Supervisor:          processcompose.Client{Binary: processComposeBinary, StateDir: filepath.Join(stateDir, "process-compose"), Env: shellEnv},
+		RunBuild:            runBuild,
+		EnsureImage:         ensureImage,
+		IsPortFreeOnHost:    ports.IsFreeOnHost,
+		IsExternalServiceUp: isListeningOnLocalhost,
+		CheckoutsForStack:   currentWorkspace.checkoutsForStack,
+		ConfigForStack:      currentWorkspace.configForStack,
+		UsesMise:            hasMiseConfig,
+		ReposNotCloned:      currentWorkspace.reposNotCloned(),
+		HostPath:            hostPathFor(currentWorkspace.homeDir, os.Getenv("LC_DEVBOX_LOGIN")),
+		Personal:            currentWorkspace.settings,
+		KeyringFile:         filepath.Join(currentWorkspace.homeDir, ".keyring"),
+		ShellEnv:            shellEnv,
+		Login:               os.Getenv("LC_DEVBOX_LOGIN"),
+		RoutesDir:           routesDir,
+		BackendHost:         "devbox",
+		ProxyPort:           cmp.Or(os.Getenv("ILOT_PROXY_PORT"), os.Getenv("DEVHOST_PORT_7")),
+		ReadyTimeout:        readyTimeout,
+		ProgressInterval:    10 * time.Second,
+		Output:              os.Stdout,
 	}
 	return controller, nil
 }

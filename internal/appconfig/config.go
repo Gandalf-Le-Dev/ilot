@@ -41,25 +41,24 @@ type ExternalService struct {
 }
 
 type App struct {
-	Build             string            `yaml:"build"`
-	Run               string            `yaml:"run"`
-	Env               map[string]string `yaml:"env"`
-	Ports             []string          `yaml:"ports"`
-	Route             string            `yaml:"route"`
-	Ready             ReadyCheck        `yaml:"ready"`
-	DependsOn         []string          `yaml:"depends_on"`
-	GatewayAliases    []string          `yaml:"gateway_aliases"`
-	Gateway           bool              `yaml:"gateway"`
-	Shared            bool              `yaml:"shared"`
-	Autostart         bool              `yaml:"autostart"`
-	FixedPorts        map[string]int    `yaml:"fixed_ports"`
-	Dir               string            `yaml:"dir"`
-	Watch             Watch             `yaml:"watch"`
-	HomePath          string            `yaml:"home_path"`
-	Repo              string            `yaml:"-"`
-	TemporalNamespace bool              `yaml:"temporal_namespace"`
-	Container         Container         `yaml:"container"`
-	PerStack          bool              `yaml:"per_stack"`
+	Build          string            `yaml:"build"`
+	Run            string            `yaml:"run"`
+	Env            map[string]string `yaml:"env"`
+	Ports          []string          `yaml:"ports"`
+	Route          string            `yaml:"route"`
+	Ready          ReadyCheck        `yaml:"ready"`
+	DependsOn      []string          `yaml:"depends_on"`
+	GatewayAliases []string          `yaml:"gateway_aliases"`
+	Gateway        bool              `yaml:"gateway"`
+	Shared         bool              `yaml:"shared"`
+	Autostart      bool              `yaml:"autostart"`
+	FixedPorts     map[string]int    `yaml:"fixed_ports"`
+	Dir            string            `yaml:"dir"`
+	Watch          Watch             `yaml:"watch"`
+	HomePath       string            `yaml:"home_path"`
+	Repo           string            `yaml:"-"`
+	Container      Container         `yaml:"container"`
+	PerStack       bool              `yaml:"per_stack"`
 }
 
 type Container struct {

@@ -48,7 +48,6 @@ A Traefik proxy sends each URL to its app.
 - A Traefik container named `ilotproxy_<login>` that mounts its routes folder at `/etc/traefik/routes`. To skip that lookup, set `ILOT_ROUTES_DIR` to the routes folder.
 - The port of that proxy in `ILOT_PROXY_PORT`, or else in `DEVHOST_PORT_7`.
 - A wildcard DNS name, `*.<domain>`, that points to the proxy.
-- The `temporal` CLI, only for apps with `temporal_namespace`.
 - mise, only for repos with a `mise.toml` at the root.
 
 ## Install
@@ -135,7 +134,7 @@ ilot logs -f -n 20 api        # the last 20 lines, then the new ones
 ilot env api                  # the environment of the app, with the source of each value
 ilot check                    # check the ilot.yaml of this repo with the files of the other repos
 ilot check path/to/ilot.yaml  # check that file
-ilot rm proj-1234             # stop a stack and delete its state, logs, routes and Temporal namespace
+ilot rm proj-1234             # stop a stack and delete its state, logs and routes
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
 ilot restart                  # stop every app, start the daemon again with a fresh environment, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran: run it at login
@@ -175,7 +174,6 @@ The fields of an app:
 | `shared` | The app runs once, in the `devbox` stack, for every worktree. Each of its ports needs a number in `fixed_ports`. |
 | `per_stack` | An app that depends on this app gets the copy of its own stack, not the `master` copy. |
 | `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. An app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
-| `temporal_namespace` | Before each start, `ilot` creates a Temporal namespace named after the stack. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
 
 The `build`, `run` and `env` values can use these templates:
