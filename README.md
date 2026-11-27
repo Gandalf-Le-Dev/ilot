@@ -196,7 +196,7 @@ ilot restart api              # build the app again, then restart it; its depend
 ilot doctor                   # test git, the state folder, the daemon, the proxy address, the name lookup, the login shell, and watchexec and docker when an app needs them
 ilot daemon status            # the version, the process ID and the proxy address of the daemon
 ilot daemon stop              # stop every app of every stack, then the daemon; the stacks keep their apps
-ilot daemon restart           # stop every app and the daemon, start a new daemon, then start the apps that the stacks of this workspace own
+ilot daemon restart           # stop every app and the daemon, start a new daemon, then start the apps that the stacks of every workspace own
 ilot --version
 ilot skill print              # print the skill for AI agents
 ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md

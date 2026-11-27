@@ -62,7 +62,7 @@ ilot restart api                # build the app again, then restart it, in this 
 ilot doctor                     # test what ilot needs on this machine; each line that needs a fix names the fix
 ilot daemon status              # the version, the process ID and the proxy address of the ilot daemon
 ilot daemon stop                # stop every app of every stack, then the daemon (ask first)
-ilot daemon restart             # stop every app and the daemon, start a new daemon, then start the apps of this workspace again (ask first)
+ilot daemon restart             # stop every app and the daemon, start a new daemon, then start the apps of every workspace again (ask first)
 ilot --version                  # the version of ilot
 ilot skill print                # print this skill
 ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md

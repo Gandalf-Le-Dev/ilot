@@ -80,47 +80,26 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 	}
 }
 
-func TestADaemonRestartStopsTheDaemonAndStartsTheMembers(t *testing.T) {
+func TestStartAllAfterAShutdownGivesTheMembersTheShellOfTheCommand(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	restart := environment.executorOfANewCommand()
 	restart.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
-	environment.supervisor.events = nil
-
-	if err := restart.RestartDaemon(t.Context()); err != nil {
-		t.Fatalf("RestartDaemon: %v", err)
+	if err := restart.Supervisor.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 
-	if events := environment.supervisor.events; len(events) == 0 || events[0] != "shutdown" {
-		t.Errorf("events = %v, want a shutdown first", events)
+	if err := restart.StartAll(t.Context()); err != nil {
+		t.Fatalf("StartAll: %v", err)
 	}
+
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
 	if want := []string{"standalone.proj-1234.shop"}; !slices.Equal(running, want) {
 		t.Errorf("running after restart %v, want %v: the members of the stacks", running, want)
 	}
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY after the restart = %q, want the shell of the restart", got)
-	}
-	if !strings.Contains(environment.output.String(), "stopping every app of every stack, and the ilot daemon") {
-		t.Errorf("output = %q, want a line about the stop", environment.output.String())
-	}
-}
-
-func TestADaemonRestartOfADownDaemonStartsTheMembers(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.supervisor.simulateDaemonRestart()
-
-	if err := environment.executorOfANewCommand().RestartDaemon(t.Context()); err != nil {
-		t.Fatalf("RestartDaemon: %v", err)
-	}
-
-	if _, isRunning := environment.supervisor.runningSpecs["standalone.proj-1234.shop"]; !isRunning {
-		t.Errorf("running after restart %v, want standalone.proj-1234.shop back", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
-	}
-	if strings.Contains(environment.output.String(), "stopping every app") {
-		t.Errorf("output = %q, announces a stop although nothing ran", environment.output.String())
 	}
 }
 
