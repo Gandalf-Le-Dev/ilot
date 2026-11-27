@@ -56,12 +56,16 @@ func (executor *Executor) List(ctx context.Context) (Listing, error) {
 			appInstance := plan.Instance{Stack: stackName, App: appName}
 			status := "stopped"
 			process, isKnown := processByName[snapshot.ProcessName(appInstance)]
+			undeclared := isUndeclared(snapshot, appInstance)
 			switch {
 			case isKnown:
 				status = statusOf(process)
 			case stacks[stackName].Apps[appName].Wanted:
 				status = statusDown
-				listing.Restore = "ilot start --all"
+				// ilot start --all does not start an app that no ilot.yaml declares.
+				if !undeclared {
+					listing.Restore = "ilot start --all"
+				}
 			}
 			listing.Apps = append(listing.Apps, AppRow{
 				Stack:      stackName,
@@ -69,7 +73,7 @@ func (executor *Executor) List(ctx context.Context) (Listing, error) {
 				Status:     status,
 				Ports:      stacks[stackName].Apps[appName].Ports,
 				URL:        snapshot.URL(appInstance),
-				Undeclared: isUndeclared(snapshot, appInstance),
+				Undeclared: undeclared,
 			})
 		}
 	}

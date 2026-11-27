@@ -279,13 +279,22 @@ func (executor *Executor) planBoot(snapshot plan.Snapshot) (plan.Start, []error,
 // It reads the file of each stack. A stack whose file is broken stays down, and so does an instance whose templates do not render, with its dependents. The others start.
 func (executor *Executor) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance, processByName map[string]daemon.Process) (plan.Start, []error, error) {
 	var problems []error
+	var loadedInstances []plan.Instance
 	for _, wantedInstance := range snapshot.Wanted() {
 		if err := executor.addStack(snapshot, wantedInstance.Stack); err != nil {
 			problems = append(problems, err)
 			continue
 		}
-		if !slices.Contains(bootInstances, wantedInstance) {
-			bootInstances = append(bootInstances, wantedInstance)
+		loadedInstances = append(loadedInstances, wantedInstance)
+	}
+	// The file of any stack can declare an app with the scope base, so this test waits until every file is loaded.
+	for _, loadedInstance := range loadedInstances {
+		if _, isDeclared := snapshot.Declaration(loadedInstance); !isDeclared {
+			problems = append(problems, fmt.Errorf("%s does not start: no ilot.yaml declares it any more. Give back its ports with ilot stop %s in stack %s", snapshot.ProcessName(loadedInstance), loadedInstance.App, loadedInstance.Stack))
+			continue
+		}
+		if !slices.Contains(bootInstances, loadedInstance) {
+			bootInstances = append(bootInstances, loadedInstance)
 		}
 	}
 	start, err := executor.planWithPorts(snapshot, bootInstances, StartOptions{SkipDependencies: false}, processByName)
