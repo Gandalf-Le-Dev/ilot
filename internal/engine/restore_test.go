@@ -2,7 +2,11 @@ package engine
 
 import (
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func TestAfterADaemonRestartAStartStartsOnlyWhatItNeeds(t *testing.T) {
@@ -77,4 +81,52 @@ func TestStartAllSendsNoCallForAMemberThatRuns(t *testing.T) {
 	if want := []string{"put publicapi.proj-1234.platform"}; !slices.Equal(environment.supervisor.calls, want) {
 		t.Errorf("calls = %v, want %v", environment.supervisor.calls, want)
 	}
+}
+
+// brokenTemplateInAStack makes members of proj-1234 whose run template no longer renders, as after an edit of its ilot.yaml.
+func brokenTemplateInAStack(t *testing.T, environment testEnvironment) {
+	t.Helper()
+	baseConfig := testConfig()
+	ticketConfig := configWithApps(baseConfig, map[string]config.App{
+		"reader":        {Scope: "stack", Run: "reader"},
+		"reader-client": {Scope: "stack", Run: "client", DependsOn: []string{"reader"}},
+	})
+	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": ticketConfig})
+	environment.executor.Config = ticketConfig
+	environment.start(t, environment.featureStack, StartOptions{}, "reader-client")
+	environment.executor.Config = baseConfig
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	ticketConfig.Apps["reader"] = config.App{Scope: "stack", Run: "sleep {{.Ports.nope}}"}
+	environment.supervisor.simulateDaemonRestart()
+}
+
+func checkOnlyTheBrokenStackStaysDown(t *testing.T, environment testEnvironment, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "reader.proj-1234.platform does not start") || !strings.Contains(err.Error(), "reader-client.proj-1234.platform skipped: it depends on reader.proj-1234.platform") {
+		t.Errorf("error = %v, want the broken template and its dependent named", err)
+	}
+	started := environment.supervisor.startedInOrder
+	if !slices.Contains(started, "standalone.base.platform") {
+		t.Errorf("started %v, want standalone.base.platform back: its stack has no broken template", started)
+	}
+	if slices.Contains(started, "reader.proj-1234.platform") || slices.Contains(started, "reader-client.proj-1234.platform") {
+		t.Errorf("started %v, want reader and reader-client left down", started)
+	}
+	if !environment.isStoredAsRunning(t, "proj-1234", "reader") {
+		t.Error("reader lost its membership, want it kept for the next start")
+	}
+}
+
+func TestStartAllStartsTheOtherAppsWhenATemplateDoesNotRender(t *testing.T) {
+	environment := newTestEnvironment(t)
+	brokenTemplateInAStack(t, environment)
+
+	checkOnlyTheBrokenStackStaysDown(t, environment, environment.executor.StartAll(t.Context()))
+}
+
+func TestBootStartsTheOtherAppsWhenATemplateDoesNotRender(t *testing.T) {
+	environment := newTestEnvironment(t)
+	brokenTemplateInAStack(t, environment)
+
+	checkOnlyTheBrokenStackStaysDown(t, environment, environment.executor.Boot(t.Context(), environment.base))
 }
