@@ -5,12 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
-	"github.com/Gandalf-Le-Dev/ilot/internal/proxyfiles"
 	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 )
 
@@ -40,9 +37,6 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 		return err
 	}
 	if err := controller.applyAll(ctx, stacks); err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(controller.RoutesDir, proxyfiles.RoutesFileName(stackName))); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return controller.Store.Delete(stackName)

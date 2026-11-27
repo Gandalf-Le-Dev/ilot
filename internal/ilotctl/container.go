@@ -82,13 +82,6 @@ func (controller *Controller) isLinkedContainer(appInstance instance, dependency
 	return slices.Contains(slices.Collect(maps.Values(controller.app(appInstance).Container.Links)), dependencyName)
 }
 
-func (controller *Controller) routeHost(appInstance instance) string {
-	if controller.isContainer(appInstance) {
-		return containerName(appInstance)
-	}
-	return controller.BackendHost
-}
-
 // How a caller reaches an app: a container by its name, a process from a container through devbox's name, a process from a process on localhost.
 func (controller *Controller) hostFor(callerInstance, targetInstance instance) string {
 	switch {

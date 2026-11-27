@@ -35,7 +35,6 @@ type Controller struct {
 	Personal            personal.Settings
 	ShellEnv            func() (map[string]string, error)
 	Login               string
-	RoutesDir           string
 	BackendHost         string
 	ProxyPort           string
 	ReadyTimeout        time.Duration

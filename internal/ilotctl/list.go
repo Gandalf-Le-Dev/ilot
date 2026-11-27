@@ -104,8 +104,16 @@ func (controller *Controller) publicURL(appInstance instance) string {
 	return controller.publicBaseURL(appInstance) + controller.app(appInstance).HomePath
 }
 
+func (controller *Controller) publicHost(appInstance instance) string {
+	return appInstance.appName + "." + appInstance.stackName + "." + controller.Config.Domain
+}
+
 func (controller *Controller) publicBaseURL(appInstance instance) string {
-	url := fmt.Sprintf("http://%s.%s.%s", appInstance.appName, appInstance.stackName, controller.Config.Domain)
+	return controller.proxyURL(controller.publicHost(appInstance))
+}
+
+func (controller *Controller) proxyURL(host string) string {
+	url := "http://" + host
 	if controller.ProxyPort != "" {
 		url += ":" + controller.ProxyPort
 	}
@@ -120,10 +128,7 @@ func (controller *Controller) printURLs(stacks stackSet, requestedInstances []in
 	}
 }
 
+// The proxy answers a host that is no app with the list of every route.
 func (controller *Controller) HomeURL() string {
-	url := "http://home." + controller.Config.Domain
-	if controller.ProxyPort != "" {
-		url += ":" + controller.ProxyPort
-	}
-	return url
+	return controller.proxyURL(controller.Config.Domain)
 }

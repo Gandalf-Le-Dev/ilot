@@ -3,7 +3,6 @@ package ilotctl
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -27,8 +26,10 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 			t.Errorf("%s still runs", processName)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(environment.routesDir, "ilot-proj-1234.yml")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("routes file of the removed stack: stat err = %v, want not exist", err)
+	for _, route := range environment.supervisor.routes {
+		if strings.Contains(route.Host, ".proj-1234.") {
+			t.Errorf("the removed stack keeps the route %s", route.Host)
+		}
 	}
 	if _, err := os.Stat(environment.controller.Store.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)

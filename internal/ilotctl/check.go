@@ -49,7 +49,6 @@ func CheckRendering(config appconfig.Config) []error {
 		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
 		ShellEnv:            nil,
 		Login:               checkStackName,
-		RoutesDir:           "",
 		BackendHost:         "",
 		ProxyPort:           "",
 		ReadyTimeout:        0,
