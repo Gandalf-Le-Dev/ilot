@@ -1589,6 +1589,7 @@ func TestAMoreSpecificLiteralBeatsATemplatedValueOfTheRootRepo(t *testing.T) {
 }
 
 func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
 	environment := newTestEnvironment(t)
 	environment.executor.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}
 

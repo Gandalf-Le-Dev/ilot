@@ -94,7 +94,7 @@ func (machine *e2eMachine) writeProfile() {
 // The global file moves the proxy to a free port, so the test runs beside the ilot of the developer.
 func (machine *e2eMachine) writeGlobalFile() {
 	machine.t.Helper()
-	globalFile := filepath.Join(machine.homeDir, config.GlobalFilePath)
+	globalFile := filepath.Join(machine.homeDir, ".config", config.GlobalFilePath)
 	if err := os.MkdirAll(filepath.Dir(globalFile), 0o700); err != nil {
 		machine.t.Fatal(err)
 	}

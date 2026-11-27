@@ -87,7 +87,7 @@ func DaemonWarnings(status daemon.Status, version, proxyListen string) []string 
 	}
 	switch {
 	case status.ProxyError != "":
-		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address, or set proxy.listen to another one in ~/"+config.GlobalFilePath+", then run ilot daemon restart", status.ProxyError))
+		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address, or set proxy.listen to another one in %s, then run ilot daemon restart", status.ProxyError, config.GlobalFileShown()))
 	case status.ProxyAddress != proxyListen:
 		warnings = append(warnings, fmt.Sprintf("the proxy of the ilot daemon listens on %q, and this ilot expects %q: the URLs that ilot prints do not answer. Run ilot daemon restart", status.ProxyAddress, proxyListen))
 	}

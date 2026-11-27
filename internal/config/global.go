@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -9,13 +10,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	// The global file, under the home folder. It is optional.
-	GlobalFilePath = ".config/ilot/config.yaml"
+	// The global file under XDG_CONFIG_HOME, or under ~/.config without the variable. It is optional.
+	GlobalFilePath = "ilot/config.yaml"
 	// The personal file of an older ilot. The workspaces key of the global file replaces it.
 	oldPersonalFilePath = ".config/ilot/env.yaml"
 
@@ -76,6 +78,24 @@ func DefaultGlobal() Global {
 	}
 }
 
+// GlobalFile is $XDG_CONFIG_HOME/ilot/config.yaml, or ~/.config/ilot/config.yaml without the variable.
+func GlobalFile(homeDir string) string {
+	return filepath.Join(cmp.Or(os.Getenv("XDG_CONFIG_HOME"), filepath.Join(homeDir, ".config")), GlobalFilePath)
+}
+
+// GlobalFileShown is GlobalFile for a message, with ~ for the home folder.
+func GlobalFileShown() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join("$XDG_CONFIG_HOME", GlobalFilePath)
+	}
+	globalFile := GlobalFile(homeDir)
+	if rest, isUnderHome := strings.CutPrefix(globalFile, homeDir+"/"); isUnderHome {
+		return "~/" + rest
+	}
+	return globalFile
+}
+
 // OldPersonalFile gives the personal file of an older ilot, when the home folder still has one.
 func OldPersonalFile(homeDir string) (path string, exists bool) {
 	path = filepath.Join(homeDir, oldPersonalFilePath)
@@ -87,14 +107,14 @@ func OldPersonalFile(homeDir string) (path string, exists bool) {
 // The personal file of an older ilot is an error, so that its values do not go missing without a word.
 func LoadGlobal(homeDir string) (Global, error) {
 	if oldPersonalFile, exists := OldPersonalFile(homeDir); exists {
-		return Global{}, fmt.Errorf("%s is the personal file of an older ilot, and ilot no longer reads it: move its content to %s, under workspaces.<name of the workspace> (env, apps, and repos as <name>: <path>), then delete it", oldPersonalFile, filepath.Join(homeDir, GlobalFilePath))
+		return Global{}, fmt.Errorf("%s is the personal file of an older ilot, and ilot no longer reads it: move its content to %s, under workspaces.<name of the workspace> (env, apps, and repos as <name>: <path>), then delete it", oldPersonalFile, GlobalFile(homeDir))
 	}
 	return ReadGlobal(homeDir)
 }
 
 // ReadGlobal is LoadGlobal with no test of the personal file of an older ilot.
 func ReadGlobal(homeDir string) (Global, error) {
-	globalFile := filepath.Join(homeDir, GlobalFilePath)
+	globalFile := GlobalFile(homeDir)
 	global := DefaultGlobal()
 	content, err := os.ReadFile(globalFile)
 	if errors.Is(err, fs.ErrNotExist) {

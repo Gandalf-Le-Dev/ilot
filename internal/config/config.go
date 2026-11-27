@@ -156,7 +156,7 @@ var replacementOfRemovedKey = map[string]map[string]string{
 	},
 	"Config": {
 		"gateway_base_file": "it is gone: the port and url templates give the address of an app",
-		"domain":            "it moved to proxy.domain in ~/" + GlobalFilePath,
+		"domain":            "it moved to proxy.domain in the global file, ~/.config/ilot/config.yaml or $XDG_CONFIG_HOME/ilot/config.yaml",
 	},
 	"Global": {
 		"env":   "it moved under workspaces.<name of the workspace>.env",

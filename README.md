@@ -333,7 +333,7 @@ For a case that the block does not cover, write `run: docker run ...` with a `st
 
 ## The global file
 
-The values of the machine, and the values that must stay out of a repo, go in `~/.config/ilot/config.yaml`.
+The values of the machine, and the values that must stay out of a repo, go in `~/.config/ilot/config.yaml`, or in `$XDG_CONFIG_HOME/ilot/config.yaml` when that variable is set.
 The file is optional, and so is each of its keys. This example shows the defaults of `proxy`, `ports` and `shell_env`.
 Make the file readable only by you (`chmod 600`) when it holds tokens.
 
@@ -398,6 +398,8 @@ When you add a command, add it to the skill too: a test fails otherwise.
 | `~/.local/state/ilot/workspaces/<workspace>/<stack>/` | The binaries of a stack in `bin/` and its logs in `logs/<app>.log`. |
 | `~/.local/state/ilot/ilot.log` | The audit log of the commands: one JSON record for each lock wait, port, change of the state and call to the daemon, with the command, the workspace, the stack, the folder and the process ID. |
 | `~/.local/state/ilot/daemon.lock`, `daemon.sock`, `daemon.log`, `processes.json` | The lock, the socket and the log of the daemon, and the record of the processes that it runs. If the path of the socket is longer than 100 bytes, the socket is in `/tmp/ilot-<user ID>/`. |
+
+Two variables move these folders. With `XDG_CONFIG_HOME`, the global file is `$XDG_CONFIG_HOME/ilot/config.yaml`. With `XDG_STATE_HOME`, every path under `~/.local/state/ilot/` is under `$XDG_STATE_HOME/ilot/`.
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 Every command prints its progress lines and its warnings on stderr, and only its data on stdout: the tables, the JSON of `--json`, the lines of `ilot env` and the URLs of `ilot start`.

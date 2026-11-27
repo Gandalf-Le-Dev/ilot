@@ -164,7 +164,7 @@ func (checks doctor) git(ctx context.Context) doctorCheck {
 }
 
 func (checks doctor) globalFile() doctorCheck {
-	globalFile := filepath.Join(checks.HomeDir, config.GlobalFilePath)
+	globalFile := config.GlobalFile(checks.HomeDir)
 	if checks.GlobalErr != nil {
 		return doctorCheck{Status: checkFix, Name: "global file", Detail: checks.GlobalErr.Error()}
 	}
@@ -209,7 +209,7 @@ func (checks doctor) oldState() []doctorCheck {
 		results = append(results, doctorCheck{Status: checkFix, Name: "old state", Detail: fmt.Sprintf("%s holds the process-compose files of an older ilot. Run: rm -rf %s", oldSupervisorDir, shellQuoted(oldSupervisorDir))})
 	}
 	if oldPersonalFile, exists := config.OldPersonalFile(checks.HomeDir); exists {
-		results = append(results, doctorCheck{Status: checkFix, Name: "old state", Detail: fmt.Sprintf("%s is the personal file of an older ilot, and every command stops while it exists. Move its content under workspaces.<name> of ~/%s, then run: rm %s", oldPersonalFile, config.GlobalFilePath, shellQuoted(oldPersonalFile))})
+		results = append(results, doctorCheck{Status: checkFix, Name: "old state", Detail: fmt.Sprintf("%s is the personal file of an older ilot, and every command stops while it exists. Move its content under workspaces.<name> of %s, then run: rm %s", oldPersonalFile, config.GlobalFileShown(), shellQuoted(oldPersonalFile))})
 	}
 	if len(results) == 0 {
 		results = append(results, doctorCheck{Status: checkOK, Name: "old state", Detail: "none"})
@@ -230,7 +230,7 @@ func (checks doctor) daemonAndProxy(ctx context.Context) (daemonCheck, proxyChec
 	if errors.Is(err, daemon.ErrDaemonDown) {
 		daemonCheck = doctorCheck{Status: checkOK, Name: "daemon", Detail: "does not run: ilot starts it when a command needs it"}
 		if err := checks.ListenOn(listen); err != nil {
-			return daemonCheck, doctorCheck{Status: checkFix, Name: "proxy", Detail: fmt.Sprintf("another program holds %s: %v. Stop it, or set proxy.listen to another address in ~/%s", listen, err, config.GlobalFilePath)}
+			return daemonCheck, doctorCheck{Status: checkFix, Name: "proxy", Detail: fmt.Sprintf("another program holds %s: %v. Stop it, or set proxy.listen to another address in %s", listen, err, config.GlobalFileShown())}
 		}
 		return daemonCheck, doctorCheck{Status: checkOK, Name: "proxy", Detail: listen + " is free"}
 	}
@@ -255,7 +255,7 @@ func (checks doctor) resolution(ctx context.Context) doctorCheck {
 	lookupContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	addresses, err := checks.LookupHost(lookupContext, host)
-	fixes := fmt.Sprintf("A browser still reaches the URLs, but an app that calls another one by its URL fails. Set proxy.domain in ~/%s to a domain whose names all point to this machine, such as localtest.me, or use the port template for the calls between apps", config.GlobalFilePath)
+	fixes := fmt.Sprintf("A browser still reaches the URLs, but an app that calls another one by its URL fails. Set proxy.domain in %s to a domain whose names all point to this machine, such as localtest.me, or use the port template for the calls between apps", config.GlobalFileShown())
 	if err != nil {
 		return doctorCheck{Status: checkFix, Name: "name lookup", Detail: fmt.Sprintf("%s does not resolve: %v. %s", host, err, fixes)}
 	}
@@ -269,7 +269,7 @@ func (checks doctor) resolution(ctx context.Context) doctorCheck {
 
 func shellCheck(environment map[string]string, err error) doctorCheck {
 	if err != nil {
-		return doctorCheck{Status: checkFix, Name: "shell", Detail: fmt.Sprintf("the login shell gives no environment: %v. Fix the profile files, or set shell_env.args in ~/%s", err, config.GlobalFilePath)}
+		return doctorCheck{Status: checkFix, Name: "shell", Detail: fmt.Sprintf("the login shell gives no environment: %v. Fix the profile files, or set shell_env.args in %s", err, config.GlobalFileShown())}
 	}
 	return doctorCheck{Status: checkOK, Name: "shell", Detail: "the apps get PATH=" + environment["PATH"]}
 }
