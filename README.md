@@ -19,7 +19,7 @@ The main checkout of a repo is the `master` stack.
 `ilot` names the stack of a linked worktree after the ticket key in its branch name: `PROJ-`, `OPS-` or `TASK-` and digits, in lowercase.
 For example, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`.
 If the branch has no ticket key, `ilot` looks for one in the folder name, and else it uses the folder name.
-The ticket keys are fixed in `internal/stack/stack.go`.
+The ticket keys are fixed in `internal/workspace/stackname.go`.
 
 A worktree runs only the apps that you start in it.
 The other dependencies come from the `master` stack. If one of them does not run, `ilot` starts it there.

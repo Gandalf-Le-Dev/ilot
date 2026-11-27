@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func writeConfigFile(t *testing.T, content string) string {
@@ -35,7 +37,7 @@ func TestCheckWithoutAPathUsesTheRepoOfTheCurrentFolder(t *testing.T) {
 		"devbox/ilot.yaml": "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: ilot.yaml}\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  portal: {path: "+portalDir+"}\n")
-	currentWorkspace, err := loadWorkspace(homeDir)
+	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestCheckWithoutAPathOutsideACheckoutUsesPlatformsMainCheckout(t *testing.T
 		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
-	currentWorkspace, err := loadWorkspace(homeDir)
+	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +106,9 @@ func TestCheckWithoutAPathFromAHomeFolderThatIsACheckoutUsesPlatformsMainCheckou
 		"devbox/ilot.yaml": "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n",
 	})
 	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
-	runGitInTest(t, homeDir, "init", "-q", "-b", "master")
+	runGitInTest(t, homeDir, "init", "-q", "-b", "main")
 	runGitInTest(t, homeDir, "commit", "-q", "--allow-empty", "-m", "dotfiles")
-	currentWorkspace, err := loadWorkspace(homeDir)
+	currentWorkspace, err := workspace.Load(homeDir, workspace.NewGit())
 	if err != nil {
 		t.Fatal(err)
 	}

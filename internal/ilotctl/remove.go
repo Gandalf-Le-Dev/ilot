@@ -7,12 +7,11 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func (controller *Controller) Remove(ctx context.Context, stackName string) (err error) {
-	if stackName == stack.MasterStackName || stackName == stack.SharedStackName {
+	if stackName == workspace.MasterStackName || stackName == workspace.SharedStackName {
 		return fmt.Errorf("cannot remove stack %s: ilot needs it, stop its apps with ilot stop", stackName)
 	}
 	release, err := controller.Store.Lock()
@@ -49,11 +48,11 @@ func (controller *Controller) StacksWithoutCheckouts() ([]string, error) {
 	}
 	var stacksWithoutCheckouts []string
 	for _, stackState := range allStacks {
-		if stackState.Name == stack.MasterStackName || stackState.Name == stack.SharedStackName {
+		if stackState.Name == workspace.MasterStackName || stackState.Name == workspace.SharedStackName {
 			continue
 		}
 		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)
-		if checkouts.IsSeveralWorktrees(err) {
+		if workspace.IsSeveralWorktrees(err) {
 			continue
 		}
 		if err != nil {
@@ -66,6 +65,6 @@ func (controller *Controller) StacksWithoutCheckouts() ([]string, error) {
 	return stacksWithoutCheckouts, nil
 }
 
-func isLinkedWorktree(checkout checkouts.Checkout) bool {
-	return !checkout.IsMainCheckout
+func isLinkedWorktree(checkout workspace.Worktree) bool {
+	return !checkout.IsMain
 }

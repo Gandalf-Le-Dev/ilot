@@ -35,7 +35,7 @@ type declaredExternalService struct {
 }
 
 func (command *appsCommand) Run() error {
-	currentDir, err := currentFolder()
+	currentDir, err := os.Getwd()
 	if err != nil {
 		return err
 	}
@@ -43,15 +43,15 @@ func (command *appsCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	worktree, err := worktreeForCommand(currentWorkspace, currentDir, false, os.Stderr)
+	stackName, _, err := currentWorkspace.StackOf(currentDir, false, os.Stderr)
 	if err != nil {
 		return err
 	}
-	config, err := currentWorkspace.configForStack(worktree.Name)
+	config, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return err
 	}
-	services := declaredServicesOf(worktree.Name, config)
+	services := declaredServicesOf(stackName, config)
 	if command.JSON {
 		return json.NewEncoder(os.Stdout).Encode(services)
 	}

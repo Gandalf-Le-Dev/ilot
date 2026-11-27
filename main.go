@@ -25,14 +25,13 @@ import (
 
 	"github.com/alecthomas/kong"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 const (
@@ -77,11 +76,11 @@ type envCommand struct {
 }
 
 func (command *envCommand) Run() error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
 	if err != nil {
 		return err
 	}
-	entries, err := controller.Environment(worktree, command.App)
+	entries, err := controller.Environment(stackName, command.App)
 	if err != nil {
 		return err
 	}
@@ -100,11 +99,11 @@ type logsCommand struct {
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
 	if err != nil {
 		return err
 	}
-	logPath, err := controller.LogFile(worktree, command.App)
+	logPath, err := controller.LogFile(stackName, command.App)
 	if err != nil {
 		return err
 	}
@@ -131,28 +130,27 @@ func (command *restartCommand) Run(ctx context.Context) error {
 	case len(command.Apps) == 0 && command.Stack != "":
 		return errors.New("--stack needs the apps to restart")
 	case len(command.Apps) == 0:
-		controller, mainCheckout, err := newControllerForCurrentWorktree(command.Timeout, true)
+		controller, masterStackName, err := newControllerForCurrentWorktree(command.Timeout, true)
 		if err != nil {
 			return err
 		}
-		return controller.Restart(ctx, mainCheckout)
+		return controller.Restart(ctx, masterStackName)
 	case command.Stack != "":
 		currentWorkspace, err := loadCurrentWorkspace()
 		if err != nil {
 			return err
 		}
-		namedStack := stack.Worktree{Name: command.Stack, WorktreeDir: "", MainCheckoutDir: "", Branch: ""}
-		controller, err := newController(currentWorkspace, namedStack, command.Timeout)
+		controller, err := newController(currentWorkspace, command.Stack, command.Timeout)
 		if err != nil {
 			return err
 		}
-		return controller.RestartApps(ctx, namedStack, command.Apps)
+		return controller.RestartApps(ctx, command.Stack, command.Apps)
 	}
-	controller, worktree, err := newControllerForCurrentWorktree(command.Timeout, false)
+	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, false)
 	if err != nil {
 		return err
 	}
-	return controller.RestartApps(ctx, worktree, command.Apps)
+	return controller.RestartApps(ctx, stackName, command.Apps)
 }
 
 type lsCommand struct {
@@ -162,7 +160,7 @@ type lsCommand struct {
 type lsJSONOutput struct {
 	Home string `json:"home"`
 	ilotctl.Listing
-	CheckoutsByStack map[string]map[string]checkouts.Checkout `json:"checkouts"`
+	CheckoutsByStack map[string]map[string]workspace.Worktree `json:"checkouts"`
 }
 
 type rmCommand struct {
@@ -182,22 +180,22 @@ type stopCommand struct {
 }
 
 func (command *bootCommand) Run(ctx context.Context) error {
-	mainCheckout, err := stack.Locate(command.Checkout)
-	if err != nil {
-		return err
-	}
-	if mainCheckout.Name != stack.MasterStackName {
-		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
-	}
 	currentWorkspace, err := loadCurrentWorkspace()
 	if err != nil {
 		return err
 	}
-	controller, err := newController(currentWorkspace, mainCheckout, command.Timeout)
+	mainCheckout, err := currentWorkspace.Locate(command.Checkout)
 	if err != nil {
 		return err
 	}
-	return controller.Boot(ctx, mainCheckout)
+	if !mainCheckout.IsMain {
+		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
+	}
+	controller, err := newController(currentWorkspace, workspace.MasterStackName, command.Timeout)
+	if err != nil {
+		return err
+	}
+	return controller.Boot(ctx, workspace.MasterStackName)
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
@@ -243,13 +241,13 @@ func (command *lsCommand) Run(ctx context.Context) error {
 }
 
 // The main checkouts are the same for every stack, so only the worktrees of a stack say something.
-func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[string]checkouts.Checkout, homeDir string) error {
+func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[string]workspace.Worktree, homeDir string) error {
 	table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 	hasRows := false
 	for _, stackName := range slices.Sorted(maps.Keys(checkoutsByStack)) {
 		for _, repoName := range slices.Sorted(maps.Keys(checkoutsByStack[stackName])) {
 			checkout := checkoutsByStack[stackName][repoName]
-			if checkout.IsMainCheckout {
+			if checkout.IsMain {
 				continue
 			}
 			if !hasRows {
@@ -294,67 +292,48 @@ func (command *cleanCommand) Run(ctx context.Context) error {
 }
 
 func (command *startCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(command.Timeout, false)
+	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, false)
 	if err != nil {
 		return err
 	}
-	return controller.Start(ctx, worktree, command.Apps, ilotctl.StartOptions{SkipDependencies: command.NoDeps})
+	return controller.Start(ctx, stackName, command.Apps, ilotctl.StartOptions{SkipDependencies: command.NoDeps})
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	controller, worktree, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
 	if err != nil {
 		return err
 	}
-	return controller.Stop(ctx, worktree, command.Apps)
+	return controller.Stop(ctx, stackName, command.Apps)
 }
 
-func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, stack.Worktree, error) {
-	currentDir, err := currentFolder()
+func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, string, error) {
+	currentDir, err := os.Getwd()
 	if err != nil {
-		return nil, stack.Worktree{}, err
+		return nil, "", err
 	}
 	currentWorkspace, err := loadCurrentWorkspace()
 	if err != nil {
-		return nil, stack.Worktree{}, err
+		return nil, "", err
 	}
-	worktree, err := worktreeForCommand(currentWorkspace, currentDir, isCrossStack, os.Stderr)
+	stackName, _, err := currentWorkspace.StackOf(currentDir, isCrossStack, os.Stderr)
 	if err != nil {
-		return nil, stack.Worktree{}, err
+		return nil, "", err
 	}
-	controller, err := newController(currentWorkspace, worktree, readyTimeout)
-	return controller, worktree, err
+	controller, err := newController(currentWorkspace, stackName, readyTimeout)
+	return controller, stackName, err
 }
 
-func worktreeForCommand(currentWorkspace workspace, currentDir string, isCrossStack bool, notes io.Writer) (stack.Worktree, error) {
-	if isCrossStack {
-		return platformMainCheckout(currentWorkspace)
-	}
-	location := currentWorkspace.locationOf(currentDir)
-	if location == outsideAnyCheckout {
-		fmt.Fprintln(notes, "not in a checkout: using the master stack")
-		return platformMainCheckout(currentWorkspace)
-	}
-	if location == insideHomeCheckout {
-		fmt.Fprintln(notes, "the home folder is a checkout, not a known repo: using the master stack")
-		return platformMainCheckout(currentWorkspace)
-	}
-	if _, err := checkouts.RepoOf(currentWorkspace.repoPaths, currentDir); err != nil {
-		return stack.Worktree{}, err
-	}
-	return stack.Locate(currentDir)
-}
-
-func loadCurrentWorkspace() (workspace, error) {
+func loadCurrentWorkspace() (workspace.Workspace, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return workspace{}, err
+		return workspace.Workspace{}, err
 	}
-	return loadWorkspace(homeDir)
+	return workspace.Load(homeDir, workspace.NewGit())
 }
 
-func newController(currentWorkspace workspace, worktree stack.Worktree, readyTimeout time.Duration) (*ilotctl.Controller, error) {
-	config, err := currentWorkspace.configForStack(worktree.Name)
+func newController(currentWorkspace workspace.Workspace, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+	config, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +346,7 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	if err != nil {
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
-	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
+	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.HomeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Login().Environment(context.Background()) })
 	ilotBinary, err := os.Executable()
 	if err != nil {
@@ -392,10 +371,10 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		EnsureImage:         ensureImage,
 		IsPortFreeOnHost:    ports.IsFreeOnLoopback,
 		IsExternalServiceUp: isListeningOnLocalhost,
-		CheckoutsForStack:   currentWorkspace.checkoutsForStack,
-		ConfigForStack:      currentWorkspace.configForStack,
-		ReposNotCloned:      currentWorkspace.reposNotCloned(),
-		Personal:            currentWorkspace.settings,
+		CheckoutsForStack:   currentWorkspace.CheckoutsForStack,
+		ConfigForStack:      currentWorkspace.ConfigForStack,
+		ReposNotCloned:      currentWorkspace.ReposNotCloned(),
+		Personal:            currentWorkspace.Settings,
 		ShellEnv:            shellEnv,
 		Login:               currentUser.Username,
 		ProxyPort:           proxyPort,

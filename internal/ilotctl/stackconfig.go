@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func (controller *Controller) loadStackConfigs(stackNames []string) error {
@@ -44,7 +44,7 @@ func (controller *Controller) declaringConfig(appInstance instance) (appconfig.C
 	if _, isDeclared := controller.configOf(appInstance.stackName).Apps[appInstance.appName]; isDeclared {
 		return controller.configOf(appInstance.stackName), true
 	}
-	if appInstance.stackName != stack.SharedStackName {
+	if appInstance.stackName != workspace.SharedStackName {
 		return appconfig.Config{}, false
 	}
 	return controller.anyDeclaringConfig(appInstance.stackName, appInstance.appName)
@@ -82,7 +82,7 @@ func (controller *Controller) app(appInstance instance) appconfig.App {
 func (controller *Controller) appNamesOf(stacks stackSet, stackName string) []string {
 	appNames := slices.Collect(maps.Keys(controller.configOf(stackName).Apps))
 	for _, sharedInstance := range stacks.runningInstances() {
-		if sharedInstance.stackName == stack.SharedStackName && !slices.Contains(appNames, sharedInstance.appName) {
+		if sharedInstance.stackName == workspace.SharedStackName && !slices.Contains(appNames, sharedInstance.appName) {
 			appNames = append(appNames, sharedInstance.appName)
 		}
 	}

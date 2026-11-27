@@ -14,8 +14,8 @@ import (
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 func (controller *Controller) planStart(stacks stackSet, requestedInstances []instance, options StartOptions) ([]instance, []string) {
@@ -58,11 +58,11 @@ func (controller *Controller) stackServing(stacks stackSet, stackName, appName s
 	app, _ := controller.anyDeclaration(stackName, appName)
 	switch {
 	case app.Shared:
-		return stack.SharedStackName
+		return workspace.SharedStackName
 	case app.PerStack || stacks.isRunning(instance{stackName: stackName, appName: appName}):
 		return stackName
 	}
-	return stack.MasterStackName
+	return workspace.MasterStackName
 }
 
 func (controller *Controller) checkExternalServicesUp(externalNames []string) error {
@@ -108,7 +108,7 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 
 func (controller *Controller) fixedPortsOf(appInstance instance) map[string]int {
 	app := controller.app(appInstance)
-	if app.Shared || appInstance.stackName == stack.MasterStackName {
+	if app.Shared || appInstance.stackName == workspace.MasterStackName {
 		return app.FixedPorts
 	}
 	return nil
@@ -219,12 +219,12 @@ func (controller *Controller) loadSavedStacks() (stackSet, error) {
 	return stacks, nil
 }
 
-func (controller *Controller) loadStacks(worktree stack.Worktree) (stackSet, error) {
+func (controller *Controller) loadStacks(stackName string) (stackSet, error) {
 	stacks, err := controller.loadSavedStacks()
 	if err != nil {
 		return stackSet{}, err
 	}
-	for _, stackName := range []string{stack.MasterStackName, stack.SharedStackName, worktree.Name} {
+	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName, stackName} {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
 		if err != nil {
 			return stackSet{}, err

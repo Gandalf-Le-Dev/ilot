@@ -15,11 +15,10 @@ import (
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/checkouts"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
-	"github.com/Gandalf-Le-Dev/ilot/internal/stack"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
+	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 type processBehavior int
@@ -183,8 +182,8 @@ type testEnvironment struct {
 	builds        *[]recordedBuild
 	buildEnvirons *[][]string
 	output        *bytes.Buffer
-	master        stack.Worktree
-	featureStack  stack.Worktree
+	master        string
+	featureStack  string
 }
 
 // Every ilot command builds its own controller.
@@ -294,13 +293,13 @@ func testConfig() appconfig.Config {
 	}
 }
 
-func fakeCheckoutsForStack(stackName string) (map[string]checkouts.Checkout, error) {
-	checkoutByRepo := map[string]checkouts.Checkout{
-		"platform": {Repo: "platform", Dir: "/src/platform", Branch: "master", IsMainCheckout: true},
-		"portal":   {Repo: "portal", Dir: "/src/portal", Branch: "master", IsMainCheckout: true},
+func fakeCheckoutsForStack(stackName string) (map[string]workspace.Worktree, error) {
+	checkoutByRepo := map[string]workspace.Worktree{
+		"platform": {Repo: "platform", Dir: "/src/platform", Branch: "master", IsMain: true},
+		"portal":   {Repo: "portal", Dir: "/src/portal", Branch: "master", IsMain: true},
 	}
 	if stackName == "proj-1234" {
-		checkoutByRepo["platform"] = checkouts.Checkout{Repo: "platform", Dir: "/worktrees/proj-1234", Branch: "PROJ-1234-x", IsMainCheckout: false}
+		checkoutByRepo["platform"] = workspace.Worktree{Repo: "platform", Dir: "/worktrees/proj-1234", Branch: "PROJ-1234-x", IsMain: false}
 	}
 	return checkoutByRepo, nil
 }
@@ -335,15 +334,15 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		builds:        builds,
 		buildEnvirons: buildEnvirons,
 		output:        output,
-		master:        stack.Worktree{Name: "master", WorktreeDir: "/src/platform", MainCheckoutDir: "/src/platform"},
-		featureStack:  stack.Worktree{Name: "proj-1234", WorktreeDir: "/worktrees/proj-1234", MainCheckoutDir: "/src/platform"},
+		master:        "master",
+		featureStack:  "proj-1234",
 	}
 }
 
-func (environment testEnvironment) start(t *testing.T, worktree stack.Worktree, options StartOptions, appNames ...string) {
+func (environment testEnvironment) start(t *testing.T, stackName string, options StartOptions, appNames ...string) {
 	t.Helper()
-	if err := environment.controller.Start(t.Context(), worktree, appNames, options); err != nil {
-		t.Fatalf("Start(%s, %v): %v", worktree.Name, appNames, err)
+	if err := environment.controller.Start(t.Context(), stackName, appNames, options); err != nil {
+		t.Fatalf("Start(%s, %v): %v", stackName, appNames, err)
 	}
 }
 
