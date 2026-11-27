@@ -9,7 +9,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 )
 
@@ -170,7 +170,7 @@ func (controller *Controller) binDirIsEmpty(stackName string) bool {
 	return err != nil || len(entries) == 0
 }
 
-func readyPortName(app appconfig.App) string {
+func readyPortName(app config.App) string {
 	switch {
 	case app.Ready.Port != "":
 		return app.Ready.Port
@@ -217,7 +217,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 	repoCheckoutDir := func(repoName string) (string, error) {
 		checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 		if checkoutDir == "" {
-			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", appInstance.processName(), repoName, repoName)
+			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", appInstance.processName(), repoName, controller.repoPathKey(repoName))
 		}
 		return checkoutDir, nil
 	}
@@ -246,7 +246,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 	err = parsed.Execute(&rendered, templateData{
 		Workspace:   controller.Workspace,
 		Stack:       appInstance.stackName,
-		Domain:      controller.Config.Domain,
+		Domain:      controller.Domain,
 		ProxyPort:   controller.ProxyPort,
 		User:        controller.Login,
 		Ports:       stacks.app(appInstance).Ports,

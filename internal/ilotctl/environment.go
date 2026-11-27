@@ -14,12 +14,13 @@ type EnvEntry struct {
 }
 
 const (
-	sourceShell       = "shell"
-	sourceRepo        = "repo"
-	sourceApp         = "app"
-	sourcePersonal    = "personal"
-	sourcePersonalApp = "personal app"
-	sourceComputed    = "computed"
+	sourceShell     = "shell"
+	sourceRoot      = "root repo"
+	sourceRepo      = "repo"
+	sourceApp       = "app"
+	sourceGlobal    = "global"
+	sourceGlobalApp = "global app"
+	sourceComputed  = "computed"
 )
 
 func (controller *Controller) Environment(stackName string, appName string) ([]EnvEntry, error) {
@@ -49,7 +50,8 @@ func (controller *Controller) shellEnviron() ([]string, error) {
 	return environ(shellEnv), nil
 }
 
-// A value written with a template is computed by ilot (ports, addresses, the stack), so a personal value cannot override it.
+// The layers, and the last one wins: the login shell, the env of the root repo, the env of the repo of the app, the env of the app, the global file.
+// A value written with a template is computed by ilot (ports, addresses, the stack), so a value of the global file cannot override it.
 func (controller *Controller) environmentOf(stacks stackSet, appInstance instance) ([]EnvEntry, error) {
 	app := controller.app(appInstance)
 	shellEnv, err := controller.shellEnvironment()
@@ -63,13 +65,15 @@ func (controller *Controller) environmentOf(stacks stackSet, appInstance instanc
 		}
 	}
 	setAll(sourceShell, shellEnv)
+	literalRootEnv, templatedRootEnv := splitByTemplate(controller.repoEnvOf(appInstance)[controller.Workspace])
 	literalRepoEnv, templatedRepoEnv := splitByTemplate(controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, controller.Workspace)])
 	literalAppEnv, templatedAppEnv := splitByTemplate(app.Env)
+	setAll(sourceRoot, literalRootEnv)
 	setAll(sourceRepo, literalRepoEnv)
 	setAll(sourceApp, literalAppEnv)
-	setAll(sourcePersonal, controller.Personal.Env)
-	setAll(sourcePersonalApp, controller.Personal.Apps[appInstance.appName])
-	for _, templatedEnv := range []map[string]string{templatedRepoEnv, templatedAppEnv} {
+	setAll(sourceGlobal, controller.Settings.Env)
+	setAll(sourceGlobalApp, controller.Settings.Apps[appInstance.appName])
+	for _, templatedEnv := range []map[string]string{templatedRootEnv, templatedRepoEnv, templatedAppEnv} {
 		for _, key := range slices.Sorted(maps.Keys(templatedEnv)) {
 			value, err := controller.renderTemplate(stacks, appInstance, templatedEnv[key])
 			if err != nil {

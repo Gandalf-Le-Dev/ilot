@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 )
 
@@ -55,9 +56,9 @@ func newE2EMachine(t *testing.T) *e2eMachine {
 		"HOME=" + homeDir,
 		"SHELL=/bin/sh",
 		"PATH=" + os.Getenv("PATH"),
-		proxyListenVariable + "=" + machine.proxyAddress,
 	}
 	machine.writeProfile()
+	machine.writeGlobalFile()
 	t.Cleanup(machine.stopDaemon)
 	return machine
 }
@@ -85,6 +86,18 @@ func (machine *e2eMachine) writeProfile() {
 	profile := fmt.Sprintf("export PATH='%s'\nexport GOCACHE='%s'\nexport GOMODCACHE='%s'\nexport GOTOOLCHAIN=local\n",
 		filepath.Join(goEnv("GOROOT"), "bin")+":"+os.Getenv("PATH"), goEnv("GOCACHE"), goEnv("GOMODCACHE"))
 	if err := os.WriteFile(filepath.Join(machine.homeDir, ".profile"), []byte(profile), 0o600); err != nil {
+		machine.t.Fatal(err)
+	}
+}
+
+// The global file moves the proxy to a free port, so the test runs beside the ilot of the developer.
+func (machine *e2eMachine) writeGlobalFile() {
+	machine.t.Helper()
+	globalFile := filepath.Join(machine.homeDir, config.GlobalFilePath)
+	if err := os.MkdirAll(filepath.Dir(globalFile), 0o700); err != nil {
+		machine.t.Fatal(err)
+	}
+	if err := os.WriteFile(globalFile, []byte("proxy:\n  listen: "+machine.proxyAddress+"\n"), 0o600); err != nil {
 		machine.t.Fatal(err)
 	}
 }

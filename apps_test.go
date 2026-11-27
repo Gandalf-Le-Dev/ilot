@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 func TestDeclaredServicesListEveryAppWithItsRepoAndDependenciesThenTheExternalServices(t *testing.T) {
-	config := appconfig.Config{
-		Apps: map[string]appconfig.App{
+	config := config.Config{
+		Apps: map[string]config.App{
 			"publicapi":  {Repo: "platform", DependsOn: []string{"gateway", "keyring"}},
 			"gateway":    {Repo: "platform"},
 			"portal-api": {Repo: "portal", DependsOn: []string{"temporal"}},
 		},
-		External: map[string]appconfig.ExternalService{"keyring": {Port: 8200}},
+		External: map[string]config.ExternalService{"keyring": {Port: 8200}},
 	}
 
 	encoded, err := json.Marshal(declaredServicesOf("proj-0001", config))

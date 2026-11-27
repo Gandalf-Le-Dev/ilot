@@ -37,14 +37,6 @@ func TestImagePullHintNamesDockerHubLoginWithoutARegistry(t *testing.T) {
 	}
 }
 
-func TestImagePullHintAsksToUnlockGPG(t *testing.T) {
-	got := imagePullHint("registry.example.net/app:1", "error getting credentials - err: exit status 2")
-	want := "docker could not read its credential store: unlock your GPG key, for example with echo test | gpg --clearsign >/dev/null, then run the command again"
-	if got != want {
-		t.Errorf("imagePullHint = %q, want %q", got, want)
-	}
-}
-
 func TestImagePullHintIsEmptyForOtherErrors(t *testing.T) {
 	if got := imagePullHint("registry.example.net/app:1", "manifest unknown"); got != "" {
 		t.Errorf("imagePullHint = %q, want empty", got)

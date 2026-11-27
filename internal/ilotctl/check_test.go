@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 func TestCheckRenderingAcceptsAValidConfig(t *testing.T) {
@@ -15,10 +15,10 @@ func TestCheckRenderingAcceptsAValidConfig(t *testing.T) {
 }
 
 func TestCheckRenderingReportsATemplateTypoWithItsApp(t *testing.T) {
-	config := testConfig()
-	config.Apps["typo-api"] = appconfig.App{Run: `api --port={{port "gateway" "htp"}}`}
+	merged := testConfig()
+	merged.Apps["typo-api"] = config.App{Run: `api --port={{port "gateway" "htp"}}`}
 
-	problems := CheckRendering("platform", []string{"portal"}, config)
+	problems := CheckRendering("platform", []string{"portal"}, merged)
 
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "typo-api") || !strings.Contains(problems[0].Error(), "htp") {
 		t.Fatalf("CheckRendering = %v, want one problem naming typo-api and htp", errors.Join(problems...))
@@ -26,10 +26,10 @@ func TestCheckRenderingReportsATemplateTypoWithItsApp(t *testing.T) {
 }
 
 func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
-	config := testConfig()
-	config.Apps["stoppable"] = appconfig.App{Run: "docker run --name stoppable nginx", Stop: "docker stop {{.Stak}}"}
+	merged := testConfig()
+	merged.Apps["stoppable"] = config.App{Run: "docker run --name stoppable nginx", Stop: "docker stop {{.Stak}}"}
 
-	problems := CheckRendering("platform", []string{"portal"}, config)
+	problems := CheckRendering("platform", []string{"portal"}, merged)
 
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), "stoppable") || !strings.Contains(problems[0].Error(), "Stak") {
 		t.Fatalf("CheckRendering = %v, want one problem naming stoppable and Stak", errors.Join(problems...))
@@ -37,12 +37,12 @@ func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
 }
 
 func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
-	config := testConfig()
-	config.Apps["mounting"] = appconfig.App{
-		Container: appconfig.Container{Image: "registry/mounting:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{`{{repo "nowhere"}}`: "/src"}},
+	merged := testConfig()
+	merged.Apps["mounting"] = config.App{
+		Container: config.Container{Image: "registry/mounting:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{`{{repo "nowhere"}}`: "/src"}},
 	}
 
-	problems := CheckRendering("platform", []string{"portal"}, config)
+	problems := CheckRendering("platform", []string{"portal"}, merged)
 
 	if len(problems) == 0 || !strings.Contains(errors.Join(problems...).Error(), "nowhere") {
 		t.Fatalf("CheckRendering = %v, want a problem naming the unknown repo", errors.Join(problems...))
@@ -50,16 +50,16 @@ func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
 }
 
 func TestCheckRenderingReportsEveryBrokenTemplateOfAnApp(t *testing.T) {
-	config := testConfig()
-	config.Apps["many-typos"] = appconfig.App{
+	merged := testConfig()
+	merged.Apps["many-typos"] = config.App{
 		Env: map[string]string{"GOOD": "{{.Ports.http}}", "FIRST": `{{port "ghost" "http"}}`, "SECOND": "{{.Ports.nope}}"},
-		Container: appconfig.Container{Image: "registry/many:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{
+		Container: config.Container{Image: "registry/many:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{
 			`{{repo "nowhere"}}`:   "/a",
 			`{{repo "elsewhere"}}`: "/b",
 		}, Args: []string{"--label={{.NoSuchField}}"}},
 	}
 
-	problems := CheckRendering("platform", []string{"portal"}, config)
+	problems := CheckRendering("platform", []string{"portal"}, merged)
 
 	if len(problems) != 5 {
 		t.Fatalf("CheckRendering = %d problems, want 5 (two env values, two mounts, one flag of docker run):\n%v", len(problems), errors.Join(problems...))
@@ -72,10 +72,10 @@ func TestCheckRenderingReportsEveryBrokenTemplateOfAnApp(t *testing.T) {
 }
 
 func TestCheckRenderingTagsEachProblemWithTheRepoOfItsApp(t *testing.T) {
-	config := testConfig()
-	config.Apps["portal-typo"] = appconfig.App{Repo: "portal", Run: `api --port={{port "gateway" "htp"}}`}
+	merged := testConfig()
+	merged.Apps["portal-typo"] = config.App{Repo: "portal", Run: `api --port={{port "gateway" "htp"}}`}
 
-	problems := CheckRendering("platform", []string{"portal"}, config)
+	problems := CheckRendering("platform", []string{"portal"}, merged)
 
 	var renderProblem RenderProblem
 	if len(problems) != 1 || !errors.As(problems[0], &renderProblem) || renderProblem.Repo != "portal" {

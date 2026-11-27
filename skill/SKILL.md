@@ -67,8 +67,8 @@ ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL
 - Proxy URLs: `http://<app>.<stack>.<workspace>.localhost:4580`. `ilot ls` prints them. The page `http://localhost:4580` lists them all. The URL of an app that does not run answers 503 with the command that starts it.
 - State and logs: `~/.local/state/ilot/stacks/<stack>/`, logs in `logs/<app>.log`.
 - Apps: the `ilot.yaml` at the root of each repo. `ilot apps` lists their names, their repo and their dependencies. A checkout with no `ilot.yaml` reads the file of the main checkout of its repo.
-- The personal file: `~/.config/ilot/env.yaml`. It holds the path of a member repo that is cloned at another place (`repos.<name>.path`), and personal values (`env`, and `apps.<app>` for one app). Do not put secrets in a repo file: put them there.
-- An app gets a fixed environment. The values of the shell files come first: `ilot` reads the whole environment of a login shell (`$SHELL -l`), and `ilot env` marks these values `(shell)`. A login shell reads the profile files, for example `~/.zprofile`, and not `~/.zshrc`: if an app does not find a tool, compare the `PATH` of `ilot env <app>` with the `PATH` of the terminal. The `ilot.yaml` and personal values come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the personal file. An app gets its environment when it starts: after a change, run `ilot start <app>` again. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot restart`.
+- The global file: `~/.config/ilot/config.yaml`. It holds the address and the domain of the proxy (`proxy`), the port range (`ports`), the flags of the shell (`shell_env.args`), and, under `workspaces.<workspace>`, the path of a member repo that is cloned at another place (`repos.<name>`) and personal values (`env`, and `apps.<app>` for one app). Do not put secrets in a repo file: put them there.
+- An app gets a fixed environment. The values of the shell files come first: `ilot` reads the whole environment of a login shell (`$SHELL -l`), and `ilot env` marks these values `(shell)`. A login shell reads the profile files, for example `~/.zprofile`, and not `~/.zshrc`: if an app does not find a tool, compare the `PATH` of `ilot env <app>` with the `PATH` of the terminal. The values of the `ilot.yaml` files and of the global file come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the global file. An app gets its environment when it starts: after a change, run `ilot start <app>` again. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot restart`.
 - The README of ilot describes every key and template of `ilot.yaml`.
 
 ## When you edit an ilot.yaml
@@ -84,12 +84,7 @@ When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too.
 3. Run `ilot env <app>` to see the ports and the values it got.
 4. Run `ilot ls` to see which dependencies run and where.
 
-`ilot start` checks the container images before any build. It pulls a missing image (`pulling <image>`), once for all apps that share it. A failed pull stops `ilot start` before the builds. The error is `pull <image>: <error>`, and it can end with a hint:
-
-- `log in to the registry, then run the command again: docker login <registry>`
-- `docker could not read its credential store: unlock your GPG key, for example with echo test | gpg --clearsign >/dev/null, then run the command again`
-
-Both hints need the user (a login, or the GPG passphrase). Tell the user, wait, then run the same `ilot start` again.
+`ilot start` checks the container images before any build. It pulls a missing image (`pulling <image>`), once for all apps that share it. A failed pull stops `ilot start` before the builds. The error is `pull <image>: <error>`, and it can end with the hint `log in to the registry, then run the command again: docker login <registry>`. The login needs the user. Tell the user, wait, then run the same `ilot start` again.
 
 When an app that this run started ends, `ilot start` stops it and marks it stopped. Its log stays. Run the same `ilot start` again. It starts that app again. It also starts again a dependency of the named apps in `master` or in the `devbox` stack, without its name. A dependency that ran in the ticket stack because an earlier `ilot start` named it is different: after `ilot` stops it, a plain retry starts it in `master`. The error then ends with `<app> ran in <stack>: name it to start it there again: ilot start <app> <apps>`. Run that command. A dependency that already ran, and that `ilot start` only waited for, is never stopped.
 
@@ -103,6 +98,6 @@ A port that "is taken by another process" belongs to something outside `ilot`. F
 
 - Two worktrees of one repo for the same ticket make `ilot` refuse that stack. The error names both folders. Keep one.
 - A container app declares its ports in `container.ports`, with the port inside the container. `ilot` publishes each one on `127.0.0.1` on a port of the stack, which `ilot ls` and `ilot env` show. A container reaches another app with `{{host "<app>"}}`, which gives it `host.docker.internal`.
-- If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also set `ILOT_PROXY_LISTEN` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
+- If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also give it a separate `HOME` whose `~/.config/ilot/config.yaml` sets `proxy.listen` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
 - If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.
 - In zsh, a shell variable named `path` overwrites `PATH`. Name loop variables something else.

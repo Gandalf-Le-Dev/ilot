@@ -10,7 +10,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -55,7 +55,7 @@ func (command *appsCommand) Run() error {
 	return printDeclaredServices(os.Stdout, services)
 }
 
-func declaredServicesOf(stackName string, config appconfig.Config) declaredServices {
+func declaredServicesOf(stackName string, config config.Config) declaredServices {
 	services := declaredServices{Stack: stackName, Apps: []declaredApp{}, ExternalServices: []declaredExternalService{}}
 	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[appName]

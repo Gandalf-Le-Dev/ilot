@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -65,4 +66,11 @@ func countingGit() (*workspace.Git, *int) {
 		return run(dir, arguments...)
 	}
 	return git, &processCount
+}
+
+var testGlobal = config.Global{
+	Proxy:      config.Proxy{Listen: config.DefaultProxyListen, Domain: config.DefaultDomain},
+	Ports:      config.PortRange{First: config.DefaultFirstPort, Last: config.DefaultLastPort},
+	ShellEnv:   config.ShellEnv{Args: []string{"-l"}},
+	Workspaces: nil,
 }

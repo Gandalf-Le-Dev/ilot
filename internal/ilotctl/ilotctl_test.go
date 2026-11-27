@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
-	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -192,16 +192,15 @@ func (environment testEnvironment) controllerOfANewCommand() *Controller {
 	return &controller
 }
 
-func testConfig() appconfig.Config {
+func testConfig() config.Config {
 	const buildPlatform = "go build -o {{.BinDir}}/platform ./cmd/platformv2"
 	const gatewayAddress = `http://localhost:{{port "gateway" "http"}}`
-	return appconfig.Config{
-		Domain: "dev.example.net",
-		External: map[string]appconfig.ExternalService{
+	return config.Config{
+		External: map[string]config.ExternalService{
 			"keyring":   {Port: 8200, StartHint: "restart devbox"},
 			"legacyapi": {Port: 10004, StartHint: "start it by hand"},
 		},
-		Apps: map[string]appconfig.App{
+		Apps: map[string]config.App{
 			"temporal": {
 				Shared:     true,
 				Autostart:  true,
@@ -209,7 +208,7 @@ func testConfig() appconfig.Config {
 				Ports:      []string{"grpc", "ui"},
 				FixedPorts: map[string]int{"grpc": 7233, "ui": 10012},
 				Route:      "ui",
-				Ready:      appconfig.ReadyCheck{Port: "grpc", Path: ""},
+				Ready:      config.ReadyCheck{Port: "grpc", Path: ""},
 			},
 			"restapi": {
 				Shared:     true,
@@ -219,7 +218,7 @@ func testConfig() appconfig.Config {
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 10003},
 				Route:      "http",
-				Watch:      appconfig.Watch{Paths: []string{"."}, Exts: []string{"pl", "pm"}},
+				Watch:      config.Watch{Paths: []string{"."}, Exts: []string{"pl", "pm"}},
 			},
 			"doc": {
 				Shared:     true,
@@ -265,7 +264,7 @@ func testConfig() appconfig.Config {
 					"REGION":      "DEV1",
 				},
 				DependsOn: []string{"search-cache", "gateway"},
-				Container: appconfig.Container{
+				Container: config.Container{
 					Image:    "registry/search:latest",
 					Ports:    map[string]int{"http": 16271},
 					Mounts:   map[string]string{`{{repo "portal"}}/schemas`: "/src/schemas"},
@@ -275,8 +274,8 @@ func testConfig() appconfig.Config {
 			},
 			"search-cache": {
 				PerStack:  true,
-				Ready:     appconfig.ReadyCheck{Port: "", Path: "", Command: "pg_isready -U postgres"},
-				Container: appconfig.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
+				Ready:     config.ReadyCheck{Port: "", Path: "", Command: "pg_isready -U postgres"},
+				Container: config.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
 			},
 			"front-like": {
 				Run:       "front --api=http://{{host \"search\"}}:{{port \"search\" \"http\"}} --gw={{host \"gateway\"}}",
@@ -312,6 +311,8 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	output := &bytes.Buffer{}
 	controller := &Controller{
 		Workspace:  "platform",
+		Domain:     "dev.example.net",
+		PortRange:  ports.Range{First: 20000, Last: 29999},
 		Config:     testConfig(),
 		Store:      state.Store{RootDir: t.TempDir()},
 		Supervisor: supervisor,
@@ -860,13 +861,13 @@ func TestPortsStayTheSameAcrossStopAndStart(t *testing.T) {
 
 func TestAllocationSkipsPortsOfOtherStacksAndBusyPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != appconfig.ReservedPortFirst }
+	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
 	environment.start(t, environment.master, StartOptions{}, "standalone")
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
 	masterPort := environment.appPort(t, "master", "standalone")
 	worktreePort := environment.appPort(t, "proj-1234", "standalone")
-	if masterPort == appconfig.ReservedPortFirst || masterPort == worktreePort {
+	if masterPort == config.DefaultFirstPort || masterPort == worktreePort {
 		t.Errorf("master got %d and the worktree got %d", masterPort, worktreePort)
 	}
 }
@@ -982,7 +983,7 @@ func TestMasterGatewayUsesItsFixedPortAndWorktreeGatewaysDoNot(t *testing.T) {
 	if port := environment.appPort(t, "master", "gateway"); port != 9090 {
 		t.Errorf("master gateway port = %d, want 9090", port)
 	}
-	if port := environment.appPort(t, "proj-1234", "gateway"); port < appconfig.ReservedPortFirst || port > appconfig.ReservedPortLast {
+	if port := environment.appPort(t, "proj-1234", "gateway"); port < config.DefaultFirstPort || port > config.DefaultLastPort {
 		t.Errorf("worktree gateway port = %d, want one from the reserved range", port)
 	}
 }
@@ -1048,7 +1049,7 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 func TestTheWatcherOfATicketStackNamesItsStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	portalStandalone := environment.controller.Config.Apps["portal-standalone"]
-	portalStandalone.Watch = appconfig.Watch{Paths: []string{"."}, Exts: []string{"go"}}
+	portalStandalone.Watch = config.Watch{Paths: []string{"."}, Exts: []string{"go"}}
 	environment.controller.Config.Apps["portal-standalone"] = portalStandalone
 
 	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
@@ -1345,10 +1346,10 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 	standalone := environment.controller.Config.Apps["standalone"]
 	standalone.Env = map[string]string{"PORT": "{{.Ports.http}}", "REGION": "EU1"}
 	environment.controller.Config.Apps["standalone"] = standalone
-	environment.controller.Personal = personal.Settings{
+	environment.controller.Settings = config.WorkspaceSettings{
+		Repos: nil,
 		Env:   map[string]string{"LOG_LEVEL": "debug", "PORT": "1"},
 		Apps:  map[string]map[string]string{"standalone": {"API_TOKEN": "custom"}},
-		Repos: nil,
 	}
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
@@ -1356,10 +1357,10 @@ func TestEnvironmentAppliesTheSourcesInOrder(t *testing.T) {
 
 	wantPort := strconv.Itoa(environment.appPort(t, "proj-1234", "standalone"))
 	want := map[string]EnvEntry{
-		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "personal"},
+		"LOG_LEVEL": {Key: "LOG_LEVEL", Value: "debug", Source: "global"},
 		"REGION":    {Key: "REGION", Value: "EU1", Source: "app"},
 		"PORT":      {Key: "PORT", Value: wantPort, Source: "computed"},
-		"API_TOKEN": {Key: "API_TOKEN", Value: "custom", Source: "personal app"},
+		"API_TOKEN": {Key: "API_TOKEN", Value: "custom", Source: "global app"},
 	}
 	for key, wantEntry := range want {
 		if entryByKey[key] != wantEntry {
@@ -1444,7 +1445,7 @@ func TestContainerCommandPublishesItsPortsOnTheLoopbackAddress(t *testing.T) {
 	if strings.Contains(command, "DEV1") {
 		t.Errorf("command %q shows an env value, which ps would show to every user", command)
 	}
-	if searchPort < appconfig.ReservedPortFirst || searchPort > appconfig.ReservedPortLast {
+	if searchPort < config.DefaultFirstPort || searchPort > config.DefaultLastPort {
 		t.Errorf("search is published on port %d, want a port of the range of ilot", searchPort)
 	}
 	if order := environment.supervisor.startedInOrder; slices.Index(order, "search-cache.proj-1234") > slices.Index(order, "search.proj-1234") {
@@ -1507,7 +1508,7 @@ func TestTwoStacksPublishTheSameContainerOnTwoPorts(t *testing.T) {
 
 func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != appconfig.ReservedPortFirst }
+	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
 
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 
@@ -1515,7 +1516,7 @@ func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if port := cacheState.Apps["search-cache"].Ports["postgres"]; port == appconfig.ReservedPortFirst || port == 0 {
+	if port := cacheState.Apps["search-cache"].Ports["postgres"]; port == config.DefaultFirstPort || port == 0 {
 		t.Errorf("search-cache is published on port %d, want a free port", port)
 	}
 }
@@ -1588,23 +1589,45 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 	}
 }
 
+func TestTheEnvOfTheRootRepoReachesTheAppsOfEveryRepoBelowTheEnvOfTheirOwnRepo(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.controller.Config.RepoEnv = map[string]map[string]string{
+		"platform": {"LOG_LEVEL": "info", "REGION": "DEV1", "STACK_NAME": "{{.Stack}}"},
+		"portal":   {"REGION": "EU2"},
+	}
+	environment.start(t, environment.featureStack, StartOptions{}, "portal-standalone")
+
+	entryByKey := environmentOf(t, environment, "portal-standalone")
+
+	want := map[string]EnvEntry{
+		"LOG_LEVEL":  {Key: "LOG_LEVEL", Value: "info", Source: "root repo"},
+		"REGION":     {Key: "REGION", Value: "EU2", Source: "repo"},
+		"STACK_NAME": {Key: "STACK_NAME", Value: "proj-1234", Source: "computed"},
+	}
+	for key, wantEntry := range want {
+		if entryByKey[key] != wantEntry {
+			t.Errorf("%s = %+v, want %+v", key, entryByKey[key], wantEntry)
+		}
+	}
+}
+
 func TestAnUnknownAppNamesTheReposThatAreNotCloned(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.ReposNotCloned = map[string]string{"portal": "/home/user/go/src/portal"}
 
 	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"portal-front"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "repos.portal.path") || !strings.Contains(err.Error(), "/home/user/go/src/portal") {
+	if err == nil || !strings.Contains(err.Error(), "workspaces.platform.repos.portal in ~/.config/ilot/config.yaml") || !strings.Contains(err.Error(), "/home/user/go/src/portal") {
 		t.Fatalf("Start = %v, want an error naming the repo that is not cloned", err)
 	}
 }
 
 func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.controller.Personal = personal.Settings{
+	environment.controller.Settings = config.WorkspaceSettings{
+		Repos: nil,
 		Env:   map[string]string{"DEBUG_TOKEN": "secret"},
 		Apps:  map[string]map[string]string{"search": {"FEATURE_FLAG": "true"}},
-		Repos: nil,
 	}
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")

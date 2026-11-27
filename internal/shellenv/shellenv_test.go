@@ -95,13 +95,13 @@ func TestEnvironmentReportsAShellThatDoesNotRunTheCommand(t *testing.T) {
 	}
 }
 
-func TestLoginUsesTheShellOfTheUser(t *testing.T) {
+func TestOfUserUsesTheShellOfTheUserWithTheGivenFlags(t *testing.T) {
 	t.Setenv("SHELL", "/usr/bin/fish")
-	if shell := Login(); shell.Program != "/usr/bin/fish" || len(shell.Args) != 1 || shell.Args[0] != "-l" {
-		t.Errorf("Login = %+v, want /usr/bin/fish -l", shell)
+	if shell := OfUser([]string{"-l", "-i"}); shell.Program != "/usr/bin/fish" || len(shell.Args) != 2 || shell.Args[1] != "-i" {
+		t.Errorf("OfUser = %+v, want /usr/bin/fish -l -i", shell)
 	}
 	t.Setenv("SHELL", "")
-	if shell := Login(); shell.Program != "/bin/sh" {
-		t.Errorf("Login with no SHELL = %+v, want /bin/sh", shell)
+	if shell := OfUser([]string{"-l"}); shell.Program != "/bin/sh" {
+		t.Errorf("OfUser with no SHELL = %+v, want /bin/sh", shell)
 	}
 }

@@ -25,6 +25,7 @@ import (
 
 	"github.com/alecthomas/kong"
 
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ilotctl"
 	"github.com/Gandalf-Le-Dev/ilot/internal/logs"
@@ -32,12 +33,6 @@ import (
 	"github.com/Gandalf-Le-Dev/ilot/internal/shellenv"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
-)
-
-const (
-	// The address of the proxy in the daemon. ILOT_PROXY_LISTEN moves it when another program has the port.
-	defaultProxyListen  = "127.0.0.1:4580"
-	proxyListenVariable = "ILOT_PROXY_LISTEN"
 )
 
 type cli struct {
@@ -331,34 +326,39 @@ func findWorkspaceOf(dir string) (workspace.Workspace, workspace.Worktree, error
 	if err != nil {
 		return workspace.Workspace{}, workspace.Worktree{}, err
 	}
-	return workspace.Find(dir, homeDir, workspace.NewGit())
+	global, err := config.LoadGlobal(homeDir)
+	if err != nil {
+		return workspace.Workspace{}, workspace.Worktree{}, err
+	}
+	return workspace.Find(dir, homeDir, global, workspace.NewGit())
 }
 
 func newController(currentWorkspace workspace.Workspace, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
-	config, err := currentWorkspace.ConfigForStack(stackName)
+	stackConfig, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return nil, err
 	}
-	proxyListen := cmp.Or(os.Getenv(proxyListenVariable), defaultProxyListen)
+	global := currentWorkspace.Global
+	proxyListen := global.Proxy.Listen
 	_, proxyPort, err := net.SplitHostPort(proxyListen)
 	if err != nil {
-		return nil, fmt.Errorf("%s=%q is not an address such as %s: %w", proxyListenVariable, proxyListen, defaultProxyListen, err)
+		return nil, err
 	}
 	currentUser, err := user.Current()
 	if err != nil {
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.HomeDir, ".local", "state")), "ilot")
-	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Login().Environment(context.Background()) })
+	shellEnv := sync.OnceValues(func() (map[string]string, error) {
+		return shellenv.OfUser(global.ShellEnv.Args).Environment(context.Background())
+	})
 	ilotBinary, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("find the ilot binary, to start its daemon: %w", err)
 	}
 	ilotEnv := map[string]string{}
-	for _, name := range []string{"XDG_STATE_HOME", proxyListenVariable} {
-		if value, isSet := os.LookupEnv(name); isSet {
-			ilotEnv[name] = value
-		}
+	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
+		ilotEnv["XDG_STATE_HOME"] = value
 	}
 	store := state.Store{RootDir: stateDir}
 	if err := store.Claim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
@@ -371,7 +371,7 @@ func newController(currentWorkspace workspace.Workspace, stackName string, ready
 	}
 	controller := &ilotctl.Controller{
 		Workspace:           currentWorkspace.Name,
-		Config:              config,
+		Config:              stackConfig,
 		Store:               store,
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
@@ -381,7 +381,9 @@ func newController(currentWorkspace workspace.Workspace, stackName string, ready
 		CheckoutsForStack:   currentWorkspace.CheckoutsForStack,
 		ConfigForStack:      currentWorkspace.ConfigForStack,
 		ReposNotCloned:      currentWorkspace.ReposNotCloned(),
-		Personal:            currentWorkspace.Settings,
+		Settings:            currentWorkspace.Settings,
+		Domain:              global.Proxy.Domain,
+		PortRange:           ports.Range{First: global.Ports.First, Last: global.Ports.Last},
 		ShellEnv:            shellEnv,
 		Login:               currentUser.Username,
 		ProxyPort:           proxyPort,

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
-	"github.com/Gandalf-Le-Dev/ilot/internal/personal"
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -34,10 +34,10 @@ func (problem RenderProblem) Unwrap() error {
 }
 
 // CheckRendering renders every template of every app, with made-up ports and a made-up folder for each repo.
-func CheckRendering(workspaceName string, repoNames []string, config appconfig.Config) []error {
+func CheckRendering(workspaceName string, repoNames []string, merged config.Config) []error {
 	controller := Controller{
 		Workspace:           workspaceName,
-		Config:              config,
+		Config:              merged,
 		Store:               state.Store{RootDir: madeUpCheckoutsRoot + "state"},
 		Supervisor:          nil,
 		RunBuild:            nil,
@@ -47,7 +47,9 @@ func CheckRendering(workspaceName string, repoNames []string, config appconfig.C
 		CheckoutsForStack:   nil,
 		ConfigForStack:      nil,
 		ReposNotCloned:      nil,
-		Personal:            personal.Settings{Env: nil, Apps: nil, Repos: nil},
+		Settings:            config.WorkspaceSettings{Repos: nil, Env: nil, Apps: nil},
+		Domain:              config.DefaultDomain,
+		PortRange:           ports.Range{First: 0, Last: 0},
 		ShellEnv:            nil,
 		Login:               checkStackName,
 		ProxyPort:           "",
@@ -59,11 +61,11 @@ func CheckRendering(workspaceName string, repoNames []string, config appconfig.C
 		configByStack:       nil,
 	}
 
-	stacks := stacksWithEveryAppRunning(append([]string{workspaceName}, repoNames...), config)
+	stacks := stacksWithEveryAppRunning(append([]string{workspaceName}, repoNames...), merged)
 	var problems []error
-	for _, appName := range slices.Sorted(maps.Keys(config.Apps)) {
+	for _, appName := range slices.Sorted(maps.Keys(merged.Apps)) {
 		appInstance := instance{stackName: controller.stackOf(checkStackName, appName), appName: appName}
-		repoName := cmp.Or(config.Apps[appName].Repo, workspaceName)
+		repoName := cmp.Or(merged.Apps[appName].Repo, workspaceName)
 		for _, err := range controller.renderEveryTemplateOf(stacks, appInstance) {
 			problems = append(problems, RenderProblem{App: appName, Repo: repoName, Err: err})
 		}
@@ -71,7 +73,7 @@ func CheckRendering(workspaceName string, repoNames []string, config appconfig.C
 	return problems
 }
 
-func stacksWithEveryAppRunning(repoNames []string, config appconfig.Config) stackSet {
+func stacksWithEveryAppRunning(repoNames []string, config config.Config) stackSet {
 	for _, app := range config.Apps {
 		if app.Repo != "" {
 			repoNames = append(repoNames, app.Repo)

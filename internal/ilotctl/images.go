@@ -20,9 +20,6 @@ func registryOfImage(image string) string {
 }
 
 func imagePullHint(image, pullOutput string) string {
-	if strings.Contains(pullOutput, "error getting credentials") {
-		return "docker could not read its credential store: unlock your GPG key, for example with echo test | gpg --clearsign >/dev/null, then run the command again"
-	}
 	for _, marker := range []string{"Authentication is required", "unauthorized", "no basic auth credentials", "denied:"} {
 		if strings.Contains(pullOutput, marker) {
 			loginCommand := "docker login"

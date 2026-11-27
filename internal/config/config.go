@@ -1,8 +1,7 @@
-package appconfig
+package config
 
 import (
 	"bytes"
-	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,17 +13,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	ReservedPortFirst = 20000
-	ReservedPortLast  = 29999
-	// The file of a repo. Its name and its place, the root of the repo, are fixed.
-	FileName = "ilot.yaml"
-	// Every name under localhost points to this machine, with no DNS setup.
-	DefaultDomain = "localhost"
-)
+// The file of a repo. Its name and its place, the root of the repo, are fixed.
+const FileName = "ilot.yaml"
 
+// Config is the file of one repo, and also what Merge makes of the files of every repo of a stack.
 type Config struct {
-	Domain string `yaml:"domain"`
 	// The three keys of the workspace. ilot reads them from the main checkout of a repo only.
 	// Name and Repos belong to the root repo of the workspace. The default name is the folder name of the root.
 	Name  string    `yaml:"name"`
@@ -120,17 +113,6 @@ type ReadyCheck struct {
 
 var dnsLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-func Load(configPath string) (Config, error) {
-	config, err := Parse(configPath)
-	if err != nil {
-		return Config{}, err
-	}
-	if err := config.Validate(); err != nil {
-		return Config{}, fmt.Errorf("invalid %s: %w", configPath, err)
-	}
-	return config, nil
-}
-
 func Parse(configPath string) (Config, error) {
 	content, err := os.ReadFile(configPath)
 	if err != nil {
@@ -156,6 +138,12 @@ var replacementOfRemovedKey = map[string]map[string]string{
 	},
 	"Config": {
 		"gateway_base_file": "it is gone: the port and url templates give the address of an app",
+		"domain":            "it moved to proxy.domain in ~/" + GlobalFilePath,
+	},
+	"Global": {
+		"env":   "it moved under workspaces.<name of the workspace>.env",
+		"apps":  "it moved under workspaces.<name of the workspace>.apps",
+		"repos": "it moved under workspaces.<name of the workspace>.repos, as <name>: <path>",
 	},
 	"ExternalService": {
 		"gateway_aliases": "it is gone: the port template gives the port of an external service",
@@ -190,10 +178,9 @@ func hintsForUnknownKeys(err error) []error {
 	return hints
 }
 
-// The domain comes from the file of the root repo only.
-func Merge(rootRepo string, configByRepo map[string]Config) (Config, error) {
+// Merge makes one configuration of the files of the repos of a stack. A fixed port must be outside the range that ilot allocates from.
+func Merge(configByRepo map[string]Config, allocatedPorts PortRange) (Config, error) {
 	merged := Config{
-		Domain:   cmp.Or(configByRepo[rootRepo].Domain, DefaultDomain),
 		Name:     "",
 		Repos:    nil,
 		MemberOf: "",
@@ -231,13 +218,13 @@ func Merge(rootRepo string, configByRepo map[string]Config) (Config, error) {
 	if err := errors.Join(problems...); err != nil {
 		return Config{}, err
 	}
-	return merged, merged.Validate()
+	return merged, merged.Validate(allocatedPorts)
 }
 
-func (config Config) Validate() error {
+func (config Config) Validate(allocatedPorts PortRange) error {
 	return errors.Join(
 		config.validateNames(),
-		config.validateFixedPorts(),
+		config.validateFixedPorts(allocatedPorts),
 		config.validateApps(),
 		config.validateDependencyGraph(),
 	)
@@ -256,12 +243,12 @@ func (config Config) validateNames() error {
 	return errors.Join(problems...)
 }
 
-func (config Config) validateFixedPorts() error {
+func (config Config) validateFixedPorts(allocatedPorts PortRange) error {
 	var problems []error
 	ownerByPort := map[int]string{}
 	claimFixedPort := func(owner string, port int) {
-		if port >= ReservedPortFirst && port <= ReservedPortLast {
-			problems = append(problems, fmt.Errorf("%s: port %d is inside the reserved range %d-%d", owner, port, ReservedPortFirst, ReservedPortLast))
+		if allocatedPorts.Contains(port) {
+			problems = append(problems, fmt.Errorf("%s: port %d is inside the range %d-%d, which ilot gives to the apps", owner, port, allocatedPorts.First, allocatedPorts.Last))
 		}
 		if otherOwner, isTaken := ownerByPort[port]; isTaken {
 			problems = append(problems, fmt.Errorf("%s and %s both use port %d", otherOwner, owner, port))

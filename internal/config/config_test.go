@@ -1,4 +1,4 @@
-package appconfig
+package config
 
 import (
 	"os"
@@ -9,7 +9,6 @@ import (
 )
 
 const validConfigYAML = `
-domain: dev.example.net
 external:
   keyring: {port: 8200, start_hint: restart devbox}
 apps:
@@ -44,6 +43,16 @@ apps:
     depends_on: [gateway, temporal]
 `
 
+var defaultPorts = PortRange{First: DefaultFirstPort, Last: DefaultLastPort}
+
+func Load(configPath string) (Config, error) {
+	parsed, err := Parse(configPath)
+	if err != nil {
+		return Config{}, err
+	}
+	return parsed, parsed.Validate(defaultPorts)
+}
+
 func writeConfigFile(t *testing.T, content string) string {
 	t.Helper()
 	configPath := filepath.Join(t.TempDir(), "ilot.yaml")
@@ -59,9 +68,6 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if config.Domain != "dev.example.net" {
-		t.Errorf("Domain = %q", config.Domain)
-	}
 	if config.External["keyring"].Port != 8200 {
 		t.Errorf("keyring port = %d", config.External["keyring"].Port)
 	}
@@ -106,6 +112,7 @@ func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
 		{yaml: "gateway_base_file: gw.json\n", wantErrorSubstr: "gateway_base_file: it is gone"},
 		{yaml: "apps:\n  db:\n    container: {image: x, links: {a: b}}\n", wantErrorSubstr: "links: it is gone: use the host and port templates"},
 		{yaml: "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\n", wantErrorSubstr: "portal: ../portal"},
+		{yaml: "domain: dev.example.net\n", wantErrorSubstr: "domain: it moved to proxy.domain in ~/.config/ilot/config.yaml"},
 	}
 	for _, testCase := range testCases {
 		_, err := Parse(writeConfigFile(t, testCase.yaml))
@@ -147,12 +154,12 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 		{
 			name:            "external port inside the reserved range",
 			config:          Config{External: map[string]ExternalService{"keyring": {Port: 20500}}},
-			wantErrorSubstr: "reserved range",
+			wantErrorSubstr: "inside the range 20000-29999",
 		},
 		{
 			name:            "app fixed port inside the reserved range",
 			config:          Config{Apps: map[string]App{"api": {Run: "api", Ports: []string{"http"}, FixedPorts: map[string]int{"http": 20500}}}},
-			wantErrorSubstr: "reserved range",
+			wantErrorSubstr: "inside the range 20000-29999",
 		},
 		{
 			name:            "fixed port for an undeclared port",
@@ -229,7 +236,7 @@ func TestValidateRejectsInvalidConfigs(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := testCase.config.Validate()
+			err := testCase.config.Validate(defaultPorts)
 			if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, testCase.wantErrorSubstr)
 			}
@@ -254,26 +261,26 @@ func TestParseReadsTheRepoListAndRepoEnv(t *testing.T) {
 }
 
 func TestMergeSetsTheRepoOfEachApp(t *testing.T) {
-	merged, err := Merge("platform", map[string]Config{
-		"platform": {Domain: "dev.example.net", Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
+	merged, err := Merge(map[string]Config{
+		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
 		"portal":   {Env: map[string]string{"LOG_LEVEL": "info"}, Apps: map[string]App{"portal-api": {Run: "api"}}},
-	})
+	}, defaultPorts)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	if merged.Apps["publicapi"].Repo != "platform" || merged.Apps["portal-api"].Repo != "portal" {
 		t.Errorf("apps = %+v", merged.Apps)
 	}
-	if merged.Domain != "dev.example.net" || merged.RepoEnv["portal"]["LOG_LEVEL"] != "info" {
+	if merged.RepoEnv["portal"]["LOG_LEVEL"] != "info" {
 		t.Errorf("merged = %+v", merged)
 	}
 }
 
 func TestMergeRefusesAnAppDeclaredByTwoRepos(t *testing.T) {
-	_, err := Merge("platform", map[string]Config{
+	_, err := Merge(map[string]Config{
 		"platform": {Apps: map[string]App{"api": {Run: "api"}}},
 		"portal":   {Apps: map[string]App{"api": {Run: "api"}}},
-	})
+	}, defaultPorts)
 	if err == nil || !strings.Contains(err.Error(), `"api"`) || !strings.Contains(err.Error(), "portal") {
 		t.Fatalf("err = %v, want an error naming the app and both repos", err)
 	}
@@ -281,7 +288,7 @@ func TestMergeRefusesAnAppDeclaredByTwoRepos(t *testing.T) {
 
 func TestValidateRefusesTopLevelPortsOnAContainer(t *testing.T) {
 	config := Config{Apps: map[string]App{"search": {Ports: []string{"http"}, Container: Container{Image: "search:latest"}}}}
-	err := config.Validate()
+	err := config.Validate(defaultPorts)
 	if err == nil || !strings.Contains(err.Error(), `app "search": a container app declares its ports in container.ports`) {
 		t.Fatalf("Validate() = %v", err)
 	}
@@ -294,7 +301,7 @@ func TestAContainerTakesItsPortNamesFromItsOwnBlock(t *testing.T) {
 		Ready:     ReadyCheck{Port: "admin"},
 		Container: Container{Image: "search:latest", Ports: map[string]int{"http": 8080, "admin": 9000}},
 	}}}
-	if err := config.Validate(); err != nil {
+	if err := config.Validate(defaultPorts); err != nil {
 		t.Fatalf("Validate() = %v, want the route and the ready port found in container.ports", err)
 	}
 	if got := config.Apps["search"].PortNames(); !slices.Equal(got, []string{"admin", "http"}) {
@@ -307,14 +314,14 @@ func TestContainersMayUseTheSamePortInside(t *testing.T) {
 		"mock":   {Container: Container{Image: "mock:latest", Ports: map[string]int{"http": 8080}}},
 		"search": {Container: Container{Image: "search:latest", Ports: map[string]int{"http": 8080}}},
 	}}
-	if err := config.Validate(); err != nil {
+	if err := config.Validate(defaultPorts); err != nil {
 		t.Fatalf("Validate() = %v, want two containers with the same port inside: each one is published on its own port", err)
 	}
 }
 
 func TestValidateRefusesAContainerPortOutOfRange(t *testing.T) {
 	config := Config{Apps: map[string]App{"search": {Container: Container{Image: "search:latest", Ports: map[string]int{"http": 0}}}}}
-	err := config.Validate()
+	err := config.Validate(defaultPorts)
 	if err == nil || !strings.Contains(err.Error(), `container port "http" has the number 0`) {
 		t.Fatalf("Validate() = %v", err)
 	}
@@ -345,21 +352,11 @@ func TestParseReadsTheContainerBlockAndRefusesTheOldLinks(t *testing.T) {
 	}
 }
 
-func TestMergeGivesTheLocalhostDomainWhenNoFileSetsOne(t *testing.T) {
-	merged, err := Merge("platform", map[string]Config{"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}}})
-	if err != nil {
-		t.Fatalf("Merge: %v", err)
-	}
-	if merged.Domain != "localhost" {
-		t.Errorf("Domain = %q, want localhost, which needs no DNS", merged.Domain)
-	}
-}
-
 func TestMergeKeepsTheWrapOfEachRepo(t *testing.T) {
-	merged, err := Merge("platform", map[string]Config{
+	merged, err := Merge(map[string]Config{
 		"platform": {Apps: map[string]App{"publicapi": {Run: "publicapi"}}},
 		"portal":   {Wrap: "mise exec --", Apps: map[string]App{"front": {Run: "npm run dev"}}},
-	})
+	}, defaultPorts)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}

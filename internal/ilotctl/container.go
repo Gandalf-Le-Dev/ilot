@@ -67,10 +67,10 @@ func (controller *Controller) containerStopCommand(appInstance instance) string 
 	return "docker stop --time 10 " + shellQuote(controller.containerName(appInstance))
 }
 
-// Personal top-level env is for processes: it can hold tokens that third-party images have no business reading. The shell is for the docker command, not for the image.
+// The env of the workspace in the global file is for processes: it can hold tokens that third-party images have no business reading. The shell is for the docker command, not for the image.
 func containerEnvEntries(envEntries []EnvEntry) []EnvEntry {
 	return slices.DeleteFunc(slices.Clone(envEntries), func(entry EnvEntry) bool {
-		return entry.Source == sourceShell || entry.Source == sourcePersonal
+		return entry.Source == sourceShell || entry.Source == sourceGlobal
 	})
 }
 
