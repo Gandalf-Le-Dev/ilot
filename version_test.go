@@ -15,7 +15,7 @@ func TestVersionFromBuild(t *testing.T) {
 		buildSettings  []debug.BuildSetting
 		wantVersion    string
 	}{
-		{name: "stamped build", stampedVersion: "0.1.0", moduleVersion: "(devel)", buildSettings: commitSettings, wantVersion: "0.1.0"},
+		{name: "stamped build", stampedVersion: "v0.1.0", moduleVersion: "(devel)", buildSettings: commitSettings, wantVersion: "v0.1.0"},
 		{name: "build from a clean checkout", stampedVersion: "", moduleVersion: "(devel)", buildSettings: commitSettings, wantVersion: "commit abcdef012345"},
 		{name: "build from a changed checkout", stampedVersion: "", moduleVersion: "(devel)", buildSettings: changedCheckoutSettings, wantVersion: "commit abcdef012345 with local changes"},
 		{name: "go install of a tag", stampedVersion: "", moduleVersion: "v0.1.0", buildSettings: nil, wantVersion: "v0.1.0"},
