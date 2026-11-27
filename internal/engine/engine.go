@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
@@ -102,15 +103,18 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 		return err
 	}
 	isSkipped := map[plan.Instance]bool{}
+	whySkipped := map[plan.Instance]string{}
 	for _, appInstance := range start.Order {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if executor.skipsForSkippedDependency(after, appInstance, isSkipped) {
+		if dependency, isSkippedForDependency := executor.skipsForSkippedDependency(after, appInstance, isSkipped); isSkippedForDependency {
+			whySkipped[appInstance] = fmt.Sprintf("its dependency %s was stopped by another ilot command", after.ProcessName(dependency))
 			continue
 		}
 		if err := executor.startInstance(ctx, after, appInstance, processByName, actionOf(appInstance)); errors.Is(err, errStoppedByAnotherCommand) {
 			isSkipped[appInstance] = true
+			whySkipped[appInstance] = "another ilot command stopped it"
 		} else if err != nil {
 			return err
 		}
@@ -123,23 +127,38 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	}
 	startedInstances := slices.DeleteFunc(slices.Clone(requestedInstances), func(appInstance plan.Instance) bool { return isSkipped[appInstance] })
 	executor.printURLs(after, startedInstances)
-	if len(requestedInstances) > 0 && len(startedInstances) == 0 {
-		return errors.New("no requested app started: another ilot command stopped them")
+	return notStartedError(after, requestedInstances, whySkipped)
+}
+
+// notStartedError names each requested app that did not start, so that ilot start exits non-zero.
+func notStartedError(snapshot plan.Snapshot, requestedInstances []plan.Instance, whySkipped map[plan.Instance]string) error {
+	var reasons []string
+	for _, requestedInstance := range requestedInstances {
+		if why, isSkipped := whySkipped[requestedInstance]; isSkipped {
+			reasons = append(reasons, fmt.Sprintf("%s: %s", snapshot.ProcessName(requestedInstance), why))
+		}
 	}
-	return nil
+	switch len(reasons) {
+	case 0:
+		return nil
+	case 1:
+		return fmt.Errorf("a requested app did not start (%s)", reasons[0])
+	default:
+		return fmt.Errorf("%d requested apps did not start (%s)", len(reasons), strings.Join(reasons, "; "))
+	}
 }
 
 // errStoppedByAnotherCommand says that an ilot stop or ilot rm took the membership away from an instance this command was starting. The line that says so is already printed.
 var errStoppedByAnotherCommand = errors.New("another ilot command stopped the app")
 
 // skipsForSkippedDependency skips an instance whose dependency another command stopped: it would start without it.
-func (executor *Executor) skipsForSkippedDependency(snapshot plan.Snapshot, appInstance plan.Instance, isSkipped map[plan.Instance]bool) bool {
+func (executor *Executor) skipsForSkippedDependency(snapshot plan.Snapshot, appInstance plan.Instance, isSkipped map[plan.Instance]bool) (plan.Instance, bool) {
 	dependency, hasSkippedDependency := executor.failedDependencyOf(snapshot, appInstance, isSkipped)
 	if hasSkippedDependency {
 		isSkipped[appInstance] = true
 		fmt.Fprintf(executor.Output, "%s does not start: %s was stopped by another ilot command\n", snapshot.ProcessName(appInstance), snapshot.ProcessName(dependency))
 	}
-	return hasSkippedDependency
+	return dependency, hasSkippedDependency
 }
 
 // underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a call that starts or stops a process.
@@ -428,7 +447,7 @@ func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, 
 			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(failedDependency)))
 			continue
 		}
-		if executor.skipsForSkippedDependency(snapshot, appInstance, isSkipped) {
+		if _, isSkippedForDependency := executor.skipsForSkippedDependency(snapshot, appInstance, isSkipped); isSkippedForDependency {
 			continue
 		}
 		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, keepRunning); errors.Is(err, errStoppedByAnotherCommand) {

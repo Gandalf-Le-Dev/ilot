@@ -216,7 +216,7 @@ The app must run, or have exited: `ilot restart` refuses an app that is `down`, 
 A command calls the daemon only for the apps that it starts, restarts or stops. A dependency that runs gets no call, and an app of another stack never restarts.
 When the start changes a template of a running app of the same stack, for example because the stack now runs its own copy of a dependency, `ilot start` restarts that app and prints one line for it.
 Only one build runs in a stack at a time. A second build, from another `ilot` command or from a watcher, waits and says so.
-The stack owns every app of a start from the first line: an app that ends, or that fails to start, stays in the stack. `ilot ls` shows it `exited`, its log stays, and the next `ilot start` starts it again in the same stack. If another ilot command stops every app that you asked for during the start, `ilot start` prints a line for each and exits with a non-zero code.
+The stack owns every app of a start from the first line: an app that ends, or that fails to start, stays in the stack. `ilot ls` shows it `exited`, its log stays, and the next `ilot start` starts it again in the same stack. If another ilot command stops an app that you asked for during the start, or a dependency of it, `ilot start` still starts the others and prints their URLs and a line for each skipped app. Then it exits with a non-zero code, and the error names each app that did not start and why.
 When the timeout passes while the app still runs, `ilot` keeps the app and says so.
 `ilot stop`, `ilot rm`, `ilot ls` and `ilot logs` need the state only, so they work when an `ilot.yaml` is broken. A start reads the files of its own stack and of `base` only.
 
