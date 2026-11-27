@@ -95,6 +95,9 @@ func (client *Client) Processes(ctx context.Context) ([]Process, error) {
 }
 
 func (client *Client) Put(ctx context.Context, name string, spec Spec) (Process, error) {
+	if err := validateName(name); err != nil {
+		return Process{}, err
+	}
 	var process Process
 	err := client.call(ctx, http.MethodPut, "/v1/processes/"+url.PathEscape(name), spec, &process)
 	return process, err

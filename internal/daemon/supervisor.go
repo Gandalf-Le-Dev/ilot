@@ -104,8 +104,8 @@ func NewSupervisor(options SupervisorOptions) *Supervisor {
 
 // Put starts the process. A live process with the same specification stays as it is.
 func (supervisor *Supervisor) Put(name string, spec Spec) (Process, error) {
-	if name == "" {
-		return Process{}, errors.New("the process has no name")
+	if err := validateName(name); err != nil {
+		return Process{}, err
 	}
 	if err := spec.Validate(); err != nil {
 		return Process{}, fmt.Errorf("%s: %w", name, err)
