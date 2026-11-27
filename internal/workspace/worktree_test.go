@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,5 +91,35 @@ func TestARepoWhoseFolderMovedBehindALinkIsStillOneRepo(t *testing.T) {
 	worktrees, err := git.Worktrees("shop", filepath.Join(oldDir, "shop"))
 	if err != nil || len(worktrees) != 2 || worktrees[0].Dir != movedMainCheckoutDir || worktrees[1].Dir != movedWorktreeDir {
 		t.Errorf("Worktrees = %+v, %v; want %s then %s", worktrees, err, movedMainCheckoutDir, movedWorktreeDir)
+	}
+}
+
+func TestLocateInASubmoduleGivesItsCheckout(t *testing.T) {
+	moduleSourceDir := newRepo(t, "lib")
+	superDir := newRepo(t, "shop")
+	gitInTest(t, superDir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", moduleSourceDir, "lib")
+	moduleDir := filepath.Join(superDir, "lib")
+	git := NewGit()
+
+	located, err := git.Locate(moduleDir)
+	if want := (Worktree{Repo: "", Dir: moduleDir, Branch: "main", IsMain: true, MainDir: moduleDir}); err != nil || located != want {
+		t.Errorf("Locate(submodule) = %+v, %v; want %+v", located, err, want)
+	}
+	worktrees, err := git.Worktrees("lib", moduleDir)
+	if err != nil || len(worktrees) != 1 || worktrees[0].Dir != moduleDir {
+		t.Errorf("Worktrees(submodule) = %+v, %v; want the checkout %s", worktrees, err, moduleDir)
+	}
+}
+
+func TestLocateInAWorktreeOfABareRepoNamesTheBareRepo(t *testing.T) {
+	bareDir := filepath.Join(canonicalTempDir(t), "shop.git")
+	gitInTest(t, newRepo(t, "shop"), "clone", "-q", "--bare", ".", bareDir)
+	worktreeDir := filepath.Join(canonicalTempDir(t), "shop-retry")
+	gitInTest(t, bareDir, "worktree", "add", "-q", "-b", "retry", worktreeDir)
+
+	_, err := NewGit().Locate(worktreeDir)
+
+	if err == nil || !strings.Contains(err.Error(), "the bare repo "+bareDir) {
+		t.Errorf("Locate(worktree of a bare repo) = %v; want an error that names the bare repo %s", err, bareDir)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/config"
 )
 
 // Worktree is one checkout of a repo: its main checkout, or a worktree that git worktree add made.
@@ -80,9 +82,17 @@ func (git *Git) list(repoName, dir string) ([]Worktree, error) {
 			if branchRef, isBranchLine := strings.CutPrefix(line, "branch "); isBranchLine {
 				worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
 			}
+			if line == "bare" {
+				return nil, fmt.Errorf("the repo of %s is the bare repo %s: ilot reads the %s of the main checkout, and a bare repo has none", dir, worktree.Dir, config.FileName)
+			}
 		}
 		if worktree.Dir == "" {
 			continue
+		}
+		if worktree.IsMain && isGitDir(worktree.Dir) {
+			if worktree.Dir, err = git.workTreeOf(worktree.Dir); err != nil {
+				return nil, err
+			}
 		}
 		worktrees = append(worktrees, worktree)
 	}
@@ -93,6 +103,25 @@ func (git *Git) list(repoName, dir string) ([]Worktree, error) {
 		worktrees[index].MainDir = worktrees[0].Dir
 	}
 	return worktrees, nil
+}
+
+// git worktree list names the git folder of a submodule, .git/modules/<name>, in place of its main checkout.
+func isGitDir(dir string) bool {
+	for _, part := range []string{"HEAD", "objects", "refs"} {
+		if _, err := os.Stat(filepath.Join(dir, part)); err != nil {
+			return false
+		}
+	}
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+func (git *Git) workTreeOf(gitDir string) (string, error) {
+	output, err := git.Output(gitDir, "rev-parse", "--path-format=absolute", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("find the checkout of the git folder %s: %w", gitDir, err)
+	}
+	return Canonical(strings.TrimSpace(output))
 }
 
 // git keeps listing a worktree whose folder was deleted until git worktree prune runs.
