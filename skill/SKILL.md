@@ -101,7 +101,7 @@ A port that "is taken by another process" belongs to something outside `ilot`. F
 ## Traps
 
 - Two worktrees of one repo for the same ticket make `ilot` refuse that stack. The error names both folders. Keep one.
-- A container app's port is the port inside the container, so the same number can appear in several stacks.
+- A container app declares its ports in `container.ports`, with the port inside the container. `ilot` publishes each one on `127.0.0.1` on a port of the stack, which `ilot ls` and `ilot env` show. A container reaches another app with `{{host "<app>"}}`, which gives it `host.docker.internal`.
 - If you test a build of `ilot` with a separate `XDG_STATE_HOME`, also set `ILOT_PROXY_LISTEN` to a free address, for example `127.0.0.1:4590`. Without it, the scratch daemon cannot open the proxy port that the real daemon holds.
 - If a command prints `warning: the proxy cannot listen`, another program has the proxy port. The apps run, but their URLs do not answer. Tell the user.
 - In zsh, a shell variable named `path` overwrites `PATH`. Name loop variables something else.

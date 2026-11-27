@@ -39,9 +39,7 @@ func TestCheckRenderingReportsATypoInAStopCommand(t *testing.T) {
 func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
 	config := testConfig()
 	config.Apps["mounting"] = appconfig.App{
-		Ports:      []string{"http"},
-		FixedPorts: map[string]int{"http": 8080},
-		Container:  appconfig.Container{Image: "registry/mounting:latest", Mounts: map[string]string{"/src": `{{repo "nowhere"}}`}},
+		Container: appconfig.Container{Image: "registry/mounting:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{`{{repo "nowhere"}}`: "/src"}},
 	}
 
 	problems := CheckRendering(config)
@@ -54,19 +52,17 @@ func TestCheckRenderingReportsAnUnknownRepo(t *testing.T) {
 func TestCheckRenderingReportsEveryBrokenTemplateOfAnApp(t *testing.T) {
 	config := testConfig()
 	config.Apps["many-typos"] = appconfig.App{
-		Ports:      []string{"http"},
-		FixedPorts: map[string]int{"http": 8080},
-		Env:        map[string]string{"GOOD": "{{.Ports.http}}", "FIRST": `{{port "ghost" "http"}}`, "SECOND": "{{.Ports.nope}}"},
-		Container: appconfig.Container{Image: "registry/many:latest", Mounts: map[string]string{
-			"/a": `{{repo "nowhere"}}`,
-			"/b": `{{repo "elsewhere"}}`,
-		}},
+		Env: map[string]string{"GOOD": "{{.Ports.http}}", "FIRST": `{{port "ghost" "http"}}`, "SECOND": "{{.Ports.nope}}"},
+		Container: appconfig.Container{Image: "registry/many:latest", Ports: map[string]int{"http": 8080}, Mounts: map[string]string{
+			`{{repo "nowhere"}}`:   "/a",
+			`{{repo "elsewhere"}}`: "/b",
+		}, Args: []string{"--label={{.NoSuchField}}"}},
 	}
 
 	problems := CheckRendering(config)
 
-	if len(problems) != 4 {
-		t.Fatalf("CheckRendering = %d problems, want 4 (two env values, two mounts):\n%v", len(problems), errors.Join(problems...))
+	if len(problems) != 5 {
+		t.Fatalf("CheckRendering = %d problems, want 5 (two env values, two mounts, one flag of docker run):\n%v", len(problems), errors.Join(problems...))
 	}
 	for _, problem := range problems {
 		if !strings.HasPrefix(problem.Error(), "many-typos: ") {

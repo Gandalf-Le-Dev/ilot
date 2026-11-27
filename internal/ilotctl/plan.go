@@ -39,7 +39,7 @@ func (controller *Controller) planStart(stacks stackSet, requestedInstances []in
 					continue
 				}
 				dependencyStack := controller.stackServing(stacks, appInstance.stackName, dependency)
-				if isRequested[instance{stackName: appInstance.stackName, appName: dependency}] || controller.isLinkedContainer(appInstance, dependency) || controller.Config.Apps[dependency].PerStack {
+				if isRequested[instance{stackName: appInstance.stackName, appName: dependency}] || controller.Config.Apps[dependency].PerStack {
 					dependencyStack = appInstance.stackName
 				}
 				plan(instance{stackName: dependencyStack, appName: dependency})
@@ -82,13 +82,13 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 	for _, appInstance := range startOrder {
 		appState := stacks.app(appInstance)
 		for portName, fixedPort := range controller.fixedPortsOf(appInstance) {
-			if !controller.isContainer(appInstance) && !stacks.isRunning(appInstance) && !controller.IsPortFreeOnHost(fixedPort) {
+			if !stacks.isRunning(appInstance) && !controller.IsPortFreeOnHost(fixedPort) {
 				return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort, appInstance.processName())
 			}
 			appState.Ports[portName] = fixedPort
 		}
 		var portNamesWithoutPort []string
-		for _, portName := range controller.app(appInstance).Ports {
+		for _, portName := range controller.app(appInstance).PortNames() {
 			if appState.Ports[portName] == 0 {
 				portNamesWithoutPort = append(portNamesWithoutPort, portName)
 			}
@@ -108,7 +108,7 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 
 func (controller *Controller) fixedPortsOf(appInstance instance) map[string]int {
 	app := controller.app(appInstance)
-	if app.Shared || appInstance.stackName == stack.MasterStackName || controller.isContainer(appInstance) {
+	if app.Shared || appInstance.stackName == stack.MasterStackName {
 		return app.FixedPorts
 	}
 	return nil

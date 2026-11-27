@@ -168,8 +168,8 @@ The fields of an app:
 | `build` | Command that builds the app. `ilot start` runs it in the checkout before it starts the app. |
 | `env` | Environment variables of the process. |
 | `dir` | Working folder of the process. A relative path is relative to the checkout. The default is the checkout. |
-| `ports` | Names of the ports of the app. `ilot` gives each name a free port in 20000-29999 and keeps it. |
-| `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. On a normal app, they apply to the `master` stack only. |
+| `ports` | Names of the ports of the app. `ilot` gives each name a free port in 20000-29999 and keeps it. A container app declares its ports in the `container` block. |
+| `fixed_ports` | Fixed numbers for some of the ports, for example `{http: 9090}`. On an app that is not `shared`, they apply to the `master` stack only. |
 | `route` | Port that the proxy URL sends requests to. |
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
 | `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. |
@@ -187,7 +187,7 @@ The `build`, `run`, `stop` and `env` values can use these templates:
 | `{{.Ports.<name>}}` | The port of this app with that name. |
 | `{{port "<app>" "<name>"}}` | The port of another app or of an external service. If the stack runs its own copy of the app, it gets the port of that copy. Else it gets the port of the `master` copy. |
 | `{{url "<app>"}}` | The proxy URL of an app, with the same rule. |
-| `{{host "<app>"}}` | The host name that this app uses to reach another app: the container name of a container, `devbox` for a process called from a container, and `localhost` for a process called from a process. |
+| `{{host "<app>"}}` | The host name that this app uses to reach another app: `localhost` for a process, and `host.docker.internal` for a container. |
 | `{{repo "<name>"}}` | The checkout of another repo for this stack. |
 | `{{.WorktreeDir}}` | The checkout of the repo of the app for this stack. |
 | `{{.BinDir}}` | The folder for the binaries of the stack. |
@@ -204,20 +204,43 @@ An external service is a service that `ilot` does not start. It has a `port` and
 
 ### Container apps
 
-An app with a `container` block runs as a Docker container on the `ilotproxy` network, named `ilot-<stack>-<app>`.
+An app with a `container` block runs as a Docker container named `ilot-<app>-<stack>`.
 It needs no `run`. If the app has a `build`, it runs before the container starts.
+Docker is needed only for these apps.
+
+```yaml
+apps:
+  db:
+    container:
+      image: postgres:17
+      ports: {pg: 5432}
+      mounts: {"{{.StackDir}}/pg": /var/lib/postgresql/data}
+      env_files: [.env.db]
+      args: [--shm-size=1g]
+    env:
+      POSTGRES_PASSWORD: dev
+    ready: {command: pg_isready -U postgres}
+```
 
 | Field | Meaning |
 |---|---|
 | `image` | Image to run. Required. |
-| `mounts` | Folders to mount, from the path in the container to the path on this machine. The value can use templates. |
+| `ports` | The ports of the app, from the name of a port to its number inside the container. A container app has no top-level `ports`. |
+| `mounts` | Folders to mount, from the path on this machine to the path in the container. The path on this machine can use templates. |
 | `env_files` | Env files that `docker run` reads. |
-| `links` | Other container apps of the same stack, from the host name that the container uses to the app name. `ilot start` starts them first. |
-| `external_links` | Containers that `ilot` does not run, from the host name that the container uses to the container name. |
+| `args` | More flags for `docker run`, before the image. A flag can use templates. |
 
-Each port of a container needs a number in `fixed_ports`. It is the port inside the container, so two stacks can use the same number.
+`ilot` gives each port of a container a port of the stack, as for any app, and publishes it on `127.0.0.1` only.
+The proxy and the other apps therefore reach a container on `localhost`, and two stacks can run the same container.
+Use `{{host "<app>"}}` and `{{port "<app>"}}` for the address of another app: a container gets `host.docker.internal`, and a process gets `localhost`.
+`ilot` adds the `--add-host` flag that Docker on Linux needs for that name.
+On Linux, that name is the address of the Docker bridge, and not the loopback address. A container there reaches only an app that listens on every interface. It does not reach an app that listens on `127.0.0.1` only, and it does not reach another container app, because `ilot` publishes a container on `127.0.0.1` only. Docker Desktop on macOS has no such limit.
+
 The `env` of the app goes to the container with `-e KEY`, so the values stay out of the command line.
 `ilot` pulls a missing image before any build, one time for all the apps that use it.
+A `ready` check with a `command` runs inside the container, with `docker exec`.
+Prefer a `command` or a `path` to a bare port check: Docker accepts a connection on a published port before the server inside listens.
+For a case that the block does not cover, write `run: docker run ...` with a `stop` command.
 
 ## Personal settings
 
