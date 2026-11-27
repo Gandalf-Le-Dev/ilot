@@ -19,7 +19,7 @@ The main checkout of every repo is the `base` stack, on any branch.
 `ilot` names the stack of a linked worktree after its branch: the branch name in lowercase letters, digits and dashes, 63 characters at most.
 For example, the branch `feature/retry-jobs` belongs to the stack `feature-retry-jobs`.
 The branch is the name because one line of work usually gets the same branch name in each repo.
-With `stack.pattern` in the `ilot.yaml` of the root repo, the name is the first match of that regular expression in the branch name. With `pattern: '[A-Za-z]+-[0-9]+'`, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`. A branch that the pattern does not match keeps its whole name.
+With `stack.pattern` in the `ilot.yaml` of the root repo, the name is the first match of that regular expression in the branch name. With `pattern: '[A-Za-z]+-[0-9]+'`, the branch `feature/SHOP-12-cart` belongs to the stack `shop-12`. A branch that the pattern does not match keeps its whole name.
 A worktree with a detached HEAD takes the name of its folder.
 
 A worktree gets its stack one time, at the first `ilot start` in it. `ilot` records the pair of the worktree and the stack. This is the binding.
@@ -186,13 +186,13 @@ ilot logs -f -n 20 api        # the last 20 lines, then the new ones
 ilot env api                  # the environment of the app, with the source of each value
 ilot check                    # check the ilot.yaml of this repo with the files of the other repos
 ilot check path/to/ilot.yaml  # check that file
-ilot rm retry-jobs            # stop a stack and delete its state, its logs and its routes
+ilot rm shop-12               # stop a stack and delete its state, its logs and its routes
 ilot clean                    # ilot rm on each stack whose bound worktrees are all deleted
 ilot clean --dry-run          # print what ilot clean would do, and change nothing
 ilot ls --workspace shop      # the same from any folder; rm, clean and doctor take --workspace too
-ilot logs --workspace shop --stack retry-jobs api  # the log of api in the stack retry-jobs, from any folder
+ilot logs --workspace shop --stack shop-12 api  # the log of api in the stack shop-12, from any folder
 ilot stack show               # the stack of this worktree, and the checkout of each repo for it
-ilot stack bind retry-jobs    # put this worktree in the stack retry-jobs
+ilot stack bind shop-12       # put this worktree in the stack shop-12
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
 ilot doctor                   # test git, the state folder, the daemon, the proxy address, the name lookup, the login shell, and watchexec and docker when an app needs them
 ilot daemon status            # the version, the process ID and the proxy address of the daemon
