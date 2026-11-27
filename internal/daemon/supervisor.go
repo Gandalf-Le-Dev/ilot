@@ -260,6 +260,9 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 	if err != nil {
 		return fmt.Errorf("open the log file of %s: %w", name, err)
 	}
+	output.onRotationFailure = func(err error) {
+		supervisor.logger.Error("the log file does not rotate, so it grows", "process", name, "file", spec.LogFile, "error", err)
+	}
 	pipeReader, pipeWriter, err := os.Pipe()
 	if err != nil {
 		output.Close()
@@ -309,11 +312,10 @@ func (supervisor *Supervisor) watch(name string, watched *run, command *exec.Cmd
 	copied := make(chan struct{})
 	go func() {
 		defer close(copied)
-		if _, err := io.Copy(watched.output, pipeReader); err != nil {
-			supervisor.logger.Error("the output of the process is lost", "process", name, "error", err)
-			// The pipe must drain even with no log file: a full pipe would block the process.
-			_, _ = io.Copy(io.Discard, pipeReader)
-		}
+		// The pipe must drain even when the log file fails: a full pipe would block the process.
+		_, _ = io.Copy(&lossyWriter{target: watched.output, onLoss: func(err error) {
+			supervisor.logger.Error("output of the process is lost", "process", name, "error", err)
+		}}, pipeReader)
 	}()
 
 	_ = command.Wait()
