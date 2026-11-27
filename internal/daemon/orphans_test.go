@@ -160,6 +160,45 @@ func TestOrphanCleanupSparesTheRecordsOfAnotherBoot(t *testing.T) {
 	}
 }
 
+func TestOrphanCleanupOfARecordWithNoBootID(t *testing.T) {
+	ownSession, isKnown := sessionOf(os.Getpid())
+	if !isKnown {
+		t.Fatal("the session of the test is not readable")
+	}
+
+	t.Run("a live leader with the recorded start time is stopped", func(t *testing.T) {
+		orphan := startGroup(t, "sleep 300")
+		pid := orphan.Process.Pid
+		startedAt, isAlive := processStartTime(pid)
+		if !isAlive {
+			t.Fatal("the start time of a live process is not readable")
+		}
+		var log bytes.Buffer
+		record := processRecord{PID: pid, StartedAt: startedAt, Session: ownSession}
+		killOrphans(recordOf(t, map[string]processRecord{"app": record}), time.Second, slog.New(slog.NewTextHandler(&log, nil)))
+
+		waitUntil(t, "the group is gone", func() bool { return !groupExists(pid) })
+		if !strings.Contains(log.String(), "level=WARN") || !strings.Contains(log.String(), "no boot ID") || strings.Contains(log.String(), "another boot") {
+			t.Errorf("the log does not warn about the missing boot ID:\n%s", log.String())
+		}
+	})
+
+	t.Run("a group whose leader is dead stays", func(t *testing.T) {
+		group, member, leaderStartedAt := startHeadlessGroup(t)
+		var log bytes.Buffer
+		record := processRecord{PID: group, StartedAt: leaderStartedAt, Session: ownSession}
+		killOrphans(recordOf(t, map[string]processRecord{"app": record}), time.Second, slog.New(slog.NewTextHandler(&log, nil)))
+
+		time.Sleep(50 * time.Millisecond)
+		if !isProcessAlive(member) {
+			t.Fatal("the cleanup killed a group with a dead leader on the word of a record with no boot ID")
+		}
+		if !strings.Contains(log.String(), "nothing proves it") {
+			t.Errorf("the cleanup left the group and did not log it:\n%s", log.String())
+		}
+	})
+}
+
 // startHeadlessGroup gives a group whose leader is dead, as a daemon like tmux leaves after its double fork.
 func startHeadlessGroup(t *testing.T) (group, member int, leaderStartedAt string) {
 	t.Helper()

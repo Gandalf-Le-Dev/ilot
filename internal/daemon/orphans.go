@@ -83,7 +83,12 @@ func killOrphans(recordPath string, grace time.Duration, logger *slog.Logger) {
 	currentBootID := bootID()
 	var groups []int
 	for name, record := range records {
-		if record.BootID != currentBootID {
+		switch record.BootID {
+		case currentBootID:
+		case "":
+			// A daemon from before the boot IDs, or a system with none, wrote this record.
+			logger.Warn("a record of a process has no boot ID, so its group is stopped only if its leader still lives with the recorded start time", "process", name, "pid", record.PID)
+		default:
 			logger.Info("a record of a process is from another boot, so its process is gone", "process", name, "pid", record.PID)
 			continue
 		}
@@ -123,8 +128,9 @@ func isOrphanGroup(record processRecord) (isOrphan bool, doubt string) {
 		return record.StartedAt != "" && startedAt == record.StartedAt, ""
 	}
 	// The leader is dead, so its ID was free for a new process, which can have made this group and left it to its children.
-	if record.Session <= 0 || record.StartedAt == "" {
-		return false, "the record has no session or no start time"
+	if record.BootID == "" || record.Session <= 0 || record.StartedAt == "" {
+		// With no boot ID, the session and the start time can be from another boot.
+		return false, "the record has no boot ID, no session or no start time"
 	}
 	members, err := groupMembers(record.PID)
 	if err != nil {
