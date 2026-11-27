@@ -31,6 +31,9 @@ func (git *Git) Locate(dirInsideWorktree string) (Worktree, error) {
 		return Worktree{}, err
 	}
 	worktrees, err := git.list("", dir)
+	if _, isBare := errors.AsType[*bareRepoError](err); isBare {
+		return Worktree{}, err
+	}
 	if err != nil {
 		return Worktree{}, fmt.Errorf("%s is not inside a git checkout: %w", dirInsideWorktree, err)
 	}
@@ -46,6 +49,13 @@ func (git *Git) Locate(dirInsideWorktree string) (Worktree, error) {
 		return Worktree{}, fmt.Errorf("%s is in no worktree that git lists for its repo", dirInsideWorktree)
 	}
 	return worktrees[located], nil
+}
+
+// bareRepoError says that the repo of a folder has no main checkout, so no ilot.yaml to read.
+type bareRepoError struct{ dir, bareDir string }
+
+func (err *bareRepoError) Error() string {
+	return fmt.Sprintf("%s belongs to the bare repo %s, which has no main checkout and no %s", err.dir, err.bareDir, config.FileName)
 }
 
 // Worktrees lists the worktrees of a repo with one git process. The main checkout is the first one.
@@ -83,7 +93,7 @@ func (git *Git) list(repoName, dir string) ([]Worktree, error) {
 				worktree.Branch = strings.TrimPrefix(branchRef, "refs/heads/")
 			}
 			if line == "bare" {
-				return nil, fmt.Errorf("the repo of %s is the bare repo %s: ilot reads the %s of the main checkout, and a bare repo has none", dir, worktree.Dir, config.FileName)
+				return nil, &bareRepoError{dir: dir, bareDir: worktree.Dir}
 			}
 		}
 		if worktree.Dir == "" {
