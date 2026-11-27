@@ -125,8 +125,9 @@ func (executor *Executor) sendRoutes(ctx context.Context) error {
 	return executor.Supervisor.SetRoutes(ctx, plan.Snapshot{Workspace: executor.Workspace, State: current, Machine: executor.Machine}.Routes())
 }
 
-// replaceChangedDependents replaces each running app of the stack whose specification this start changed, for example a template that now names an app of the stack.
+// replaceChangedDependents replaces each running app of the stack whose specification this start changed, for example a template that now names an app of the stack, and waits for it.
 // Both specifications come from the same shell environment, so a change of the shell or of the terminal replaces nothing.
+// An app that the daemon already runs with the new specification, after another command replaced it, stays as it is.
 func (executor *Executor) replaceChangedDependents(ctx context.Context, before, after plan.Snapshot, stackName string, startOrder []plan.Instance, processByName map[string]daemon.Process) error {
 	for _, wantedInstance := range after.Wanted() {
 		process, isHeld := processByName[after.ProcessName(wantedInstance)]
@@ -138,11 +139,15 @@ func (executor *Executor) replaceChangedDependents(ctx context.Context, before, 
 			return err
 		}
 		specBefore, err := before.Spec(wantedInstance)
-		if err == nil && specBefore.Hash() == specAfter.Hash() {
+		isUnchangedByThisStart := err == nil && specBefore.Hash() == specAfter.Hash()
+		if isUnchangedByThisStart || process.Hash == specAfter.Hash() {
 			continue
 		}
-		fmt.Fprintf(executor.Output, "restarting %s: this start changed its specification\n", specAfter.Name)
-		if err := executor.Supervisor.Put(ctx, specAfter); err != nil {
+		replace := func() error {
+			fmt.Fprintf(executor.Output, "restarting %s: this start changed its specification\n", specAfter.Name)
+			return executor.put(ctx, specAfter)
+		}
+		if err := executor.applyAndWait(ctx, after, wantedInstance, processByName, replace); err != nil {
 			return err
 		}
 	}
@@ -451,30 +456,34 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 	}
 	process, isHeld := processByName[spec.Name]
 	isRunning := isHeld && process.State != daemon.StateExited
-	if isRunning && !isRequested {
+	switch {
+	case isRunning && !isRequested:
 		return executor.waitReady(ctx, snapshot, appInstance)
+	case !isRunning:
+		return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error { return executor.put(ctx, spec) })
+	case process.Hash != spec.Hash():
+		return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error {
+			fmt.Fprintf(executor.Output, "restarting %s with its new specification\n", spec.Name)
+			return executor.put(ctx, spec)
+		})
 	}
+	return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error {
+		fmt.Fprintf(executor.Output, "restarting %s\n", spec.Name)
+		return executor.Supervisor.Restart(ctx, spec)
+	})
+}
+
+// applyAndWait sends one instance and its watcher to the daemon, then waits until the instance is ready. An instance that is no member any more gets no call.
+func (executor *Executor) applyAndWait(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process, apply func() error) error {
+	processName := snapshot.ProcessName(appInstance)
 	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
 		if err == nil {
-			fmt.Fprintf(executor.Output, "%s does not start: another ilot command stopped it\n", spec.Name)
+			fmt.Fprintf(executor.Output, "%s does not start: another ilot command stopped it\n", processName)
 		}
 		return err
 	}
-	switch {
-	case !isRunning:
-		if err := executor.put(ctx, spec); err != nil {
-			return err
-		}
-	case isRequested && process.Hash != spec.Hash():
-		fmt.Fprintf(executor.Output, "restarting %s with its new specification\n", spec.Name)
-		if err := executor.put(ctx, spec); err != nil {
-			return err
-		}
-	case isRequested:
-		fmt.Fprintf(executor.Output, "restarting %s\n", spec.Name)
-		if err := executor.Supervisor.Restart(ctx, spec); err != nil {
-			return err
-		}
+	if err := apply(); err != nil {
+		return err
 	}
 	if err := executor.putWatcher(ctx, snapshot, appInstance, processByName); err != nil {
 		return err
@@ -482,7 +491,7 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 	// A stop between the test above and the start found no process to stop, so this command stops it.
 	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
 		if err == nil {
-			fmt.Fprintf(executor.Output, "%s stops again: another ilot command stopped it while it started\n", spec.Name)
+			fmt.Fprintf(executor.Output, "%s stops again: another ilot command stopped it while it started\n", processName)
 			err = executor.deleteProcesses(ctx, snapshot, []plan.Instance{appInstance})
 		}
 		return err
