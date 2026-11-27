@@ -34,7 +34,7 @@ func (launch Launch) Start() (pid int, err error) {
 		return 0, err
 	}
 	// The daemon writes its records by itself. This handle catches what it cannot: a panic.
-	output, err := os.OpenFile(launch.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	output, err := os.OpenFile(launch.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, daemonLogPerm)
 	if err != nil {
 		return 0, err
 	}

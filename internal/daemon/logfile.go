@@ -18,6 +18,7 @@ const (
 type rotatingFile struct {
 	path     string
 	maxBytes int64
+	perm     os.FileMode
 
 	// Called with the lock held, so it must not write to this file.
 	onRotationFailure func(error)
@@ -28,11 +29,12 @@ type rotatingFile struct {
 	isClosed bool
 }
 
-func openRotatingFile(path string, maxBytes int64) (*rotatingFile, error) {
+// perm is the mode of each new file, the ones that a rotation makes included.
+func openRotatingFile(path string, maxBytes int64, perm os.FileMode) (*rotatingFile, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	rotating := &rotatingFile{path: path, maxBytes: maxBytes}
+	rotating := &rotatingFile{path: path, maxBytes: maxBytes, perm: perm}
 	if err := rotating.open(); err != nil {
 		return nil, err
 	}
@@ -40,7 +42,7 @@ func openRotatingFile(path string, maxBytes int64) (*rotatingFile, error) {
 }
 
 func (rotating *rotatingFile) open() error {
-	file, err := os.OpenFile(rotating.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	file, err := os.OpenFile(rotating.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, rotating.perm)
 	if err != nil {
 		return err
 	}

@@ -28,6 +28,9 @@ func (paths Paths) LockFile() string {
 	return filepath.Join(paths.StateDir, "daemon.lock")
 }
 
+// Like the socket and the lock, the log of the daemon is for its user only.
+const daemonLogPerm = 0o600
+
 func (paths Paths) LogFile() string {
 	return filepath.Join(paths.StateDir, "daemon.log")
 }
