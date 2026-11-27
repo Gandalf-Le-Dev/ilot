@@ -210,6 +210,7 @@ When an app is `down`, `ilot ls` ends with the command that starts it again: `il
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
 `ilot start` converges: it builds and starts what does not run, and an app that runs stays as it is. If the specification of a named app changed, for example after an edit of its `ilot.yaml`, `ilot start` builds it and replaces it.
 `ilot restart <app>` builds an app again and restarts it, even with the same specification. Use it after a code change.
+The app must run, or have exited: `ilot restart` refuses an app that is `down`, for example after `ilot daemon stop`, because it starts no dependency. Run `ilot start <app>` instead.
 `ilot start` with no app starts every app that the stack of the folder owns and that does not run.
 A command calls the daemon only for the apps that it starts, restarts or stops. A dependency that runs gets no call, and an app of another stack never restarts.
 When the start changes a template of a running app of the same stack, for example because the stack now runs its own copy of a dependency, `ilot start` restarts that app and prints one line for it.

@@ -43,7 +43,7 @@ type cli struct {
 	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
 	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them, in the stack of the current worktree."`
+	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them, in the stack of the current worktree. An app that is down needs ilot start, which starts its dependencies first."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`

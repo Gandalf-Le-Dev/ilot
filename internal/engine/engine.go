@@ -210,16 +210,22 @@ func (executor *Executor) RestartApps(ctx context.Context, stackName string, app
 	if err != nil {
 		return err
 	}
+	processByName, err := executor.Supervisor.Processes(ctx)
+	if err != nil {
+		return err
+	}
 	for _, appInstance := range restartedInstances {
-		if !snapshot.IsWanted(appInstance) {
+		// An app that the daemon does not hold, for example after ilot daemon stop, needs ilot start, which starts its dependencies first.
+		// An app that exited is still held: its watcher restarts it after a fix.
+		if _, isHeld := processByName[snapshot.ProcessName(appInstance)]; !isHeld || !snapshot.IsWanted(appInstance) {
 			return fmt.Errorf("%s does not run: start it with ilot start %s", snapshot.ProcessName(appInstance), appInstance.App)
 		}
 	}
 	if err := executor.buildApps(ctx, snapshot, restartedInstances, func(plan.Instance) bool { return true }); err != nil {
 		return err
 	}
-	processByName, err := executor.Supervisor.Processes(ctx)
-	if err != nil {
+	// The build can take minutes, and another command can change the processes meanwhile.
+	if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
 		return err
 	}
 	var shownInstances []plan.Instance

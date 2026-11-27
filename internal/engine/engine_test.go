@@ -1103,17 +1103,35 @@ func TestRestartAppsRefusesAnAppThatDoesNotRun(t *testing.T) {
 	}
 }
 
-func TestRestartAppsStartsOneTimeAProcessThatTheDaemonLost(t *testing.T) {
+// After ilot daemon stop, a restart would start the app with its dependencies down: ilot start starts them first.
+func TestRestartAppsRefusesAnAppThatTheDaemonDoesNotHold(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
+	*environment.builds = nil
 
-	if err := environment.executorOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
-		t.Fatalf("RestartApps: %v", err)
+	err := environment.executorOfANewCommand().RestartApps(t.Context(), environment.featureStack, []string{"standalone"})
+
+	if err == nil || !strings.Contains(err.Error(), "standalone.proj-1234.shop does not run: start it with ilot start standalone") {
+		t.Fatalf("RestartApps = %v, want a refusal that names ilot start", err)
+	}
+	if len(*environment.builds) != 0 || len(environment.supervisor.events) != 0 {
+		t.Errorf("builds = %+v, events = %v; want nothing done", *environment.builds, environment.supervisor.events)
+	}
+}
+
+func TestRestartAppsRestartsAnAppThatExited(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
+	environment.supervisor.setBehavior("standalone.proj-1234.shop", processEndedAfterItWasReady)
+	environment.supervisor.events = nil
+
+	if err := environment.executor.RestartApps(t.Context(), environment.featureStack, []string{"standalone"}); err != nil {
+		t.Fatalf("RestartApps = %v, want a restart: the watcher of an app that crashed restarts it after a fix", err)
 	}
 
-	if want := []string{"start standalone.proj-1234.shop", "ready standalone.proj-1234.shop"}; !slices.Equal(environment.supervisor.events, want) {
-		t.Errorf("events = %v, want %v", environment.supervisor.events, want)
+	if len(environment.supervisor.events) == 0 {
+		t.Errorf("events = %v, want the restart", environment.supervisor.events)
 	}
 }
 
