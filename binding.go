@@ -98,7 +98,10 @@ func (command *stackBindCommand) Run(ctx context.Context) error {
 
 // withBindings gives the workspace the worktrees of each stack, which the state holds.
 func withBindings(currentWorkspace workspace.Workspace) (workspace.Workspace, state.Store, error) {
-	store := state.Store{RootDir: stateDirOf(currentWorkspace.HomeDir), LockTimeout: 0, OnLockWait: sayWhoHoldsTheLock}
+	store := state.Store{RootDir: stateDirOf(currentWorkspace.HomeDir), LockTimeout: 0, OnLockWait: func(holder string) {
+		sayWhoHoldsTheLock(holder)
+		auditLog.Info("state lock wait", "workspace", currentWorkspace.Name, "holder", holder)
+	}}
 	current, err := store.Load()
 	if err != nil {
 		return workspace.Workspace{}, state.Store{}, err
@@ -181,6 +184,7 @@ func bindWorktree(ctx context.Context, store state.Store, currentWorkspace works
 	if err := store.Save(current); err != nil {
 		return workspace.Workspace{}, "", err
 	}
+	auditLog.Info("worktree bound", "workspace", currentWorkspace.Name, "stack", stackName, "worktree", worktree.Dir, "previous_stack", previousStackName)
 	currentWorkspace.Bindings = newBindings
 	return currentWorkspace, previousStackName, nil
 }

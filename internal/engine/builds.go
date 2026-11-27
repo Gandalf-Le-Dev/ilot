@@ -60,6 +60,7 @@ func (executor *Executor) allocatePorts(start plan.Start) error {
 	}
 	for index, need := range start.PortNeeds {
 		start.After.SetPort(need.Instance, need.PortName, allocated[index])
+		executor.audit().Info("port given", "process", start.After.ProcessName(need.Instance), "port_name", need.PortName, "port", allocated[index])
 	}
 	return nil
 }
@@ -163,11 +164,20 @@ func (executor *Executor) warnAboutUndeclared(snapshot plan.Snapshot, dropped []
 	}
 }
 
+// saveStacks runs under the state lock, so the file that it reads first is the state before this save.
 func (executor *Executor) saveStacks(snapshot plan.Snapshot) error {
 	if err := snapshot.State.Claim(executor.Workspace, executor.Root); err != nil {
 		return err
 	}
-	return executor.Store.Save(snapshot.State)
+	before, beforeErr := executor.Store.Load()
+	if err := executor.Store.Save(snapshot.State); err != nil {
+		return err
+	}
+	if beforeErr == nil {
+		executor.auditStateChanges(before, snapshot.State)
+	}
+	executor.audit().Info("state saved", "file", executor.Store.File())
+	return nil
 }
 
 // A build runs in the terminal of the command, so it gets the session variables too, for example SSH_AUTH_SOCK for a private module.

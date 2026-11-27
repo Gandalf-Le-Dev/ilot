@@ -170,9 +170,6 @@ func (command *lsCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if command.JSON {
-		executor.Output = os.Stderr
-	}
 	listing, err := executor.List(ctx)
 	if err != nil {
 		return err
@@ -457,6 +454,10 @@ func newSource(ctx context.Context, currentWorkspace workspace.Workspace, store 
 	if err != nil {
 		return engine.Source{}, fmt.Errorf("find the ilot binary, which the watcher of an app runs: %w", err)
 	}
+	store.OnLockWait = func(holder string) {
+		sayWhoHoldsTheLock(holder)
+		auditLog.Info("state lock wait", "workspace", currentWorkspace.Name, "stack", stackName, "holder", holder)
+	}
 	ilotEnv := map[string]string{}
 	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
 		ilotEnv["XDG_STATE_HOME"] = value
@@ -489,9 +490,10 @@ func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, stor
 		return nil, err
 	}
 	global := currentWorkspace.Global
+	logger := auditLog.With("workspace", currentWorkspace.Name, "stack", stackName)
 	return &engine.Executor{
 		Source:              source,
-		Supervisor:          newDaemonSupervisor(source.Machine.IlotBinary, store.RootDir, global.Proxy.Listen),
+		Supervisor:          engine.AuditedSupervisor{ProcessSupervisor: newDaemonSupervisor(source.Machine.IlotBinary, store.RootDir, global.Proxy.Listen), Logger: logger},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		RemoveContainer:     removeContainer,
@@ -500,7 +502,9 @@ func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, stor
 		PortRange:           ports.Range{First: global.Ports.First, Last: global.Ports.Last},
 		ReadyTimeout:        readyTimeout,
 		ProgressInterval:    10 * time.Second,
-		Output:              os.Stdout,
+		Output:              os.Stderr,
+		Data:                os.Stdout,
+		Logger:              logger,
 	}, nil
 }
 
@@ -563,5 +567,11 @@ func main() {
 	defer stop()
 	var commandLineArguments cli
 	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the apps of each git worktree behind one local proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
-	commandLine.FatalIfErrorf(commandLine.Run())
+	closeAuditLog := openAuditLog(commandLine.Command())
+	err := commandLine.Run()
+	if err != nil {
+		auditLog.Warn("command failed", "error", err.Error())
+	}
+	closeAuditLog()
+	commandLine.FatalIfErrorf(err)
 }
