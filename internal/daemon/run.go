@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -22,6 +23,8 @@ type Options struct {
 	// With no logger, the daemon writes JSON records to the daemon.log of the state folder.
 	Logger     *slog.Logger
 	Supervisor SupervisorOptions
+	// How long the processes of a dead daemon get to end after SIGTERM.
+	OrphanGrace time.Duration
 }
 
 // Run is the whole life of the daemon. It returns ErrAlreadyRunning, and touches nothing, when another daemon lives.
@@ -46,6 +49,9 @@ func Run(ctx context.Context, options Options) error {
 		logger = slog.New(slog.NewJSONHandler(logFile, nil))
 	}
 
+	// Before the socket: a caller must not start an app while the old copy still holds its port.
+	killOrphans(paths.RecordFile(), cmp.Or(options.OrphanGrace, defaultOrphanGrace), logger)
+
 	listener, err := listenOnSocket(paths.Socket())
 	if err != nil {
 		logger.Error("daemon cannot listen", "error", err)
@@ -54,6 +60,7 @@ func Run(ctx context.Context, options Options) error {
 
 	supervisorOptions := options.Supervisor
 	supervisorOptions.Logger = logger
+	supervisorOptions.RecordFile = paths.RecordFile()
 	supervisor := NewSupervisor(supervisorOptions)
 	shutdownRequested := make(chan struct{})
 	api := &Server{

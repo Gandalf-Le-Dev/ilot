@@ -28,6 +28,10 @@ func (paths Paths) LogFile() string {
 	return filepath.Join(paths.StateDir, "daemon.log")
 }
 
+func (paths Paths) RecordFile() string {
+	return filepath.Join(paths.StateDir, "processes.json")
+}
+
 func (paths Paths) Socket() string {
 	inStateDir := filepath.Join(paths.StateDir, "daemon.sock")
 	if len(inStateDir) <= longestSocketPath {
