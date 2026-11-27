@@ -1,13 +1,14 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alecthomas/kong"
 )
 
 func installedSkillPath(homeDir string) string {
@@ -17,7 +18,7 @@ func installedSkillPath(homeDir string) string {
 func TestInstallAgentSkillWritesTheEmbeddedFile(t *testing.T) {
 	homeDir := t.TempDir()
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -29,7 +30,7 @@ func TestInstallAgentSkillWritesTheEmbeddedFile(t *testing.T) {
 
 func TestInstallAgentSkillLeavesAnIdenticalFileAlone(t *testing.T) {
 	homeDir := t.TempDir()
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatal(err)
 	}
 	longAgo := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -37,7 +38,7 @@ func TestInstallAgentSkillLeavesAnIdenticalFileAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -57,7 +58,7 @@ func TestInstallAgentSkillKeepsOtherFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installAgentSkill(homeDir); err != nil {
+	if _, err := installAgentSkill(homeDir); err != nil {
 		t.Fatalf("installAgentSkill: %v", err)
 	}
 
@@ -91,26 +92,26 @@ func TestAgentSkillNamesEveryCommand(t *testing.T) {
 	}
 }
 
-func TestInstallAgentSkillOrWarnPrintsOneWarningWhenTheFolderCannotBeWritten(t *testing.T) {
+func TestInstallAgentSkillFailsWhenTheFolderCannotBeWritten(t *testing.T) {
 	homeDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(homeDir, ".claude"), []byte("a file where the folder must be\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var warnings strings.Builder
 
-	installAgentSkillOrWarn(func() (string, error) { return homeDir, nil }, &warnings)
-
-	if lines := strings.Split(strings.TrimSpace(warnings.String()), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "warning: install the ilot skill: ") {
-		t.Fatalf("warnings = %q, want one warning line", warnings.String())
+	if _, err := installAgentSkill(homeDir); err == nil {
+		t.Fatal("installAgentSkill = nil, want an error")
 	}
 }
 
-func TestInstallAgentSkillOrWarnPrintsOneWarningWithoutAHomeFolder(t *testing.T) {
-	var warnings strings.Builder
-
-	installAgentSkillOrWarn(func() (string, error) { return "", errors.New("$HOME is not defined") }, &warnings)
-
-	if warnings.String() != "warning: install the ilot skill: $HOME is not defined\n" {
-		t.Fatalf("warnings = %q, want one warning naming the cause", warnings.String())
+func TestSkillHasAPrintAndAnInstallCommand(t *testing.T) {
+	for _, subcommand := range []string{"print", "install"} {
+		parser, err := kong.New(&cli{}, kong.Vars{"version": "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := parser.Parse([]string{"skill", subcommand})
+		if err != nil || parsed.Command() != "skill "+subcommand {
+			t.Errorf("parse skill %s = %v, %v", subcommand, parsed, err)
+		}
 	}
 }

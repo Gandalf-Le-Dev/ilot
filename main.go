@@ -41,7 +41,6 @@ const (
 
 type cli struct {
 	Version kong.VersionFlag `short:"v" help:"Print the version of ilot and exit."`
-	Skill   skillFlag        `help:"Print the ilot skill for AI agents and exit."`
 
 	Ls      lsCommand      `cmd:"" help:"List the apps of every stack and the external services."`
 	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
@@ -54,6 +53,7 @@ type cli struct {
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, logs and routes."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
+	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
 }
 
 type envCommand struct {
@@ -152,7 +152,6 @@ type stopCommand struct {
 }
 
 func (command *bootCommand) Run(ctx context.Context) error {
-	installAgentSkillOrWarn(os.UserHomeDir, os.Stderr)
 	mainCheckout, err := stack.Locate(command.Checkout)
 	if err != nil {
 		return err
@@ -434,6 +433,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
-	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot --skill."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
+	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
 	commandLine.FatalIfErrorf(commandLine.Run())
 }

@@ -139,7 +139,8 @@ ilot clean                    # ilot rm on each stack whose worktrees are delete
 ilot restart                  # stop every app, start the daemon again with a fresh environment, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran: run it at login
 ilot --version
-ilot --skill                  # print the skill for AI agents
+ilot skill print              # print the skill for AI agents
+ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
 ```
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
@@ -244,7 +245,8 @@ The daemon keeps the shell values that it started with. To give the apps fresh v
 
 `ilot` ships a skill for Claude Code, `skill/SKILL.md`.
 It tells an agent that `ilot` is its own tool, and it describes every command, the stacks and the traps.
-`ilot boot` copies it to `~/.claude/skills/ilot/SKILL.md`, and `ilot --skill` prints it.
+`ilot skill install` copies it to `~/.claude/skills/ilot/SKILL.md`, and `ilot skill print` prints it.
+Run `ilot skill install` again after you upgrade `ilot`.
 The skill pre-approves every `ilot` command.
 When you add a command, add it to the skill too: a test fails otherwise.
 
