@@ -142,3 +142,29 @@ func TestRotatingFileGivesEachNewFileItsMode(t *testing.T) {
 		}
 	}
 }
+
+func TestRotatingFileNarrowsTheModeOfAnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.log")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rotating, err := OpenRotating(path, 10, userOnlyPerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rotating.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != userOnlyPerm {
+		t.Errorf("the file has the mode %v, want %v", info.Mode().Perm(), os.FileMode(userOnlyPerm))
+	}
+}
