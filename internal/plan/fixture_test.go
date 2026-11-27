@@ -14,7 +14,6 @@ func testConfig() config.Config {
 		Apps: map[string]config.App{
 			"temporal": {
 				Scope:      "base",
-				Autostart:  true,
 				Run:        "temporal server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
 				Ports:      []string{"grpc", "ui"},
 				FixedPorts: map[string]int{"grpc": 7233, "ui": 10012},
@@ -23,7 +22,6 @@ func testConfig() config.Config {
 			},
 			"restapi": {
 				Scope:      "base",
-				Autostart:  true,
 				Dir:        "/legacy/restapi",
 				Run:        "perl main.pl prefork",
 				Ports:      []string{"http"},
@@ -40,13 +38,11 @@ func testConfig() config.Config {
 			},
 			"gateway": {
 				Scope:      "stack",
-				Autostart:  true,
 				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 9090},
 			},
 			"internalapi": {
-				Autostart: true,
 				Build:     buildPlatform,
 				Run:       "{{.BinDir}}/platform api internalapi --port={{.Ports.http}}",
 				Env:       map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},

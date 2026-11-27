@@ -16,7 +16,7 @@ Every `ilot` command is pre-approved for you. These limits still apply:
 
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop an app of the `base` stack that you did not start, ask the user. Other stacks and the user's other sessions use them.
-- Before you run `ilot restart` with no app name, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
+- Before you run `ilot daemon stop` or `ilot daemon restart`, ask the user. Both stop every app of every stack, the user's other sessions included.
 - Never run `ilot daemon run`. `ilot` starts its daemon by itself.
 
 ## Stacks
@@ -40,7 +40,8 @@ ilot ls                         # every app of every stack: status, ports, proxy
 ilot ls --json                  # the same as one JSON object, with the checkout of each repo per stack: use it to read the list from a script
 ilot apps                       # every app and external service that the ilot.yaml files declare for this folder's stack, with the dependencies of each app
 ilot apps --json                # the same as one JSON object
-ilot start front                # build, then start the app after its dependencies, in this folder's stack
+ilot start front                # build, then start the app after its dependencies, in this folder's stack; an app that runs stays as it is
+ilot start                      # start every app that this folder's stack owns and that does not run
 ilot start api --no-deps        # start only this app
 ilot start --all                # start every app that a stack owns and that does not run, after a crash of the daemon
 ilot stop api                   # stop the app in this folder's stack
@@ -54,16 +55,16 @@ ilot rm retry-jobs              # stop a stack and delete its state, its logs an
 ilot clean                      # ilot rm on every stack whose bound worktrees are all deleted (ask first); a moved worktree keeps its stack
 ilot stack show                 # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs      # put this worktree in the stack retry-jobs (ask first)
-ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
 ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already
-ilot restart                    # with no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
-ilot daemon run                 # the daemon itself: ilot starts it, never run it
+ilot daemon status              # the version, the process ID and the proxy address of the ilot daemon
+ilot daemon stop                # stop every app of every stack, then the daemon (ask first)
+ilot daemon restart             # stop every app and the daemon, start a new daemon, then start the apps of this workspace again (ask first)
 ilot --version                  # the version of ilot
 ilot skill print                # print this skill
 ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md
 ```
 
-`ilot start` rebuilds an app that already runs, then restarts it. An app with `watch` in its `ilot.yaml` is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot start <app>` again.
+`ilot start` leaves an app that runs as it is, unless its specification changed. After a code change, run `ilot restart <app>`: it builds the app again and restarts it. An app with `watch` in its `ilot.yaml` is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot restart <app>`.
 
 ## Where things are
 
@@ -71,7 +72,7 @@ ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL
 - State: `~/.local/state/ilot/state.json`. Logs: `~/.local/state/ilot/workspaces/<workspace>/<stack>/logs/<app>.log`.
 - Apps: the `ilot.yaml` at the root of each repo. `ilot apps` lists their names, their repo and their dependencies. A checkout with no `ilot.yaml` reads the file of the main checkout of its repo.
 - The global file: `~/.config/ilot/config.yaml`. It holds the address and the domain of the proxy (`proxy`), the port range (`ports`), the flags of the shell (`shell_env.args`), and, under `workspaces.<workspace>`, the path of a member repo that is cloned at another place (`repos.<name>`) and personal values (`env`, and `apps.<app>` for one app). Do not put secrets in a repo file: put them there.
-- An app gets a fixed environment. The values of the shell files come first: `ilot` reads the whole environment of a login shell (`$SHELL -l`), and `ilot env` marks these values `(shell)`. A login shell reads the profile files, for example `~/.zprofile`, and not `~/.zshrc`: if an app does not find a tool, compare the `PATH` of `ilot env <app>` with the `PATH` of the terminal. The values of the `ilot.yaml` files and of the global file come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the global file. An app gets its environment when it starts: after a change, run `ilot start <app>` again. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot restart`.
+- An app gets a fixed environment. The values of the shell files come first: `ilot` reads the whole environment of a login shell (`$SHELL -l`), and `ilot env` marks these values `(shell)`. A login shell reads the profile files, for example `~/.zprofile`, and not `~/.zshrc`: if an app does not find a tool, compare the `PATH` of `ilot env <app>` with the `PATH` of the terminal. The values of the `ilot.yaml` files and of the global file come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the global file. An app gets its environment when it starts: after a change, run `ilot restart <app>`. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot daemon restart`.
 - The README of ilot describes every key and template of `ilot.yaml`.
 
 ## When you edit an ilot.yaml
@@ -91,9 +92,9 @@ When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too.
 
 When an app of the start ends, it stays in its stack: `ilot ls` shows it `exited (<code>)` and its log stays. Fix the cause, then run the same `ilot start` again. It starts that app again, in the same stack, and every other app of the start that does not run. A dependency that runs gets no call and is never stopped.
 
-When the timeout passes while the app still runs, the error ends with `it still starts: ilot keeps it`. The app stays. Do not run `ilot start` again for it: that restarts a named app from zero. Follow its log with `ilot logs -f <app>` until it is ready, and check with `ilot ls` that it still runs. Next time, use a longer `--timeout`. Ctrl-C keeps the app too.
+When the timeout passes while the app still runs, the error ends with `it still starts: ilot keeps it`. The app stays. Do not run `ilot restart` for it: that restarts it from zero. Follow its log with `ilot logs -f <app>` until it is ready, and check with `ilot ls` that it still runs. Next time, use a longer `--timeout`. Ctrl-C keeps the app too.
 
-`ilot boot` does the same image check. A failed image fails only that app and the apps that depend on it.
+`ilot start --all` does the same image check. A failed image fails only that app and the apps that depend on it.
 
 A port that "is taken by another process" belongs to something outside `ilot`. Find it, and ask the user before you stop it.
 

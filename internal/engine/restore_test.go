@@ -124,13 +124,6 @@ func TestStartAllStartsTheOtherAppsWhenATemplateDoesNotRender(t *testing.T) {
 	checkOnlyTheBrokenStackStaysDown(t, environment, environment.executor.StartAll(t.Context()))
 }
 
-func TestBootStartsTheOtherAppsWhenATemplateDoesNotRender(t *testing.T) {
-	environment := newTestEnvironment(t)
-	brokenTemplateInAStack(t, environment)
-
-	checkOnlyTheBrokenStackStaysDown(t, environment, environment.executor.Boot(t.Context(), environment.base))
-}
-
 func TestStartAllSkipsABaseAppThatNoConfigDeclaresAnyMore(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.Config.Apps["envdump"] = config.App{Run: "env"}
@@ -158,5 +151,38 @@ func TestStartAllSkipsABaseAppThatNoConfigDeclaresAnyMore(t *testing.T) {
 	listing, err = environment.executor.List(t.Context())
 	if err != nil || listing.Restore != "" {
 		t.Errorf("restore = %q, %v; want nothing: ilot start --all does not start envdump", listing.Restore, err)
+	}
+}
+
+func TestAStartWithNoAppStartsTheMembersOfItsStackAndTheirDependencies(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	environment.supervisor.simulateDaemonRestart()
+
+	if err := environment.executor.StartStack(t.Context(), environment.featureStack); err != nil {
+		t.Fatal(err)
+	}
+
+	started := environment.supervisor.startedInOrder
+	for _, processName := range []string{"temporal.base.shop", "gateway.proj-1234.shop", "internalapi.base.shop", "publicapi.proj-1234.shop"} {
+		if !slices.Contains(started, processName) {
+			t.Errorf("started %v, want %s", started, processName)
+		}
+	}
+	if slices.Contains(started, "standalone.base.shop") {
+		t.Errorf("started %v, want standalone.base.shop left down: it is a member of another stack", started)
+	}
+}
+
+func TestAStartWithNoAppInAStackThatOwnsNoAppSaysSo(t *testing.T) {
+	environment := newTestEnvironment(t)
+
+	if err := environment.executor.StartStack(t.Context(), environment.featureStack); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(environment.supervisor.startedInOrder) != 0 || !strings.Contains(environment.output.String(), "the stack proj-1234 owns no app") {
+		t.Errorf("started %v, output %q; want nothing started and a line that says why", environment.supervisor.startedInOrder, environment.output.String())
 	}
 }
