@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -35,7 +35,6 @@ import (
 )
 
 const (
-	devboxMarkerFile = "/etc/devhost.env"
 	// The address of the proxy in the daemon. ILOT_PROXY_LISTEN moves it when another program has the port.
 	defaultProxyListen  = "127.0.0.1:4580"
 	proxyListenVariable = "ILOT_PROXY_LISTEN"
@@ -48,7 +47,7 @@ type cli struct {
 	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
 	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before devbox restarted. Does nothing when ilot already runs."`
+	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before this machine restarted. Does nothing when the ilot daemon already runs."`
 	Restart restartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
@@ -331,9 +330,6 @@ func loadCurrentWorkspace() (workspace, error) {
 }
 
 func newController(currentWorkspace workspace, worktree stack.Worktree, readyTimeout time.Duration) (*ilotctl.Controller, error) {
-	if _, err := os.Stat(devboxMarkerFile); err != nil {
-		return nil, errors.New("ilot runs inside devbox only for now: ssh into devbox and run it there")
-	}
 	config, err := currentWorkspace.configForStack(worktree.Name)
 	if err != nil {
 		return nil, err
@@ -342,6 +338,10 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 	_, proxyPort, err := net.SplitHostPort(proxyListen)
 	if err != nil {
 		return nil, fmt.Errorf("%s=%q is not an address such as %s: %w", proxyListenVariable, proxyListen, defaultProxyListen, err)
+	}
+	currentUser, err := user.Current()
+	if err != nil {
+		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
 	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.homeDir, ".local", "state")), "ilot")
 	shellEnv := sync.OnceValues(func() (map[string]string, error) { return shellenv.Base(context.Background()) })
@@ -368,7 +368,7 @@ func newController(currentWorkspace workspace, worktree stack.Worktree, readyTim
 		ReposNotCloned:      currentWorkspace.reposNotCloned(),
 		Personal:            currentWorkspace.settings,
 		ShellEnv:            shellEnv,
-		Login:               os.Getenv("LC_DEVBOX_LOGIN"),
+		Login:               currentUser.Username,
 		BackendHost:         "devbox",
 		ProxyPort:           proxyPort,
 		ReadyTimeout:        readyTimeout,
@@ -417,6 +417,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
-	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the devbox apps of each worktree behind the ilot proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
+	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the apps of each git worktree behind one local proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
 	commandLine.FatalIfErrorf(commandLine.Run())
 }

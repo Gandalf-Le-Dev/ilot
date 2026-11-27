@@ -1,20 +1,19 @@
 ---
 name: ilot
-description: "Run, stop, inspect and debug the apps of devbox with the ilot CLI. Use it inside devbox for any task about an app, a port, a log, a proxy URL, a stack, an ilot.yaml or ilot itself. Examples: start an API to test a change, read its logs, find its URL, check an ilot.yaml."
+description: "Run, stop, inspect and debug the apps of a workspace with the ilot CLI. Use it for any task about an app, a port, a log, a proxy URL, a stack, an ilot.yaml or ilot itself. Examples: start an API to test a change, read its logs, find its URL, check an ilot.yaml."
 allowed-tools: Bash(ilot:*)
 ---
 
 # ilot
 
-`ilot` runs the apps of devbox: the platform APIs, portal, Temporal, catalog and the other services. It starts each app with its dependencies, gives it ports, puts it behind the ilot proxy and keeps its logs.
+`ilot` runs the apps that the `ilot.yaml` files of the repos declare. It starts each app with its dependencies, gives it ports, puts it behind the ilot proxy and keeps its logs.
 
 ## The rule
 
-Inside devbox, `ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
+`ilot` is yours to run. Run `ilot start`, `ilot stop`, `ilot logs`, `ilot ls`, `ilot apps`, `ilot env` and `ilot check` yourself. Do not ask the user to run them, and do not tell the user to "start the API": start it.
 
-Every `ilot` command is pre-approved for you. Two limits still apply:
+Every `ilot` command is pre-approved for you. These limits still apply:
 
-- Never run `make up` or `make down`, never recreate or restart the devbox container, and never edit `devbox/.env`. Recreating devbox ends every session inside it, yours included. If one of these is necessary, ask the user.
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
 - Before you stop a shared app (for example Temporal, auth-mock, restapi) or a `master` app that you did not start, ask the user. Other stacks and the user's other sessions use them.
 - Before you run `ilot restart`, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
@@ -51,7 +50,7 @@ ilot check                      # check the ilot.yaml of this folder's repo, wit
 ilot check path/to/ilot.yaml     # check that file
 ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
-ilot boot --checkout <main checkout>  # runs at login; you do not need it
+ilot boot --checkout <main checkout>  # starts again the apps that ran before a restart of the machine; you do not need it
 ilot restart                    # stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
 ilot daemon run                 # the daemon itself: ilot starts it, never run it
 ilot --version                  # the version of ilot

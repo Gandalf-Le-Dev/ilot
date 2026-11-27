@@ -40,10 +40,8 @@ A URL of an app that does not run answers with the command that starts the app. 
 
 ## Requirements
 
-`ilot` expects a specific development environment. The code uses each item below.
-
-- Linux, and Go 1.26 to build `ilot`.
-- A development container, the devbox, that holds the file `/etc/devhost.env`. Without that file, `ilot` refuses to run, except for `ilot check` and `ilot apps`.
+- macOS or Linux, and Go 1.26 to build `ilot`.
+- git.
 - Docker, for container apps only. A mount of a container app names a path on this machine.
 - zsh. `ilot` reads the environment of the apps from a clean zsh.
 - mise, only for repos with a `mise.toml` at the root.
@@ -134,7 +132,7 @@ ilot check path/to/ilot.yaml  # check that file
 ilot rm proj-1234             # stop a stack and delete its state, its logs and its routes
 ilot clean                    # ilot rm on each stack whose worktrees are deleted
 ilot restart                  # stop every app and the daemon, start a new daemon, then start the apps that ran
-ilot boot --checkout <dir>    # start the autostart apps and the apps that ran: run it at login
+ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login
 ilot --version
 ilot skill print              # print the skill for AI agents
 ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
@@ -190,7 +188,7 @@ The `build`, `run`, `stop` and `env` values can use these templates:
 | `{{.BinDir}}` | The folder for the binaries of the stack. |
 | `{{.StackDir}}` | The folder for the state and the logs of the stack. |
 | `{{.Stack}}` | The name of the stack. |
-| `{{.User}}` | Your login. |
+| `{{.User}}` | Your user name on this machine. |
 | `{{.Domain}}` | The domain of the proxy URLs. |
 | `{{.ProxyPort}}` | The port of the proxy. |
 
