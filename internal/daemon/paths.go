@@ -17,7 +17,7 @@ const longestSocketPath = 100
 
 var (
 	ErrAlreadyRunning     = errors.New("another ilot daemon holds the lock")
-	ErrUnsafeSocketFolder = errors.New("the socket folder is not a folder of the current user with the mode 0700")
+	ErrUnsafeSocketFolder = errors.New("the socket folder is not private to the current user")
 )
 
 type Paths struct {
@@ -67,8 +67,17 @@ func checkPrivateFolder(folder string) error {
 		return err
 	}
 	owner, hasOwner := info.Sys().(*syscall.Stat_t)
-	if !info.IsDir() || !hasOwner || int(owner.Uid) != os.Getuid() || info.Mode().Perm() != 0o700 {
-		return fmt.Errorf("%w: %s", ErrUnsafeSocketFolder, folder)
+	switch {
+	case info.Mode()&fs.ModeSymlink != 0:
+		return fmt.Errorf("%w: %s is a symbolic link", ErrUnsafeSocketFolder, folder)
+	case !info.IsDir():
+		return fmt.Errorf("%w: %s is not a folder", ErrUnsafeSocketFolder, folder)
+	case !hasOwner:
+		return fmt.Errorf("%w: the owner of %s is not readable", ErrUnsafeSocketFolder, folder)
+	case int(owner.Uid) != os.Getuid():
+		return fmt.Errorf("%w: %s belongs to the user %d, not to %d", ErrUnsafeSocketFolder, folder, owner.Uid, os.Getuid())
+	case info.Mode().Perm() != 0o700:
+		return fmt.Errorf("%w: %s has the mode %04o, not 0700", ErrUnsafeSocketFolder, folder, info.Mode().Perm())
 	}
 	return nil
 }

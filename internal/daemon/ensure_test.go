@@ -321,11 +321,18 @@ func TestCheckPrivateFolder(t *testing.T) {
 	if err := checkPrivateFolder(filepath.Join(parent, "missing")); err != nil {
 		t.Errorf("a folder that does not exist is refused: %v", err)
 	}
-	if err := checkPrivateFolder(shared); !errors.Is(err, ErrUnsafeSocketFolder) {
+	if err := checkPrivateFolder(shared); !errors.Is(err, ErrUnsafeSocketFolder) || !strings.Contains(err.Error(), "has the mode 0770") {
 		t.Errorf("a folder that the group can write gives %v", err)
 	}
-	if err := checkPrivateFolder(link); !errors.Is(err, ErrUnsafeSocketFolder) {
+	if err := checkPrivateFolder(link); !errors.Is(err, ErrUnsafeSocketFolder) || !strings.Contains(err.Error(), "is a symbolic link") {
 		t.Errorf("a link to a folder gives %v", err)
+	}
+	file := filepath.Join(parent, "file")
+	if err := os.WriteFile(file, nil, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkPrivateFolder(file); !errors.Is(err, ErrUnsafeSocketFolder) || !strings.Contains(err.Error(), "is not a folder") {
+		t.Errorf("a file gives %v", err)
 	}
 	if err := checkSocketFolder(filepath.Join(shared, "daemon.sock")); err != nil {
 		t.Errorf("a state folder is held to the rule of the fallback folder: %v", err)
