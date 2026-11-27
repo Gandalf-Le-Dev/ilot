@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
-	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -82,7 +81,7 @@ func (controller *Controller) allocatePorts(stacks stackSet, startOrder []instan
 		appState := stacks.app(appInstance)
 		for portName, fixedPort := range controller.fixedPortsOf(appInstance) {
 			if !stacks.isRunning(appInstance) && !controller.IsPortFreeOnHost(fixedPort) {
-				return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort, appInstance.processName())
+				return fmt.Errorf("port %d of %s is taken by another process: stop it first (supervisor?)", fixedPort, controller.processName(appInstance))
 			}
 			appState.Ports[portName] = fixedPort
 		}
@@ -160,12 +159,12 @@ func (controller *Controller) buildApps(ctx context.Context, stacks stackSet, st
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(controller.Output, "building %s in %s\n", appInstance.processName(), workingDir)
-		stopProgress := controller.printProgressUntilStopped("building " + appInstance.processName())
+		fmt.Fprintf(controller.Output, "building %s in %s\n", controller.processName(appInstance), workingDir)
+		stopProgress := controller.printProgressUntilStopped("building " + controller.processName(appInstance))
 		err = controller.RunBuild(ctx, workingDir, build.command, environ)
 		stopProgress()
 		if err := errors.Join(err, releaseBuilds()); err != nil {
-			return fmt.Errorf("build %s: %w", appInstance.processName(), err)
+			return fmt.Errorf("build %s: %w", controller.processName(appInstance), err)
 		}
 	}
 	return nil
@@ -210,7 +209,7 @@ func (controller *Controller) loadSavedStacks() (stackSet, error) {
 	if err != nil {
 		return stackSet{}, err
 	}
-	stacks := stackSet{byName: map[string]*state.StackState{}}
+	stacks := stackSet{byName: map[string]*StackState{}}
 	for _, stackState := range allStacks {
 		stacks.byName[stackState.Name] = &stackState
 	}
@@ -222,33 +221,42 @@ func (controller *Controller) loadStacks(stackName string) (stackSet, error) {
 	if err != nil {
 		return stackSet{}, err
 	}
-	for _, stackName := range []string{workspace.BaseStackName, stackName} {
+	stacks.ensure(workspace.BaseStackName)
+	stacks.ensure(stackName)
+	if err := controller.deriveCheckouts(stacks); err != nil {
+		return stackSet{}, err
+	}
+	return stacks, controller.prepareStacks(stacks)
+}
+
+// A bound worktree that is deleted gives its repo back to the main checkout.
+func (controller *Controller) deriveCheckouts(stacks stackSet) error {
+	for stackName, stackState := range stacks.byName {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
 		if err != nil {
-			return stackSet{}, err
+			return err
 		}
-		stackState := stacks.ensure(stackName)
+		clear(stackState.CheckoutDirs)
 		for repoName, checkout := range checkoutByRepo {
 			stackState.CheckoutDirs[repoName] = checkout.Dir
 		}
 	}
-	return stacks, controller.prepareStacks(stacks)
+	return nil
 }
 
 func (controller *Controller) checkoutDir(stacks stackSet, appInstance instance) (string, error) {
 	repoName := cmp.Or(controller.app(appInstance).Repo, controller.Workspace)
 	checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 	if checkoutDir == "" {
-		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", appInstance.processName(), repoName, controller.repoPathKey(repoName))
+		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, controller.repoPathKey(repoName))
 	}
 	return checkoutDir, nil
 }
 
 func (controller *Controller) saveStacks(stacks stackSet) error {
+	var stackStates []StackState
 	for _, stackName := range slices.Sorted(maps.Keys(stacks.byName)) {
-		if err := controller.Store.Save(*stacks.byName[stackName]); err != nil {
-			return err
-		}
+		stackStates = append(stackStates, *stacks.byName[stackName])
 	}
-	return nil
+	return controller.Store.SaveAll(stackStates)
 }

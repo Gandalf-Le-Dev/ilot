@@ -34,7 +34,7 @@ func stackOfACommand(t *testing.T, dir string, recordsBinding bool) (workspace.W
 	if err != nil {
 		t.Fatal(err)
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(store, currentWorkspace, worktree, recordsBinding, io.Discard)
+	currentWorkspace, stackName, err := stackOfWorktree(t.Context(), store, currentWorkspace, worktree, recordsBinding, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,24 +78,25 @@ func TestACommandThatIsNotAStartReadsTheWorktreeAsIfItWereBound(t *testing.T) {
 	if err != nil || stackConfig.Apps["api"].Run != "api --retry" {
 		t.Errorf("config of %s = %+v, %v; want the file of the worktree", stackName, stackConfig.Apps, err)
 	}
-	if recorded, err := loadBindings(store); err != nil || len(recorded) != 0 {
-		t.Errorf("recorded bindings = %v, %v; want none before a start", recorded, err)
+	recorded, err := store.Load()
+	if err != nil || len(bindingsOf(recorded, currentWorkspace.Name)) != 0 {
+		t.Errorf("recorded bindings = %v, %v; want none before a start", bindingsOf(recorded, currentWorkspace.Name), err)
 	}
 }
 
 func TestStackBindMovesAWorktreeAndKeepsAStackThatHasApps(t *testing.T) {
 	_, worktreeDir := shopWithAWorktree(t)
 	currentWorkspace, store, worktree, _ := stackOfACommand(t, worktreeDir, true)
-	retryJobs, err := store.Load("retry-jobs")
+	current, err := store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryJobs.Apps["api"] = state.AppState{Ports: map[string]int{"http": 20000}, Running: false}
-	if err := store.Save(retryJobs); err != nil {
+	current.Stack(currentWorkspace.Name, "retry-jobs").Apps["api"] = state.App{Wanted: false, Ports: map[string]int{"http": 20000}, Route: nil, Container: ""}
+	if err := store.Save(current); err != nil {
 		t.Fatal(err)
 	}
 
-	_, previousStackName, err := bindWorktree(store, currentWorkspace, worktree, "faster")
+	_, previousStackName, err := bindWorktree(t.Context(), store, currentWorkspace, worktree, "faster")
 	if err != nil || previousStackName != "retry-jobs" {
 		t.Fatalf("bindWorktree = %q, %v; want the worktree out of retry-jobs", previousStackName, err)
 	}
@@ -103,16 +104,17 @@ func TestStackBindMovesAWorktreeAndKeepsAStackThatHasApps(t *testing.T) {
 	if _, _, _, stackName := stackOfACommand(t, worktreeDir, false); stackName != "faster" {
 		t.Errorf("stack after ilot stack bind = %q, want faster", stackName)
 	}
-	retryJobs, err = store.Load("retry-jobs")
-	if err != nil || len(retryJobs.BoundWorktrees) != 0 || retryJobs.Apps["api"].Ports["http"] != 20000 {
+	current, err = store.Load()
+	retryJobs := current.Stacks(currentWorkspace.Name)["retry-jobs"]
+	if err != nil || retryJobs == nil || len(retryJobs.Checkouts) != 0 || retryJobs.Apps["api"].Ports["http"] != 20000 {
 		t.Errorf("retry-jobs = %+v, %v; want its app kept and no worktree", retryJobs, err)
 	}
 
 	currentWorkspace, _, _, _ = stackOfACommand(t, worktreeDir, false)
-	if _, _, err := bindWorktree(store, currentWorkspace, worktree, "third"); err != nil {
+	if _, _, err := bindWorktree(t.Context(), store, currentWorkspace, worktree, "third"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(store.StackDir("faster")); err == nil {
+	if _, err := os.Stat(store.StackDir(currentWorkspace.Name, "faster")); err == nil {
 		t.Error("the stack faster has no worktree and no app, and its folder is still there")
 	}
 }
@@ -124,7 +126,7 @@ func TestStackBindRefusesASecondWorktreeOfARepoInOneStack(t *testing.T) {
 	runGitInTest(t, shopDir, "worktree", "add", "-q", "-b", "second", secondWorktreeDir)
 	currentWorkspace, store, secondWorktree, _ := stackOfACommand(t, secondWorktreeDir, false)
 
-	_, _, err := bindWorktree(store, currentWorkspace, secondWorktree, "retry-jobs")
+	_, _, err := bindWorktree(t.Context(), store, currentWorkspace, secondWorktree, "retry-jobs")
 
 	if err == nil || !strings.Contains(err.Error(), worktreeDir) || !strings.Contains(err.Error(), "ilot stack bind") {
 		t.Errorf("bindWorktree = %v, want an error that names the worktree of the stack and the way out", err)

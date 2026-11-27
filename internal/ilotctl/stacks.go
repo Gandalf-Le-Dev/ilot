@@ -3,27 +3,25 @@ package ilotctl
 import (
 	"maps"
 	"slices"
-
-	"github.com/Gandalf-Le-Dev/ilot/internal/state"
 )
 
 type stackSet struct {
-	byName map[string]*state.StackState
+	byName map[string]*StackState
 }
 
-func (stacks stackSet) ensure(stackName string) *state.StackState {
+func (stacks stackSet) ensure(stackName string) *StackState {
 	stackState, isKnown := stacks.byName[stackName]
 	if !isKnown {
-		stackState = &state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]state.AppState{}}
+		stackState = &StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]AppState{}}
 		stacks.byName[stackName] = stackState
 	}
 	return stackState
 }
 
-func (stacks stackSet) app(appInstance instance) state.AppState {
+func (stacks stackSet) app(appInstance instance) AppState {
 	stackState, isKnown := stacks.byName[appInstance.stackName]
 	if !isKnown {
-		return state.AppState{Ports: map[string]int{}, Running: false}
+		return AppState{Ports: map[string]int{}, Running: false}
 	}
 	appState := stackState.Apps[appInstance.appName]
 	if appState.Ports == nil {
@@ -32,7 +30,7 @@ func (stacks stackSet) app(appInstance instance) state.AppState {
 	return appState
 }
 
-func (stacks stackSet) setApp(appInstance instance, appState state.AppState) {
+func (stacks stackSet) setApp(appInstance instance, appState AppState) {
 	stacks.byName[appInstance.stackName].Apps[appInstance.appName] = appState
 }
 
@@ -71,13 +69,13 @@ func (stacks stackSet) portsInUse() map[int]bool {
 }
 
 func (stacks stackSet) clone() stackSet {
-	cloned := stackSet{byName: map[string]*state.StackState{}}
+	cloned := stackSet{byName: map[string]*StackState{}}
 	for stackName, stackState := range stacks.byName {
-		clonedApps := map[string]state.AppState{}
+		clonedApps := map[string]AppState{}
 		for appName, appState := range stackState.Apps {
-			clonedApps[appName] = state.AppState{Ports: maps.Clone(appState.Ports), Running: appState.Running}
+			clonedApps[appName] = AppState{Ports: maps.Clone(appState.Ports), Running: appState.Running}
 		}
-		cloned.byName[stackName] = &state.StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), BoundWorktrees: maps.Clone(stackState.BoundWorktrees), Apps: clonedApps}
+		cloned.byName[stackName] = &StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), BoundWorktrees: maps.Clone(stackState.BoundWorktrees), Apps: clonedApps}
 	}
 	return cloned
 }

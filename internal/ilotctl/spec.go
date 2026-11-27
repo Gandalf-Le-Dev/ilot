@@ -67,7 +67,7 @@ func (controller *Controller) processSpec(stacks stackSet, appInstance instance)
 		return ProcessSpec{}, err
 	}
 	return ProcessSpec{
-		Name: appInstance.processName(),
+		Name: controller.processName(appInstance),
 		Spec: daemon.Spec{
 			Command: command,
 			Dir:     workingDir,
@@ -153,7 +153,7 @@ func (controller *Controller) watcherSpec(watchedInstance instance, workingDir, 
 	maps.Copy(env, controller.IlotEnv)
 	watcherInstance := instance{stackName: watchedInstance.stackName, appName: watchedInstance.appName + "-watch"}
 	return ProcessSpec{
-		Name: watcherInstance.processName(),
+		Name: controller.processName(watcherInstance),
 		Spec: daemon.Spec{
 			Command: strings.Join(commandParts, " "),
 			Dir:     workingDir,
@@ -210,14 +210,14 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		servingInstance := instance{stackName: controller.stackServing(stacks, appInstance.stackName, name), appName: name}
 		port := cmp.Or(stacks.app(servingInstance).Ports[portName], controller.fixedPortsOf(servingInstance)[portName])
 		if port == 0 {
-			return 0, fmt.Errorf("%s needs the %s port of %q in stack %s, which is not started: start it or drop --no-deps", appInstance.processName(), portName, name, servingInstance.stackName)
+			return 0, fmt.Errorf("%s needs the %s port of %q in stack %s, which is not started: start it or drop --no-deps", controller.processName(appInstance), portName, name, servingInstance.stackName)
 		}
 		return port, nil
 	}
 	repoCheckoutDir := func(repoName string) (string, error) {
 		checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 		if checkoutDir == "" {
-			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", appInstance.processName(), repoName, controller.repoPathKey(repoName))
+			return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set %s", controller.processName(appInstance), repoName, controller.repoPathKey(repoName))
 		}
 		return checkoutDir, nil
 	}
@@ -234,7 +234,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		return controller.hostFor(appInstance), nil
 	}
 	templateFunctions := template.FuncMap{"port": portOf, "repo": repoCheckoutDir, "url": urlOf, "host": hostOf}
-	parsed, err := template.New(appInstance.processName()).Funcs(templateFunctions).Option("missingkey=error").Parse(templateText)
+	parsed, err := template.New(controller.processName(appInstance)).Funcs(templateFunctions).Option("missingkey=error").Parse(templateText)
 	if err != nil {
 		return "", err
 	}
@@ -255,7 +255,7 @@ func (controller *Controller) renderTemplate(stacks stackSet, appInstance instan
 		WorktreeDir: checkoutDir,
 	})
 	if err != nil {
-		return "", fmt.Errorf("render %q for %s: %w", templateText, appInstance.processName(), err)
+		return "", fmt.Errorf("render %q for %s: %w", templateText, controller.processName(appInstance), err)
 	}
 	return rendered.String(), nil
 }
