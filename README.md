@@ -316,7 +316,7 @@ An older `ilot` read a personal file, `~/.config/ilot/env.yaml`. `ilot` now stop
 `ilot` builds the environment of an app in this order, and the last value wins:
 
 1. The shell. `ilot` runs your shell, `$SHELL`, with the flags of `shell_env.args`, and takes its whole environment. The default, `-l`, makes a login shell. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
-   `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` come from the terminal, unless a profile file sets them. `ilot env` shows them as `session`. An app gets them, but a change of them does not make its specification change, so a command from another terminal restarts nothing.
+   `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` come from the terminal, unless a profile file sets them. `ilot env` shows them as `session`. An app gets them, but a change of them does not make its specification change, so a command from another terminal restarts nothing. An app that you name in `ilot start` or `ilot restart` gets the values of your terminal, for example after an SSH reconnect.
 2. The top-level `env` of the `ilot.yaml` of the root repo, for the apps of every repo.
 3. The top-level `env` of the `ilot.yaml` of the repo of the app, then the `env` of the app.
 4. The global file: the `env` of the workspace, then its entry under `apps`.

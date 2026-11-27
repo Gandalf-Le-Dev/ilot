@@ -123,12 +123,16 @@ func TestRoundTripOfEveryCall(t *testing.T) {
 		t.Fatalf("PUT of the same specification restarted the process")
 	}
 
-	restarted, err := client.Restart(ctx, name)
+	restarted, err := client.Restart(ctx, name, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if restarted.PID == started.PID || restarted.Hash != started.Hash {
 		t.Fatalf("restart gives %+v after %+v", restarted, started)
+	}
+	// An ilot of the version before sends no specification.
+	if err := client.call(ctx, http.MethodPost, "/v1/processes/"+name+"/restart", nil, &restarted); err != nil {
+		t.Fatalf("a restart with no body gives %v, want a restart of the stored specification", err)
 	}
 
 	routes := []Route{{Host: "api.retry-jobs.shop.localhost", Port: 20001, HomePath: "/docs", StartHint: "ilot start api"}}
@@ -174,7 +178,7 @@ func TestClientErrors(t *testing.T) {
 	client := served.client
 	ctx := t.Context()
 
-	if _, err := client.Restart(ctx, "unknown"); !errors.Is(err, ErrUnknownProcess) {
+	if _, err := client.Restart(ctx, "unknown", Spec{Command: "true", LogFile: filepath.Join(t.TempDir(), "unknown.log")}); !errors.Is(err, ErrUnknownProcess) {
 		t.Errorf("a restart of an unknown process gives %v", err)
 	}
 	if err := client.WaitReady(ctx, "unknown"); !errors.Is(err, ErrUnknownProcess) {

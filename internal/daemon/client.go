@@ -104,9 +104,10 @@ func (client *Client) Put(ctx context.Context, name string, spec Spec) (Process,
 	return process, err
 }
 
-func (client *Client) Restart(ctx context.Context, name string) (Process, error) {
+// Restart restarts a known process with a specification, which takes the place of the stored one even with the same hash.
+func (client *Client) Restart(ctx context.Context, name string, spec Spec) (Process, error) {
 	var process Process
-	err := client.call(ctx, http.MethodPost, "/v1/processes/"+url.PathEscape(name)+"/restart", nil, &process)
+	err := client.call(ctx, http.MethodPost, "/v1/processes/"+url.PathEscape(name)+"/restart", spec, &process)
 	return process, err
 }
 

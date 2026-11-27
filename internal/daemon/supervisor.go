@@ -139,6 +139,19 @@ func (supervisor *Supervisor) Put(name string, spec Spec) (Process, error) {
 }
 
 func (supervisor *Supervisor) Restart(name string) (Process, error) {
+	return supervisor.restart(name, nil)
+}
+
+// RestartWith restarts a known process with a specification that takes the place of the stored one, even with the same hash:
+// the specification brings the session of the terminal that asks, for example a new SSH_AUTH_SOCK.
+func (supervisor *Supervisor) RestartWith(name string, spec Spec) (Process, error) {
+	if err := spec.Validate(); err != nil {
+		return Process{}, fmt.Errorf("%s: %w", name, err)
+	}
+	return supervisor.restart(name, &spec)
+}
+
+func (supervisor *Supervisor) restart(name string, replacement *Spec) (Process, error) {
 	target, err := supervisor.lockEntry(name, false)
 	if err != nil {
 		return Process{}, err
@@ -149,6 +162,11 @@ func (supervisor *Supervisor) Restart(name string) (Process, error) {
 		return Process{}, fmt.Errorf("%s: %w", name, ErrUnknownProcess)
 	}
 	supervisor.stop(name, target)
+	if replacement != nil {
+		supervisor.mu.Lock()
+		target.spec, target.hash, target.run = *replacement, replacement.Hash(), nil
+		supervisor.mu.Unlock()
+	}
 	err = supervisor.start(name, target)
 	return supervisor.describe(name, target), err
 }

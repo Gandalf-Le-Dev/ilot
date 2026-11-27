@@ -383,6 +383,36 @@ func TestRestartStartsTheStoredSpecificationAgain(t *testing.T) {
 	}
 }
 
+func TestRestartWithGivesTheNewSessionToTheProcess(t *testing.T) {
+	supervisor := newTestSupervisor(t, SupervisorOptions{})
+	logFile := filepath.Join(t.TempDir(), "app.log")
+	spec := Spec{Command: `echo "agent=$SSH_AUTH_SOCK"; exec sleep 300`, Env: map[string]string{"PATH": "/usr/bin:/bin"}, Session: map[string]string{"SSH_AUTH_SOCK": "/tmp/first"}, LogFile: logFile}
+	first, err := supervisor.Put("app", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec.Session = map[string]string{"SSH_AUTH_SOCK": "/tmp/second"}
+	second, err := supervisor.RestartWith("app", spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if second.PID == first.PID || second.Hash != first.Hash {
+		t.Fatalf("got %+v after a restart of %+v, want a new process with the same hash", second, first)
+	}
+	waitUntil(t, "the new process wrote the new session", func() bool {
+		output, _ := os.ReadFile(logFile)
+		return strings.Contains(string(output), "agent=/tmp/second")
+	})
+	if _, err := supervisor.RestartWith("unknown", spec); !errors.Is(err, ErrUnknownProcess) {
+		t.Fatalf("a restart of an unknown process gives %v", err)
+	}
+	if _, err := supervisor.RestartWith("app", Spec{LogFile: logFile}); err == nil {
+		t.Fatal("a restart with a specification with no command gives no error")
+	}
+}
+
 func TestAStartThatFailsIsReported(t *testing.T) {
 	supervisor := newTestSupervisor(t, SupervisorOptions{})
 	workingDir := t.TempDir()

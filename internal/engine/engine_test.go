@@ -137,10 +137,12 @@ func (supervisor *fakeSupervisor) forgetProcess(processName string) {
 	delete(supervisor.runningSpecs, processName)
 }
 
-func (supervisor *fakeSupervisor) Restart(_ context.Context, processName string) error {
+func (supervisor *fakeSupervisor) Restart(_ context.Context, spec ProcessSpec) error {
+	processName := spec.Name
 	if _, isKnown := supervisor.runningSpecs[processName]; !isKnown {
 		return fmt.Errorf("%s: %w", processName, daemon.ErrUnknownProcess)
 	}
+	supervisor.runningSpecs[processName] = spec
 	supervisor.calls = append(supervisor.calls, "restart "+processName)
 	supervisor.restarted = append(supervisor.restarted, processName)
 	supervisor.events = append(supervisor.events, "restart "+processName)
