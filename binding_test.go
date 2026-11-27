@@ -92,7 +92,7 @@ func TestStackBindMovesAWorktreeAndKeepsAStackThatHasApps(t *testing.T) {
 		t.Fatal(err)
 	}
 	current.Stack(currentWorkspace.Name, "retry-jobs").Apps["api"] = state.App{Wanted: false, Ports: map[string]int{"http": 20000}, Route: nil, Container: ""}
-	if err := store.Save(current); err != nil {
+	if _, err := store.Save(current); err != nil {
 		t.Fatal(err)
 	}
 
