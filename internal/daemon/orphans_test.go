@@ -1,11 +1,13 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -124,7 +126,7 @@ func TestOrphanCleanupSparesAProcessThatReusesARecordedID(t *testing.T) {
 	discard := slog.New(slog.DiscardHandler)
 
 	for _, startedAt := range []string{"", "another start time"} {
-		recordPath := recordOf(t, map[string]processRecord{"app": {PID: pid, StartedAt: startedAt}})
+		recordPath := recordOf(t, map[string]processRecord{"app": {PID: pid, StartedAt: startedAt, BootID: bootID()}})
 		killOrphans(recordPath, time.Second, discard)
 		time.Sleep(50 * time.Millisecond)
 		if !groupExists(pid) {
@@ -141,6 +143,83 @@ func TestOrphanCleanupSparesAProcessThatReusesARecordedID(t *testing.T) {
 	}
 }
 
+func TestOrphanCleanupSparesTheRecordsOfAnotherBoot(t *testing.T) {
+	stranger := startGroup(t, "sleep 300")
+	pid := stranger.Process.Pid
+	startedAt, isAlive := processStartTime(pid)
+	if !isAlive {
+		t.Fatal("the start time of a live process is not readable")
+	}
+
+	record := processRecord{PID: pid, StartedAt: startedAt, BootID: "another boot"}
+	killOrphans(recordOf(t, map[string]processRecord{"app": record}), time.Second, slog.New(slog.DiscardHandler))
+
+	time.Sleep(50 * time.Millisecond)
+	if !groupExists(pid) {
+		t.Fatal("the cleanup killed a process on the word of a record from another boot")
+	}
+}
+
+// startHeadlessGroup gives a group whose leader is dead, as a daemon like tmux leaves after its double fork.
+func startHeadlessGroup(t *testing.T) (group, member int, leaderStartedAt string) {
+	t.Helper()
+	pidFile := filepath.Join(t.TempDir(), "member.pid")
+	leader := startGroup(t, "sleep 300 & echo $! > "+pidFile+"; wait")
+	group = leader.Process.Pid
+	member = readPIDFile(t, pidFile)
+	leaderStartedAt, isAlive := processStartTime(group)
+	if !isAlive {
+		t.Fatal("the start time of a live process is not readable")
+	}
+	if err := syscall.Kill(group, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the leader of the group is dead", func() bool {
+		_, isAlive := processStartTime(group)
+		return !isAlive
+	})
+	if !isProcessAlive(member) || !groupExists(group) {
+		t.Fatal("the group died with its leader, so the test proves nothing")
+	}
+	return group, member, leaderStartedAt
+}
+
+func TestOrphanCleanupSparesAForeignGroupWhoseLeaderIsDead(t *testing.T) {
+	group, member, leaderStartedAt := startHeadlessGroup(t)
+	ownSession, isKnown := sessionOf(os.Getpid())
+	if !isKnown {
+		t.Fatal("the session of the test is not readable")
+	}
+
+	// The group is in the session of the test. No record below is from a daemon of that session.
+	for _, session := range []int{0, ownSession + 1} {
+		var log bytes.Buffer
+		record := processRecord{PID: group, StartedAt: leaderStartedAt, BootID: bootID(), Session: session}
+		killOrphans(recordOf(t, map[string]processRecord{"app": record}), time.Second, slog.New(slog.NewTextHandler(&log, nil)))
+
+		time.Sleep(50 * time.Millisecond)
+		if !isProcessAlive(member) {
+			t.Fatalf("the cleanup killed a group that the daemon of the session %d never started", session)
+		}
+		if !strings.Contains(log.String(), "nothing proves it") {
+			t.Errorf("the cleanup left the group and did not log it:\n%s", log.String())
+		}
+	}
+}
+
+func TestOrphanCleanupKillsItsOwnGroupWhoseLeaderIsDead(t *testing.T) {
+	group, member, leaderStartedAt := startHeadlessGroup(t)
+	ownSession, isKnown := sessionOf(os.Getpid())
+	if !isKnown {
+		t.Fatal("the session of the test is not readable")
+	}
+
+	record := processRecord{PID: group, StartedAt: leaderStartedAt, BootID: bootID(), Session: ownSession}
+	killOrphans(recordOf(t, map[string]processRecord{"app": record}), time.Second, slog.New(slog.DiscardHandler))
+
+	waitUntil(t, "the member of the group is dead", func() bool { return !isProcessAlive(member) })
+}
+
 func TestOrphanCleanupKillsAGroupThatIgnoresSIGTERM(t *testing.T) {
 	workingDir := t.TempDir()
 	stubborn := startGroup(t, "trap '' TERM; echo armed > "+filepath.Join(workingDir, "armed")+"; sleep 300")
@@ -151,7 +230,7 @@ func TestOrphanCleanupKillsAGroupThatIgnoresSIGTERM(t *testing.T) {
 	})
 	startedAt, _ := processStartTime(pid)
 
-	killOrphans(recordOf(t, map[string]processRecord{"app": {PID: pid, StartedAt: startedAt}}), 200*time.Millisecond, slog.New(slog.DiscardHandler))
+	killOrphans(recordOf(t, map[string]processRecord{"app": {PID: pid, StartedAt: startedAt, BootID: bootID()}}), 200*time.Millisecond, slog.New(slog.DiscardHandler))
 
 	waitUntil(t, "the group is gone", func() bool { return !groupExists(pid) })
 }
@@ -168,7 +247,8 @@ func TestSupervisorRecordsOnlyLiveProcesses(t *testing.T) {
 	}
 	wantStartedAt, _ := processStartTime(started.PID)
 	records := readRecords(t, recordPath)
-	if record := records["app"]; record.PID != started.PID || record.StartedAt == "" || record.StartedAt != wantStartedAt {
+	wantSession, _ := sessionOf(os.Getpid())
+	if record := records["app"]; record.PID != started.PID || record.StartedAt == "" || record.StartedAt != wantStartedAt || record.BootID != bootID() || record.Session != wantSession || wantSession == 0 {
 		t.Fatalf("the record holds %+v for the process %d that started at %q", records, started.PID, wantStartedAt)
 	}
 

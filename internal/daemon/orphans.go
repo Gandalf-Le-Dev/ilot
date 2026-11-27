@@ -20,6 +20,16 @@ const (
 type processRecord struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
+	// After a boot, the process IDs of the record belong to other processes.
+	BootID string `json:"boot_id,omitempty"`
+	// The session of the daemon, which its processes keep. It tells them from a foreign group that got the same ID.
+	Session int `json:"session,omitzero"`
+}
+
+type groupMember struct {
+	pid       int
+	session   int
+	startedAt string
 }
 
 func (supervisor *Supervisor) saveRecord() {
@@ -33,7 +43,7 @@ func (supervisor *Supervisor) saveRecord() {
 	records := map[string]processRecord{}
 	for name, target := range supervisor.entries {
 		if target.run != nil && target.run.state != StateExited {
-			records[name] = processRecord{PID: target.run.pid, StartedAt: target.run.startedAt}
+			records[name] = processRecord{PID: target.run.pid, StartedAt: target.run.startedAt, BootID: supervisor.bootID, Session: supervisor.session}
 		}
 	}
 	supervisor.mu.Unlock()
@@ -70,9 +80,18 @@ func killOrphans(recordPath string, grace time.Duration, logger *slog.Logger) {
 		return
 	}
 
+	currentBootID := bootID()
 	var groups []int
 	for name, record := range records {
-		if !isOrphanGroup(record) {
+		if record.BootID != currentBootID {
+			logger.Info("a record of a process is from another boot, so its process is gone", "process", name, "pid", record.PID)
+			continue
+		}
+		isOrphan, doubt := isOrphanGroup(record)
+		if doubt != "" {
+			logger.Warn("a process group may be left from a dead daemon, but nothing proves it, so it stays", "process", name, "group", record.PID, "reason", doubt)
+		}
+		if !isOrphan {
 			continue
 		}
 		logger.Warn("stop a process that a dead daemon left", "process", name, "pid", record.PID)
@@ -93,18 +112,30 @@ func killOrphans(recordPath string, grace time.Duration, logger *slog.Logger) {
 	}
 }
 
-func isOrphanGroup(record processRecord) bool {
+// isOrphanGroup gives a doubt when the group exists, but nothing proves that the dead daemon started it.
+func isOrphanGroup(record processRecord) (isOrphan bool, doubt string) {
 	// kill(-1) and kill(0) reach far more than one group.
 	if record.PID <= 1 || !groupExists(record.PID) {
-		return false
+		return false, ""
 	}
-	startedAt, isLeaderAlive := processStartTime(record.PID)
-	if !isLeaderAlive {
-		// The system gives the ID of a live group to no new process, so this group is the recorded one.
-		return true
+	if startedAt, isLeaderAlive := processStartTime(record.PID); isLeaderAlive {
+		// Another start time means that the ID now belongs to a process that the daemon never started.
+		return record.StartedAt != "" && startedAt == record.StartedAt, ""
 	}
-	// Another start time means that the ID now belongs to a process that the daemon never started.
-	return record.StartedAt != "" && startedAt == record.StartedAt
+	// The leader is dead, so its ID was free for a new process, which can have made this group and left it to its children.
+	if record.Session <= 0 || record.StartedAt == "" {
+		return false, "the record has no session or no start time"
+	}
+	members, err := groupMembers(record.PID)
+	if err != nil {
+		return false, "the members of the group are not readable: " + err.Error()
+	}
+	for _, member := range members {
+		if member.session == record.Session && isStartNotBefore(member.startedAt, record.StartedAt) {
+			return true, ""
+		}
+	}
+	return false, "no member is in the session of the dead daemon"
 }
 
 func groupExists(group int) bool {

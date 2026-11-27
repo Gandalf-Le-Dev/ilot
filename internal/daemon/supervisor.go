@@ -46,6 +46,8 @@ type Supervisor struct {
 	probeTimeout  time.Duration
 	recordFile    string
 	recordMu      sync.Mutex
+	bootID        string
+	session       int
 
 	mu         sync.Mutex
 	entries    map[string]*entry
@@ -80,7 +82,10 @@ type run struct {
 }
 
 func NewSupervisor(options SupervisorOptions) *Supervisor {
+	session, _ := sessionOf(os.Getpid())
 	return &Supervisor{
+		bootID:        bootID(),
+		session:       session,
 		logger:        cmp.Or(options.Logger, slog.New(slog.DiscardHandler)),
 		stopTimeout:   cmp.Or(options.StopTimeout, defaultStopTimeout),
 		logMaxBytes:   cmp.Or(options.LogMaxBytes, defaultLogMaxBytes),
