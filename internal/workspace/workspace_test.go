@@ -211,6 +211,27 @@ func TestTheNameOfTheWorkspace(t *testing.T) {
 	}
 }
 
+func TestTheStackPatternComesFromTheRootRepo(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\nstack:\n  pattern: '[A-Z]+-[0-9]+'\n", webFile)
+	webWorktreeDir := addWorktree(t, webDir, "web-retry", "feature/PROJ-12-retry")
+
+	workspace, worktree := find(t, webWorktreeDir)
+
+	if stackName, err := workspace.DefaultStackName(worktree); err != nil || stackName != "proj-12" {
+		t.Errorf("DefaultStackName = %q, %v; want proj-12, from the pattern of %s", stackName, err, shopDir)
+	}
+}
+
+func TestAWrongStackPatternNamesTheFile(t *testing.T) {
+	shopDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "shop"), map[string]string{"ilot.yaml": "stack:\n  pattern: '[A-Z'\n"})
+
+	_, _, err := Find(shopDir, t.TempDir(), defaultGlobal(t), NewGit())
+
+	if err == nil || !strings.Contains(err.Error(), "stack.pattern") || !strings.Contains(err.Error(), filepath.Join(shopDir, "ilot.yaml")) {
+		t.Errorf("Find = %v, want an error that names stack.pattern and the file", err)
+	}
+}
+
 func TestTheGlobalFileGivesAnotherPathToARepo(t *testing.T) {
 	shopDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n"})
 	homeDir := canonicalTempDir(t)
@@ -256,7 +277,7 @@ func TestARepoReachedThroughALinkIsTheSameRepo(t *testing.T) {
 }
 
 func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testing.T) {
-	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\napps:\n  api: {run: api}\n", webFile)
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\nstack:\n  pattern: '[A-Z]+-[0-9]+'\napps:\n  api: {run: api}\n", webFile)
 	shopWorktreeDir := addWorktree(t, shopDir, "shop-retry", "PROJ-1-retry")
 	if err := os.WriteFile(filepath.Join(shopWorktreeDir, "ilot.yaml"), []byte("apps:\n  api: {run: api --retry}\n  jobs: {run: jobs}\n"), 0o600); err != nil {
 		t.Fatal(err)

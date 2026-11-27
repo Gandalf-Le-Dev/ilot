@@ -42,7 +42,7 @@ func (supervisor *readySupervisor) Shutdown(context.Context) error { return nil 
 
 func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	codeDir := canonicalTempDir(t)
-	gitRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n  jobs: ../jobs\napps:\n  api: {run: api, ports: [http], depends_on: [worker]}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n  jobs: ../jobs\nstack:\n  pattern: '[A-Z]+-[0-9]+'\napps:\n  api: {run: api, ports: [http], depends_on: [worker]}\n"})
 	gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  front: {run: front, depends_on: [api]}\n"})
 	gitRepoAt(t, filepath.Join(codeDir, "jobs"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  worker: {run: worker}\n"})
 	webWorktreeDir := filepath.Join(codeDir, "web-retry")
@@ -54,9 +54,9 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stackName, err := workspace.StackName(worktree)
+	stackName, err := currentWorkspace.DefaultStackName(worktree)
 	if err != nil || stackName != "proj-1" {
-		t.Fatalf("StackName = %q, %v; want proj-1", stackName, err)
+		t.Fatalf("DefaultStackName = %q, %v; want proj-1", stackName, err)
 	}
 	controller, err := newController(currentWorkspace, stackName, time.Second)
 	if err != nil {

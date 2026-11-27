@@ -98,7 +98,7 @@ func configFilesToCheck(currentWorkspace workspace.Workspace, checkout workspace
 		}
 		checkedFile = ownFile
 	}
-	stackName, err := workspace.StackName(checkout)
+	stackName, err := currentWorkspace.DefaultStackName(checkout)
 	if err != nil {
 		return "", nil, err
 	}

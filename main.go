@@ -305,7 +305,7 @@ func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bo
 	}
 	stackName := workspace.BaseStackName
 	if !isCrossStack {
-		if stackName, err = workspace.StackName(worktree); err != nil {
+		if stackName, err = currentWorkspace.DefaultStackName(worktree); err != nil {
 			return nil, "", err
 		}
 	}

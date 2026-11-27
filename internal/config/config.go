@@ -18,10 +18,11 @@ const FileName = "ilot.yaml"
 
 // Config is the file of one repo, and also what Merge makes of the files of every repo of a stack.
 type Config struct {
-	// The three keys of the workspace. ilot reads them from the main checkout of a repo only.
-	// Name and Repos belong to the root repo of the workspace. The default name is the folder name of the root.
-	Name  string    `yaml:"name"`
-	Repos RepoPaths `yaml:"repos"`
+	// The keys of the workspace. ilot reads them from the main checkout of a repo only.
+	// Name, Repos and Stack belong to the root repo of the workspace. The default name is the folder name of the root.
+	Name  string        `yaml:"name"`
+	Repos RepoPaths     `yaml:"repos"`
+	Stack StackSettings `yaml:"stack"`
 	// The path of the root repo, in the file of a member repo. The root must list the member in its repos.
 	MemberOf string            `yaml:"member_of"`
 	Env      map[string]string `yaml:"env"`
@@ -31,6 +32,12 @@ type Config struct {
 	Apps     map[string]App               `yaml:"apps"`
 	RepoEnv  map[string]map[string]string `yaml:"-"`
 	RepoWrap map[string]string            `yaml:"-"`
+}
+
+type StackSettings struct {
+	// A regular expression. Its first match in the name of a branch is the name of the stack of a worktree on that branch.
+	// Without it, or without a match, the whole branch name is the stack name.
+	Pattern string `yaml:"pattern"`
 }
 
 // RepoPaths gives the path of each member repo, relative to the main checkout of the root repo.
@@ -192,6 +199,7 @@ func Merge(configByRepo map[string]Config, allocatedPorts PortRange) (Config, er
 	merged := Config{
 		Name:     "",
 		Repos:    nil,
+		Stack:    StackSettings{Pattern: ""},
 		MemberOf: "",
 		Env:      nil,
 		External: map[string]ExternalService{},

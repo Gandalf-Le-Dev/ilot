@@ -1,3 +1,5 @@
+stack:
+  pattern: '[A-Za-z]+-[0-9]+'
 apps:
   hello:
     build: go build -o {{.BinDir}}/hello .

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -61,5 +62,5 @@ func addWorktree(t *testing.T, repoDir, folderName, branch string) string {
 }
 
 func workspaceOfRepos(repoPaths map[string]string) Workspace {
-	return Workspace{Name: "platform", RootDir: repoPaths["platform"], HomeDir: "", RepoPaths: repoPaths, git: NewGit()}
+	return Workspace{Name: "platform", RootDir: repoPaths["platform"], HomeDir: "", RepoPaths: repoPaths, StackPattern: regexp.MustCompile(ticketPattern), git: NewGit()}
 }
