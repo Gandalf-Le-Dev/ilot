@@ -291,3 +291,39 @@ func TestEnsureWaitsForADaemonThatShutsDown(t *testing.T) {
 		t.Fatal("Ensure gave the daemon that shuts down")
 	}
 }
+
+func TestCheckPrivateFolder(t *testing.T) {
+	parent := t.TempDir()
+	private := filepath.Join(parent, "private")
+	shared := filepath.Join(parent, "shared")
+	link := filepath.Join(parent, "link")
+	if err := os.Mkdir(private, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Not in Mkdir, where the umask would remove the bits.
+	if err := os.Chmod(shared, 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(private, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := checkPrivateFolder(private); err != nil {
+		t.Errorf("a folder with the mode 0700 is refused: %v", err)
+	}
+	if err := checkPrivateFolder(filepath.Join(parent, "missing")); err != nil {
+		t.Errorf("a folder that does not exist is refused: %v", err)
+	}
+	if err := checkPrivateFolder(shared); !errors.Is(err, ErrUnsafeSocketFolder) {
+		t.Errorf("a folder that the group can write gives %v", err)
+	}
+	if err := checkPrivateFolder(link); !errors.Is(err, ErrUnsafeSocketFolder) {
+		t.Errorf("a link to a folder gives %v", err)
+	}
+	if err := checkSocketFolder(filepath.Join(shared, "daemon.sock")); err != nil {
+		t.Errorf("a state folder is held to the rule of the fallback folder: %v", err)
+	}
+}
