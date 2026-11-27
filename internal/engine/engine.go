@@ -101,11 +101,17 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	if err := executor.buildApps(ctx, after, start.Order, needsBuild); err != nil {
 		return err
 	}
+	isSkipped := map[plan.Instance]bool{}
 	for _, appInstance := range start.Order {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := executor.startInstance(ctx, after, appInstance, processByName, actionOf(appInstance)); err != nil {
+		if executor.skipsForSkippedDependency(after, appInstance, isSkipped) {
+			continue
+		}
+		if err := executor.startInstance(ctx, after, appInstance, processByName, actionOf(appInstance)); errors.Is(err, errStoppedByAnotherCommand) {
+			isSkipped[appInstance] = true
+		} else if err != nil {
 			return err
 		}
 	}
@@ -115,8 +121,21 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	if err := executor.sendRoutes(ctx); err != nil {
 		return err
 	}
-	executor.printURLs(after, requestedInstances)
+	executor.printURLs(after, slices.DeleteFunc(slices.Clone(requestedInstances), func(appInstance plan.Instance) bool { return isSkipped[appInstance] }))
 	return nil
+}
+
+// errStoppedByAnotherCommand says that an ilot stop or ilot rm took the membership away from an instance this command was starting. The line that says so is already printed.
+var errStoppedByAnotherCommand = errors.New("another ilot command stopped the app")
+
+// skipsForSkippedDependency skips an instance whose dependency another command stopped: it would start without it.
+func (executor *Executor) skipsForSkippedDependency(snapshot plan.Snapshot, appInstance plan.Instance, isSkipped map[plan.Instance]bool) bool {
+	dependency, hasSkippedDependency := executor.failedDependencyOf(snapshot, appInstance, isSkipped)
+	if hasSkippedDependency {
+		isSkipped[appInstance] = true
+		fmt.Fprintf(executor.Output, "%s does not start: %s was stopped by another ilot command\n", snapshot.ProcessName(appInstance), snapshot.ProcessName(dependency))
+	}
+	return hasSkippedDependency
 }
 
 // underLock runs a step that reads or changes the state. It holds the state lock for that step only: never for a build, a wait or a call that starts or stops a process.
@@ -161,7 +180,7 @@ func (executor *Executor) replaceChangedDependents(ctx context.Context, before, 
 			fmt.Fprintf(executor.Output, "restarting %s: this start changed its specification\n", specAfter.Name)
 			return executor.put(ctx, specAfter)
 		}
-		if err := executor.applyAndWait(ctx, after, wantedInstance, processByName, replace); err != nil {
+		if err := executor.applyAndWait(ctx, after, wantedInstance, processByName, replace); err != nil && !errors.Is(err, errStoppedByAnotherCommand) {
 			return err
 		}
 	}
@@ -203,12 +222,18 @@ func (executor *Executor) RestartApps(ctx context.Context, stackName string, app
 	if err != nil {
 		return err
 	}
+	var shownInstances []plan.Instance
 	for _, appInstance := range restartedInstances {
-		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, restartAlways); err != nil {
+		err := executor.startInstance(ctx, snapshot, appInstance, processByName, restartAlways)
+		if errors.Is(err, errStoppedByAnotherCommand) {
+			continue
+		}
+		if err != nil {
 			return err
 		}
+		shownInstances = append(shownInstances, appInstance)
 	}
-	executor.printURLs(snapshot, restartedInstances)
+	executor.printURLs(snapshot, shownInstances)
 	return nil
 }
 
@@ -357,6 +382,7 @@ func renderErrorOf(snapshot plan.Snapshot, appInstance plan.Instance) error {
 func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, planProblems []error, imageFailures []imageFailure, processByName map[string]daemon.Process) error {
 	problems := slices.Clone(planProblems)
 	isFailed := map[plan.Instance]bool{}
+	isSkipped := map[plan.Instance]bool{}
 	for _, failure := range imageFailures {
 		isFailed[failure.appInstance] = true
 		problems = append(problems, fmt.Errorf("%s: %w", snapshot.ProcessName(failure.appInstance), failure.err))
@@ -373,7 +399,12 @@ func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, 
 			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(failedDependency)))
 			continue
 		}
-		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, keepRunning); err != nil {
+		if executor.skipsForSkippedDependency(snapshot, appInstance, isSkipped) {
+			continue
+		}
+		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, keepRunning); errors.Is(err, errStoppedByAnotherCommand) {
+			isSkipped[appInstance] = true
+		} else if err != nil {
 			isFailed[appInstance] = true
 			problems = append(problems, err)
 		}
@@ -490,6 +521,7 @@ func (executor *Executor) applyAndWait(ctx context.Context, snapshot plan.Snapsh
 	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
 		if err == nil {
 			fmt.Fprintf(executor.Output, "%s does not start: another ilot command stopped it\n", processName)
+			err = errStoppedByAnotherCommand
 		}
 		return err
 	}
@@ -503,7 +535,9 @@ func (executor *Executor) applyAndWait(ctx context.Context, snapshot plan.Snapsh
 	if isWanted, err := executor.isStillWanted(ctx, appInstance); err != nil || !isWanted {
 		if err == nil {
 			fmt.Fprintf(executor.Output, "%s stops again: another ilot command stopped it while it started\n", processName)
-			err = executor.deleteProcesses(ctx, snapshot, []plan.Instance{appInstance})
+			if err = executor.deleteProcesses(ctx, snapshot, []plan.Instance{appInstance}); err == nil {
+				err = errStoppedByAnotherCommand
+			}
 		}
 		return err
 	}
@@ -545,6 +579,12 @@ func (executor *Executor) waitReady(ctx context.Context, snapshot plan.Snapshot,
 	stopShowingLog := logs.FollowNewMessages(snapshot.LogFile(appInstance), &linePrefixWriter{prefix: processName + " | ", output: executor.Output, isAtLineStart: true})
 	waitErr := executor.Supervisor.WaitReady(ctx, processName, executor.ReadyTimeout)
 	if err := errors.Join(waitErr, stopShowingLog()); err != nil {
+		if errors.Is(err, daemon.ErrUnknownProcess) {
+			if isWanted, wantedErr := executor.isStillWanted(ctx, appInstance); wantedErr == nil && !isWanted {
+				fmt.Fprintf(executor.Output, "%s does not start: another ilot command stopped it\n", processName)
+				return errStoppedByAnotherCommand
+			}
+		}
 		failure := fmt.Errorf("%w, see %s", err, snapshot.LogFile(appInstance))
 		if _, isNotReadyInTime := errors.AsType[*daemon.NotReadyError](err); isNotReadyInTime {
 			return fmt.Errorf("%w; it still starts: ilot keeps it", failure)

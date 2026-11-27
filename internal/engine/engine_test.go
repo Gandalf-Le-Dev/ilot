@@ -181,6 +181,9 @@ func (supervisor *fakeSupervisor) WaitReady(ctx context.Context, processName str
 	}
 	if supervisor.onWaitReady != nil {
 		supervisor.onWaitReady(processName)
+		if _, isHeld := supervisor.runningSpecs[processName]; !isHeld {
+			return fmt.Errorf("%s: %w", processName, daemon.ErrUnknownProcess)
+		}
 	}
 	if behavior, hasBehavior := supervisor.behaviorByProcess[processName]; hasBehavior && ctx.Err() == nil {
 		switch behavior {
