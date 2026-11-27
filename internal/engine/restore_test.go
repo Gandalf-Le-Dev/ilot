@@ -142,8 +142,11 @@ func TestStartAllSkipsABaseAppThatNoConfigDeclaresAnyMore(t *testing.T) {
 
 	err = environment.executor.StartAll(t.Context())
 
-	if err == nil || !strings.Contains(err.Error(), "envdump.base.shop does not start: no ilot.yaml declares it any more") || !strings.Contains(err.Error(), "ilot stop envdump") {
-		t.Errorf("StartAll = %v, want envdump named with the command that removes it", err)
+	if err != nil {
+		t.Errorf("StartAll = %v, want no failure for an undeclared app", err)
+	}
+	if output := environment.output.String(); !strings.Contains(output, "warning: envdump.base.shop does not start: no ilot.yaml declares it any more") || !strings.Contains(output, "ilot stop envdump") {
+		t.Errorf("output %q, want envdump named with the command that removes it", output)
 	}
 	if slices.Contains(environment.supervisor.calls, "put envdump.base.shop") || !slices.Contains(environment.supervisor.startedInOrder, "standalone.base.shop") {
 		t.Errorf("calls = %v, want standalone back and no call for envdump", environment.supervisor.calls)
