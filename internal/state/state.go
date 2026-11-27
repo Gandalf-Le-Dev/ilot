@@ -13,9 +13,11 @@ import (
 )
 
 type StackState struct {
-	Name         string              `json:"name"`
-	CheckoutDirs map[string]string   `json:"checkout_dirs"`
-	Apps         map[string]AppState `json:"apps"`
+	Name         string            `json:"name"`
+	CheckoutDirs map[string]string `json:"checkout_dirs"`
+	// The binding: the linked worktree of each repo that belongs to this stack. A repo with no entry uses its main checkout.
+	BoundWorktrees map[string]string   `json:"bound_worktrees,omitempty"`
+	Apps           map[string]AppState `json:"apps"`
 }
 
 type AppState struct {

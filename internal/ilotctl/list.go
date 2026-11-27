@@ -80,7 +80,6 @@ func statusOf(process daemon.Process) string {
 	return string(process.State)
 }
 
-// A repo with several worktrees for a stack is left out: ilot start reports it in that stack.
 func (controller *Controller) StackCheckouts() (map[string]map[string]workspace.Worktree, error) {
 	allStacks, err := controller.Store.All()
 	if err != nil {
@@ -89,7 +88,7 @@ func (controller *Controller) StackCheckouts() (map[string]map[string]workspace.
 	checkoutsByStack := map[string]map[string]workspace.Worktree{}
 	for _, stackState := range allStacks {
 		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)
-		if err != nil && !workspace.IsSeveralWorktrees(err) {
+		if err != nil {
 			return nil, err
 		}
 		checkoutsByStack[stackState.Name] = checkoutByRepo

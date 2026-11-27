@@ -57,7 +57,7 @@ func TestDefaultStackNameRefusesANameThatIsEmptyOrReserved(t *testing.T) {
 		{worktree: Worktree{Dir: "/code/wt1", Branch: "___"}, wantErrorSubstr: `the branch "___"`},
 		{worktree: Worktree{Dir: "/code/___", Branch: ""}, wantErrorSubstr: `the folder "___"`},
 		{worktree: Worktree{Dir: "/code/wt1", Branch: "Base"}, wantErrorSubstr: "the stack of the main checkouts"},
-		{worktree: Worktree{Dir: "/code/base", Branch: ""}, wantErrorSubstr: "rename the folder"},
+		{worktree: Worktree{Dir: "/code/base", Branch: ""}, wantErrorSubstr: "ilot stack bind"},
 	}
 	for _, testCase := range testCases {
 		_, err := Workspace{}.DefaultStackName(testCase.worktree)

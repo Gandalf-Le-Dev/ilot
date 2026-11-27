@@ -22,6 +22,10 @@ The branch is the name because one ticket usually gets the same branch name in e
 With `stack.pattern` in the `ilot.yaml` of the root repo, the name is the first match of that regular expression in the branch name. With `pattern: '[A-Za-z]+-[0-9]+'`, the branch `feature/PROJ-1234-retry-jobs` belongs to the stack `proj-1234`. A branch that the pattern does not match keeps its whole name.
 A worktree with a detached HEAD takes the name of its folder.
 
+A worktree gets its stack one time, at the first `ilot start` in it. `ilot` records the pair of the worktree and the stack. This is the binding.
+After the binding, `git switch`, a rebase or a bisect in the worktree does not move it to another stack.
+`ilot stack show` prints the stack of the current worktree. `ilot stack bind <name>` sets or changes the binding by hand.
+
 A worktree runs only the apps that you start in it.
 The other dependencies come from the `base` stack. If one of them does not run, `ilot` starts it there.
 The `scope` of an app can fix that choice:
@@ -38,10 +42,11 @@ Each other repo is a member: its `ilot.yaml` names the root with `member_of`.
 `ilot` finds the workspace from the repo of the folder that you are in, so it needs no registry.
 This version keeps the state of one workspace on a machine. A second workspace gets an error that names the first one.
 
-For each repo, a stack takes the worktree whose branch gives its name. If the repo has no such worktree, the stack takes the main checkout of the repo.
+For each repo, a stack takes the worktree that is bound to it. If the repo has no such worktree, the stack takes the main checkout of the repo.
+A worktree of a second repo on the same branch joins the stack at the first `ilot start` in it, because the branch gives the same name. If its branch has another name, run `ilot stack bind <name>` in it.
 Each stack reads the `ilot.yaml` files of its own checkouts, so a change in one stack does not change the apps of another.
 A checkout with no `ilot.yaml` reads the file of the main checkout. An untracked `ilot.yaml` in the main checkout therefore works in a repo where you cannot commit one.
-Two worktrees of one repo whose branches give the same stack name make `ilot` refuse that stack, and the error names both folders.
+A stack takes one worktree of a repo. A second one gets an error that names the first, and `ilot stack bind <name>` gives it another stack.
 
 Each app gets its ports in the range 20000-29999 and keeps them. The global file can set another range.
 Its URL, `http://<app>.<stack>.<workspace>.localhost:4580`, therefore stays the same.
@@ -125,7 +130,7 @@ ilot start api front
 ## Commands
 
 Every command finds the workspace from the repo of the folder that you are in, so run `ilot` inside a repo of the workspace.
-`ilot start`, `stop`, `logs`, `apps` and `env` act on the stack of that folder.
+`ilot start`, `stop`, `logs`, `apps`, `env` and `stack` act on the stack of that folder.
 `ilot ls`, `rm` and `clean` act on every stack.
 
 ```bash
@@ -143,7 +148,9 @@ ilot env api                  # the environment of the app, with the source of e
 ilot check                    # check the ilot.yaml of this repo with the files of the other repos
 ilot check path/to/ilot.yaml  # check that file
 ilot rm retry-jobs            # stop a stack and delete its state, its logs and its routes
-ilot clean                    # ilot rm on each stack whose worktrees are deleted
+ilot clean                    # ilot rm on each stack whose bound worktrees are all deleted
+ilot stack show               # the stack of this worktree, and the checkout of each repo for it
+ilot stack bind retry-jobs    # put this worktree in the stack retry-jobs
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
 ilot restart                  # with no app: stop every app and the daemon, start a new daemon, then start the apps that ran
 ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login, with the main checkout of a repo of the workspace
@@ -334,7 +341,7 @@ A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 If another program has port 4580, each command prints a warning, the apps run, and their URLs do not answer.
 Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot restart`.
 After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot restart` to replace it.
-After you delete the worktrees of a ticket, run `ilot clean` to give back its ports.
+After you delete the worktrees of a stack, run `ilot clean` to give back its ports. `ilot clean` also removes a stack that lost its last worktree to `ilot stack bind`.
 
 ## Development
 

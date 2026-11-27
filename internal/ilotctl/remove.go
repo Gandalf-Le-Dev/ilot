@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
+	"io/fs"
+	"os"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
@@ -41,30 +41,29 @@ func (controller *Controller) Remove(ctx context.Context, stackName string) (err
 	return controller.Store.Delete(stackName)
 }
 
-func (controller *Controller) StacksWithoutCheckouts() ([]string, error) {
+// StacksWithoutWorktrees lists the stacks that ilot clean removes: each one whose bound worktrees are all deleted.
+// A stack that lost its last worktree to ilot stack bind has none, so it is listed too.
+func (controller *Controller) StacksWithoutWorktrees() ([]string, error) {
 	allStacks, err := controller.Store.All()
 	if err != nil {
 		return nil, err
 	}
-	var stacksWithoutCheckouts []string
+	var stacksWithoutWorktrees []string
 	for _, stackState := range allStacks {
 		if stackState.Name == workspace.BaseStackName {
 			continue
 		}
-		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)
-		if workspace.IsSeveralWorktrees(err) {
-			continue
+		hasWorktree := false
+		for _, worktreeDir := range stackState.BoundWorktrees {
+			_, err := os.Stat(worktreeDir)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("look for the worktree of the stack %s: %w", stackState.Name, err)
+			}
+			hasWorktree = hasWorktree || err == nil
 		}
-		if err != nil {
-			return nil, err
-		}
-		if !slices.ContainsFunc(slices.Collect(maps.Values(checkoutByRepo)), isLinkedWorktree) {
-			stacksWithoutCheckouts = append(stacksWithoutCheckouts, stackState.Name)
+		if !hasWorktree {
+			stacksWithoutWorktrees = append(stacksWithoutWorktrees, stackState.Name)
 		}
 	}
-	return stacksWithoutCheckouts, nil
-}
-
-func isLinkedWorktree(checkout workspace.Worktree) bool {
-	return !checkout.IsMain
+	return stacksWithoutWorktrees, nil
 }

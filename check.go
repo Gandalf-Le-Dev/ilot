@@ -34,6 +34,10 @@ func (command *checkCommand) Run() error {
 	if err != nil {
 		return err
 	}
+	// A check must work where the state belongs to another workspace, and then the branch names the stack.
+	if boundWorkspace, _, err := withBindings(currentWorkspace); err == nil {
+		currentWorkspace = boundWorkspace
+	}
 	checkedFile, otherFileByRepo, err := configFilesToCheck(currentWorkspace, checkout, requestedFile)
 	if err != nil {
 		return err
@@ -98,12 +102,12 @@ func configFilesToCheck(currentWorkspace workspace.Workspace, checkout workspace
 		}
 		checkedFile = ownFile
 	}
-	stackName, err := currentWorkspace.DefaultStackName(checkout)
+	stackName, _, err := currentWorkspace.StackOf(checkout)
 	if err != nil {
 		return "", nil, err
 	}
 	checkoutByRepo, err := currentWorkspace.CheckoutsForStack(stackName)
-	if err != nil && !workspace.IsSeveralWorktrees(err) {
+	if err != nil {
 		return "", nil, err
 	}
 	otherFileByRepo = map[string]string{}

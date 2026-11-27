@@ -48,6 +48,7 @@ type cli struct {
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`
 	Clean   cleanCommand   `cmd:"" help:"Remove every stack whose worktrees are all deleted."`
+	Stack   stackCommand   `cmd:"" help:"Print the stack of the current worktree, or put the worktree in another stack."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
 	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
 	Daemon  daemonCommand  `cmd:"" help:"Run the ilot daemon. ilot starts it when it needs it."`
@@ -71,7 +72,7 @@ type envCommand struct {
 }
 
 func (command *envCommand) Run() error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -94,7 +95,7 @@ type logsCommand struct {
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func (command *restartCommand) Run(ctx context.Context) error {
 	case len(command.Apps) == 0 && command.Stack != "":
 		return errors.New("--stack needs the apps to restart")
 	case len(command.Apps) == 0:
-		controller, baseStackName, err := newControllerForCurrentWorktree(command.Timeout, true)
+		controller, baseStackName, err := newControllerForCurrentWorktree(command.Timeout, baseStack)
 		if err != nil {
 			return err
 		}
@@ -135,13 +136,17 @@ func (command *restartCommand) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		controller, err := newController(currentWorkspace, command.Stack, command.Timeout)
+		currentWorkspace, store, err := withBindings(currentWorkspace)
+		if err != nil {
+			return err
+		}
+		controller, err := newController(currentWorkspace, store, command.Stack, command.Timeout)
 		if err != nil {
 			return err
 		}
 		return controller.RestartApps(ctx, command.Stack, command.Apps)
 	}
-	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, false)
+	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -182,7 +187,11 @@ func (command *bootCommand) Run(ctx context.Context) error {
 	if !mainCheckout.IsMain {
 		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
 	}
-	controller, err := newController(currentWorkspace, workspace.BaseStackName, command.Timeout)
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return err
+	}
+	controller, err := newController(currentWorkspace, store, workspace.BaseStackName, command.Timeout)
 	if err != nil {
 		return err
 	}
@@ -190,7 +199,7 @@ func (command *bootCommand) Run(ctx context.Context) error {
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -257,7 +266,7 @@ func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[st
 }
 
 func (command *rmCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -265,15 +274,15 @@ func (command *rmCommand) Run(ctx context.Context) error {
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, true)
+	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
-	stacksWithoutCheckouts, err := controller.StacksWithoutCheckouts()
+	stacksWithoutWorktrees, err := controller.StacksWithoutWorktrees()
 	if err != nil {
 		return err
 	}
-	for _, stackName := range stacksWithoutCheckouts {
+	for _, stackName := range stacksWithoutWorktrees {
 		if err := controller.Remove(ctx, stackName); err != nil {
 			return err
 		}
@@ -283,7 +292,7 @@ func (command *cleanCommand) Run(ctx context.Context) error {
 }
 
 func (command *startCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, false)
+	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err
 	}
@@ -291,25 +300,41 @@ func (command *startCommand) Run(ctx context.Context) error {
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, false)
+	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
 	return controller.Stop(ctx, stackName, command.Apps)
 }
 
-func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, string, error) {
+// Which stack a command works on.
+type stackChoice int
+
+const (
+	// For a command that works on every stack.
+	baseStack stackChoice = iota
+	stackOfCurrentFolder
+	// For ilot start: the first start in a worktree binds the worktree to its stack.
+	stackOfCurrentFolderWithBinding
+)
+
+func newControllerForCurrentWorktree(readyTimeout time.Duration, choice stackChoice) (*ilotctl.Controller, string, error) {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return nil, "", err
 	}
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return nil, "", err
+	}
 	stackName := workspace.BaseStackName
-	if !isCrossStack {
-		if stackName, err = currentWorkspace.DefaultStackName(worktree); err != nil {
+	if choice != baseStack {
+		currentWorkspace, stackName, err = stackOfWorktree(store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
+		if err != nil {
 			return nil, "", err
 		}
 	}
-	controller, err := newController(currentWorkspace, stackName, readyTimeout)
+	controller, err := newController(currentWorkspace, store, stackName, readyTimeout)
 	return controller, stackName, err
 }
 
@@ -333,7 +358,11 @@ func findWorkspaceOf(dir string) (workspace.Workspace, workspace.Worktree, error
 	return workspace.Find(dir, homeDir, global, workspace.NewGit())
 }
 
-func newController(currentWorkspace workspace.Workspace, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+func stateDirOf(homeDir string) string {
+	return filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(homeDir, ".local", "state")), "ilot")
+}
+
+func newController(currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
 	stackConfig, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return nil, err
@@ -348,7 +377,7 @@ func newController(currentWorkspace workspace.Workspace, stackName string, ready
 	if err != nil {
 		return nil, fmt.Errorf("find the name of the current user, for the User template: %w", err)
 	}
-	stateDir := filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(currentWorkspace.HomeDir, ".local", "state")), "ilot")
+	stateDir := store.RootDir
 	shellEnv := sync.OnceValues(func() (map[string]string, error) {
 		return shellenv.OfUser(global.ShellEnv.Args).Environment(context.Background())
 	})
@@ -359,10 +388,6 @@ func newController(currentWorkspace workspace.Workspace, stackName string, ready
 	ilotEnv := map[string]string{}
 	if value, isSet := os.LookupEnv("XDG_STATE_HOME"); isSet {
 		ilotEnv["XDG_STATE_HOME"] = value
-	}
-	store := state.Store{RootDir: stateDir}
-	if err := store.Claim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
-		return nil, err
 	}
 	daemonPaths := daemon.Paths{StateDir: stateDir}
 	startDaemon := func() error {
