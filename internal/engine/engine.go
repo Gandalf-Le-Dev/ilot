@@ -311,8 +311,16 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 	var problems []error
 	var warnings []string
 	var loadedInstances []plan.Instance
+	isWarnedStack := map[string]bool{}
 	for _, wantedInstance := range snapshot.Wanted() {
 		if onlyStack != "" && wantedInstance.Stack != onlyStack {
+			continue
+		}
+		if executor.hasOnlyDeletedWorktrees(wantedInstance.Stack) {
+			if !isWarnedStack[wantedInstance.Stack] {
+				isWarnedStack[wantedInstance.Stack] = true
+				warnings = append(warnings, fmt.Sprintf("%s does not start: its worktree is deleted. ilot clean removes the stack", wantedInstance.Stack))
+			}
 			continue
 		}
 		if err := executor.addStack(snapshot, wantedInstance.Stack); err != nil {
@@ -343,6 +351,23 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 	var renderProblems []error
 	start.Order, renderProblems = executor.withoutUnrenderable(start.After, start.Order)
 	return start, append(problems, renderProblems...), warnings, nil
+}
+
+// hasOnlyDeletedWorktrees tells a feature stack whose every bound worktree is gone: CheckoutsForStack then gives it the main checkouts, and its apps would run base code under the name of the stack.
+func (executor *Executor) hasOnlyDeletedWorktrees(stackName string) bool {
+	if stackName == plan.BaseStack {
+		return false
+	}
+	checkoutByRepo, err := executor.CheckoutsForStack(stackName)
+	if err != nil || len(checkoutByRepo) == 0 {
+		return false
+	}
+	for _, checkout := range checkoutByRepo {
+		if !checkout.IsMain {
+			return false
+		}
+	}
+	return true
 }
 
 // withoutUnrenderable leaves out each instance whose specification or build does not render, and each instance that depends on one.
