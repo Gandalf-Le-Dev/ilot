@@ -351,7 +351,7 @@ A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 If another program has port 4580, each command prints a warning, the apps run, and their URLs do not answer.
 Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot restart`.
 After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot restart` to replace it.
-After you delete the worktrees of a stack, run `ilot clean` to give back its ports. `ilot clean` also removes a stack that lost its last worktree to `ilot stack bind`.
+After you delete the worktrees of a stack, run `ilot clean` to give back its ports. `ilot clean` also removes a stack that lost its last worktree to `ilot stack bind`. It names each app that it stops. A worktree that you moved with `git worktree move` keeps its stack: `ilot clean` binds the stack to the new folder when one unbound worktree of the repo has a branch that gives the name of the stack.
 
 ## Development
 

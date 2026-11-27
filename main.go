@@ -288,19 +288,59 @@ func (command *rmCommand) Run(ctx context.Context) error {
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	executor, _, err := newExecutorForCurrentWorktree(ctx, time.Minute, baseStack)
+	currentWorkspace, _, err := findCurrentWorkspace()
 	if err != nil {
 		return err
 	}
+	currentWorkspace, store, err := withBindings(currentWorkspace)
+	if err != nil {
+		return err
+	}
+	executor, err := newExecutor(ctx, currentWorkspace, store, workspace.BaseStackName, time.Minute)
+	if err != nil {
+		return err
+	}
+	return cleanStacks(ctx, os.Stdout, currentWorkspace, store, executor)
+}
+
+// cleanStacks keeps a stack whose worktree was moved with git worktree move: it binds the stack to the new folder.
+func cleanStacks(ctx context.Context, output io.Writer, currentWorkspace workspace.Workspace, store state.Store, executor *engine.Executor) error {
 	stacksWithoutWorktrees, err := executor.StacksWithoutWorktrees()
 	if err != nil {
 		return err
 	}
 	for _, stackName := range stacksWithoutWorktrees {
+		movedByRepo, err := currentWorkspace.MovedWorktrees(stackName)
+		if err != nil {
+			return err
+		}
+		for _, repoName := range slices.Sorted(maps.Keys(movedByRepo)) {
+			if currentWorkspace, _, err = bindWorktree(ctx, store, currentWorkspace, movedByRepo[repoName], stackName); err != nil {
+				return err
+			}
+			fmt.Fprintf(output, "kept %s: its worktree of %s moved to %s\n", stackName, repoName, movedByRepo[repoName].Dir)
+		}
+		if len(movedByRepo) > 0 {
+			continue
+		}
+		current, err := store.Load()
+		if err != nil {
+			return err
+		}
+		var wantedApps []string
+		for appName, app := range current.Stacks(currentWorkspace.Name)[stackName].Apps {
+			if app.Wanted {
+				wantedApps = append(wantedApps, appName)
+			}
+		}
 		if err := executor.Remove(ctx, stackName); err != nil {
 			return err
 		}
-		fmt.Printf("removed %s\n", stackName)
+		fmt.Fprintf(output, "removed %s\n", stackName)
+		slices.Sort(wantedApps)
+		for _, appName := range wantedApps {
+			fmt.Fprintf(output, "  stopped %s\n", appName)
+		}
 	}
 	return nil
 }
