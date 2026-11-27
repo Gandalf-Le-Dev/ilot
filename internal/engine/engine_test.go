@@ -320,6 +320,8 @@ func fakeCheckoutsForStack(stackName string) (map[string]workspace.Worktree, err
 	}
 	if stackName == "task-1234" {
 		checkoutByRepo["shop"] = workspace.Worktree{Repo: "shop", Dir: "/worktrees/task-1234", Branch: "TASK-1234-x", IsMain: false}
+	} else if stackName != plan.BaseStack {
+		checkoutByRepo["shop"] = workspace.Worktree{Repo: "shop", Dir: "/worktrees/" + stackName, Branch: stackName, IsMain: false}
 	}
 	return checkoutByRepo, nil
 }

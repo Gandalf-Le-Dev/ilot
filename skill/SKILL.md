@@ -43,7 +43,7 @@ ilot apps --json                # the same as one JSON object
 ilot start front                # build, then start the app after its dependencies, in this folder's stack; an app that runs stays as it is
 ilot start                      # start every app that this folder's stack owns and that does not run
 ilot start api --no-deps        # start only this app
-ilot start --all                # start every app that a stack owns and that does not run, after a crash of the daemon (skips a stack whose worktrees are all deleted)
+ilot start --all                # start every app that a stack owns and that does not run, after a crash of the daemon (skips a stack whose worktrees are all deleted; a named `ilot start` in that stack fails)
 ilot stop api                   # stop the app in this folder's stack
 ilot stop --all                 # stop every app that this folder's stack owns
 ilot logs api                   # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line

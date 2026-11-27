@@ -47,6 +47,9 @@ type StartOptions struct {
 }
 
 func (executor *Executor) Start(ctx context.Context, stackName string, appNames []string, options StartOptions) error {
+	if executor.hasOnlyDeletedWorktrees(stackName) {
+		return fmt.Errorf("%s has no worktree of its own. %s", stackName, deletedWorktreesAdvice)
+	}
 	// A start tests the ports of its apps, so it needs a daemon that has killed what a dead daemon left behind. That can take seconds, so not under the lock.
 	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
@@ -342,7 +345,7 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 		if executor.hasOnlyDeletedWorktrees(wantedInstance.Stack) {
 			if !isWarnedStack[wantedInstance.Stack] {
 				isWarnedStack[wantedInstance.Stack] = true
-				warnings = append(warnings, fmt.Sprintf("%s does not start: it has no worktree of its own. ilot clean removes it, or binds it again if its worktree moved", wantedInstance.Stack))
+				warnings = append(warnings, fmt.Sprintf("%s does not start: it has no worktree of its own. %s", wantedInstance.Stack, deletedWorktreesAdvice))
 			}
 			continue
 		}
@@ -375,6 +378,8 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, 
 	start.Order, renderProblems = executor.withoutUnrenderable(start.After, start.Order)
 	return start, append(problems, renderProblems...), warnings, nil
 }
+
+const deletedWorktreesAdvice = "ilot clean removes it, or binds it again if its worktree moved"
 
 // hasOnlyDeletedWorktrees tells a feature stack whose every bound worktree is gone: CheckoutsForStack then gives it the main checkouts, and its apps would run base code under the name of the stack.
 func (executor *Executor) hasOnlyDeletedWorktrees(stackName string) bool {
