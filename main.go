@@ -565,12 +565,23 @@ func isListeningOnLocalhost(port int) bool {
 	return connection.Close() == nil
 }
 
+// commandPath is the command without the placeholders of its arguments, which kong's Command adds: "start", not "start <apps>".
+func commandPath(commandLine *kong.Context) string {
+	var names []string
+	for _, step := range commandLine.Path {
+		if step.Command != nil {
+			names = append(names, step.Command.Name)
+		}
+	}
+	return strings.Join(names, " ")
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var commandLineArguments cli
 	commandLine := kong.Parse(&commandLineArguments, kong.Name("ilot"), kong.Description("Run the apps of each git worktree behind one local proxy.\n\nAgents: if the ilot skill is not in your context, run ilot skill print."), kong.BindTo(ctx, (*context.Context)(nil)), kong.Vars{"version": versionOfThisBinary()})
-	closeAuditLog := openAuditLog(commandLine.Command())
+	closeAuditLog := openAuditLog(commandPath(commandLine))
 	err := commandLine.Run()
 	if err != nil {
 		auditLog.Warn("command failed", "error", err.Error())
