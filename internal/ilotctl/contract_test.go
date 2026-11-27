@@ -140,7 +140,7 @@ func checkSupervisorContract(t *testing.T, subject supervisorUnderContract) {
 	if supervisor.IsUp(ctx) {
 		t.Fatal("IsUp = true after a read: a read must not start the daemon")
 	}
-	someRoutes := []daemon.Route{{Host: "steady.master.localhost", Port: 20000}}
+	someRoutes := []daemon.Route{{Host: "steady.base.localhost", Port: 20000}}
 	if err := supervisor.SetRoutes(ctx, someRoutes); err != nil || supervisor.IsUp(ctx) {
 		t.Fatalf("SetRoutes with no daemon = %v, IsUp = %t; want no error and no daemon", err, supervisor.IsUp(ctx))
 	}

@@ -182,7 +182,7 @@ type testEnvironment struct {
 	builds        *[]recordedBuild
 	buildEnvirons *[][]string
 	output        *bytes.Buffer
-	master        string
+	base          string
 	featureStack  string
 }
 
@@ -197,12 +197,12 @@ func testConfig() config.Config {
 	const gatewayAddress = `http://localhost:{{port "gateway" "http"}}`
 	return config.Config{
 		External: map[string]config.ExternalService{
-			"keyring":   {Port: 8200, StartHint: "restart devbox"},
+			"keyring":   {Port: 8200, StartHint: "restart base"},
 			"legacyapi": {Port: 10004, StartHint: "start it by hand"},
 		},
 		Apps: map[string]config.App{
 			"temporal": {
-				Shared:     true,
+				Scope:      "base",
 				Autostart:  true,
 				Run:        "temporal server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
 				Ports:      []string{"grpc", "ui"},
@@ -211,7 +211,7 @@ func testConfig() config.Config {
 				Ready:      config.ReadyCheck{Port: "grpc", Path: ""},
 			},
 			"restapi": {
-				Shared:     true,
+				Scope:      "base",
 				Autostart:  true,
 				Dir:        "/legacy/restapi",
 				Run:        "perl main.pl prefork",
@@ -221,14 +221,14 @@ func testConfig() config.Config {
 				Watch:      config.Watch{Paths: []string{"."}, Exts: []string{"pl", "pm"}},
 			},
 			"doc": {
-				Shared:     true,
+				Scope:      "base",
 				Run:        "doc/run.sh",
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 10007},
 				Route:      "http",
 			},
 			"gateway": {
-				PerStack:   true,
+				Scope:      "stack",
 				Autostart:  true,
 				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
 				Ports:      []string{"http"},
@@ -256,8 +256,8 @@ func testConfig() config.Config {
 				Ports: []string{"http"},
 			},
 			"search": {
-				PerStack: true,
-				Route:    "http",
+				Scope: "stack",
+				Route: "http",
 				Env: map[string]string{
 					"GATEWAY_URL": `http://{{host "gateway"}}:{{port "gateway" "http"}}`,
 					"CACHE_URL":   `postgres://{{host "search-cache"}}:{{port "search-cache"}}/cache`,
@@ -273,7 +273,7 @@ func testConfig() config.Config {
 				},
 			},
 			"search-cache": {
-				PerStack:  true,
+				Scope:     "stack",
 				Ready:     config.ReadyCheck{Port: "", Path: "", Command: "pg_isready -U postgres"},
 				Container: config.Container{Image: "registry/search-cache:latest", Ports: map[string]int{"postgres": 5432}},
 			},
@@ -294,8 +294,8 @@ func testConfig() config.Config {
 
 func fakeCheckoutsForStack(stackName string) (map[string]workspace.Worktree, error) {
 	checkoutByRepo := map[string]workspace.Worktree{
-		"platform": {Repo: "platform", Dir: "/src/platform", Branch: "master", IsMain: true},
-		"portal":   {Repo: "portal", Dir: "/src/portal", Branch: "master", IsMain: true},
+		"platform": {Repo: "platform", Dir: "/src/platform", Branch: "base", IsMain: true},
+		"portal":   {Repo: "portal", Dir: "/src/portal", Branch: "base", IsMain: true},
 	}
 	if stackName == "proj-1234" {
 		checkoutByRepo["platform"] = workspace.Worktree{Repo: "platform", Dir: "/worktrees/proj-1234", Branch: "PROJ-1234-x", IsMain: false}
@@ -336,7 +336,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		builds:        builds,
 		buildEnvirons: buildEnvirons,
 		output:        output,
-		master:        "master",
+		base:          "base",
 		featureStack:  "proj-1234",
 	}
 }
@@ -375,12 +375,12 @@ func (environment testEnvironment) appPort(t *testing.T, stackName, appName stri
 	return port
 }
 
-func TestStartInAWorktreeTakesMissingDependenciesFromMaster(t *testing.T) {
+func TestStartInAWorktreeTakesMissingDependenciesFromBase(t *testing.T) {
 	environment := newTestEnvironment(t)
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	wantOrder := []string{"gateway.proj-1234", "gateway.master", "temporal.devbox", "internalapi.master", "publicapi.proj-1234"}
+	wantOrder := []string{"gateway.proj-1234", "gateway.base", "temporal.base", "internalapi.base", "publicapi.proj-1234"}
 	if firstWaits := firstOccurrences(environment.supervisor.waitedReady); !slices.Equal(firstWaits, wantOrder) {
 		t.Errorf("waited ready in order %v, want %v", firstWaits, wantOrder)
 	}
@@ -404,7 +404,7 @@ func TestStartBuildsEachStackOnceInItsOwnWorktree(t *testing.T) {
 	}
 }
 
-func TestEnvironmentTemplatesUseTheStackOwnGatewayAndSharedPorts(t *testing.T) {
+func TestEnvironmentTemplatesUseTheGatewayOfTheStackAndThePortsOfTheBaseStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
@@ -412,7 +412,7 @@ func TestEnvironmentTemplatesUseTheStackOwnGatewayAndSharedPorts(t *testing.T) {
 	if want := "http://localhost:" + strconv.Itoa(environment.appPort(t, "proj-1234", "gateway")); worktreePublicapi.Env["GATEWAY_URL"] != want {
 		t.Errorf("GATEWAY_URL = %q, want %q", worktreePublicapi.Env["GATEWAY_URL"], want)
 	}
-	if got := environment.supervisor.runningSpecs["internalapi.master"].Env["TEMPORAL_ADDRESS"]; got != "localhost:7233" {
+	if got := environment.supervisor.runningSpecs["internalapi.base"].Env["TEMPORAL_ADDRESS"]; got != "localhost:7233" {
 		t.Errorf("TEMPORAL_ADDRESS = %q", got)
 	}
 	if worktreePublicapi.Dir != "/worktrees/proj-1234" {
@@ -430,7 +430,7 @@ func TestStartRefusesWhenAnExternalDependencyIsDown(t *testing.T) {
 
 	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "restart devbox") {
+	if err == nil || !strings.Contains(err.Error(), "restart base") {
 		t.Fatalf("err = %v, want the start hint of keyring", err)
 	}
 	if len(*environment.builds) != 0 || len(environment.supervisor.startedInOrder) != 0 {
@@ -440,11 +440,11 @@ func TestStartRefusesWhenAnExternalDependencyIsDown(t *testing.T) {
 
 func TestStartWithoutDependenciesStartsOnlyTheRequestedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "gateway")
+	environment.start(t, environment.base, StartOptions{}, "gateway")
 
-	environment.start(t, environment.master, StartOptions{SkipDependencies: true}, "internalapi")
+	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "internalapi")
 
-	if want := []string{"gateway.master", "internalapi.master"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
+	if want := []string{"gateway.base", "internalapi.base"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
 		t.Errorf("started %v, want %v", environment.supervisor.startedInOrder, want)
 	}
 }
@@ -461,26 +461,26 @@ func TestStartWithoutDependenciesFailsWhenATemplateNeedsAMissingPort(t *testing.
 
 func TestStartOfARunningAppRebuildsAndRestartsIt(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 	*environment.builds = nil
 
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if !slices.Contains(environment.supervisor.restarted, "standalone.master") {
-		t.Errorf("restarted %v, want standalone.master", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.restarted, "standalone.base") {
+		t.Errorf("restarted %v, want standalone.base", environment.supervisor.restarted)
 	}
 }
 
 func TestStartShowsTheLogOfAnAppWhileItWaitsForIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{
-		"standalone.master": {logPath: filepath.Join(environment.controller.Store.StackDir("master"), "logs", "standalone.log"), message: "listening"},
+		"standalone.base": {logPath: filepath.Join(environment.controller.Store.StackDir("base"), "logs", "standalone.log"), message: "listening"},
 	}
 
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if !strings.Contains(environment.output.String(), "standalone.master | listening\n") {
-		t.Errorf("output = %q, want the log line of standalone.master", environment.output.String())
+	if !strings.Contains(environment.output.String(), "standalone.base | listening\n") {
+		t.Errorf("output = %q, want the log line of standalone.base", environment.output.String())
 	}
 }
 
@@ -492,16 +492,16 @@ func TestStartPrintsWhileABuildRuns(t *testing.T) {
 		return nil
 	}
 
-	environment.start(t, environment.master, StartOptions{SkipDependencies: true}, "publicapi")
+	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "publicapi")
 
-	if !strings.Contains(environment.output.String(), "still building publicapi.master, ") {
-		t.Errorf("output = %q, want a progress line while publicapi.master builds", environment.output.String())
+	if !strings.Contains(environment.output.String(), "still building publicapi.base, ") {
+		t.Errorf("output = %q, want a progress line while publicapi.base builds", environment.output.String())
 	}
 }
 
 func TestStartOfARunningDependencyDoesNotRebuildIt(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "internalapi")
+	environment.start(t, environment.base, StartOptions{}, "internalapi")
 	*environment.builds = nil
 	environment.supervisor.restarted = nil
 
@@ -509,69 +509,69 @@ func TestStartOfARunningDependencyDoesNotRebuildIt(t *testing.T) {
 
 	for _, build := range *environment.builds {
 		if build.workingDir == "/src/platform" {
-			t.Errorf("rebuilt master although its internalapi already ran: %+v", build)
+			t.Errorf("rebuilt base although its internalapi already ran: %+v", build)
 		}
 	}
-	if slices.Contains(environment.supervisor.restarted, "internalapi.master") {
-		t.Error("restarted master's internalapi")
+	if slices.Contains(environment.supervisor.restarted, "internalapi.base") {
+		t.Error("restarted base's internalapi")
 	}
 }
 
 func TestStartRestartsADependencyWhoseProcessEnded(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "publicapi")
-	environment.supervisor.setBehavior("internalapi.master", processEndedAfterItWasReady)
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
+	environment.supervisor.setBehavior("internalapi.base", processEndedAfterItWasReady)
 	environment.supervisor.restarted = nil
 
-	environment.start(t, environment.master, StartOptions{}, "publicapi")
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.restarted, "internalapi.master") {
-		t.Errorf("restarted %v, want internalapi.master, whose process ended", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.restarted, "internalapi.base") {
+		t.Errorf("restarted %v, want internalapi.base, whose process ended", environment.supervisor.restarted)
 	}
-	if slices.Contains(environment.supervisor.restarted, "temporal.devbox") {
-		t.Errorf("restarted %v, want temporal.devbox left alone: its process runs", environment.supervisor.restarted)
+	if slices.Contains(environment.supervisor.restarted, "temporal.base") {
+		t.Errorf("restarted %v, want temporal.base left alone: its process runs", environment.supervisor.restarted)
 	}
 }
 
 func TestStartKeepsACrashedDependencyInItsOwnStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-	environment.supervisor.setBehavior("internalapi.master", processEndedAfterItWasReady)
+	environment.supervisor.setBehavior("internalapi.base", processEndedAfterItWasReady)
 	environment.supervisor.restarted = nil
 	environment.supervisor.startedInOrder = nil
 	*environment.builds = nil
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.restarted, "internalapi.master") {
-		t.Errorf("restarted %v, want internalapi.master restarted in master", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.restarted, "internalapi.base") {
+		t.Errorf("restarted %v, want internalapi.base restarted in base", environment.supervisor.restarted)
 	}
 	if _, isApplied := environment.supervisor.runningSpecs["internalapi.proj-1234"]; isApplied || slices.Contains(environment.supervisor.startedInOrder, "internalapi.proj-1234") {
-		t.Errorf("started %v, want the crashed dependency kept in master, not moved to the ticket stack", environment.supervisor.startedInOrder)
+		t.Errorf("started %v, want the crashed dependency kept in base, not moved to the ticket stack", environment.supervisor.startedInOrder)
 	}
 	if !slices.ContainsFunc(*environment.builds, func(build recordedBuild) bool { return build.workingDir == "/src/platform" }) {
-		t.Errorf("builds = %+v, want master built again before its internalapi restarts", *environment.builds)
+		t.Errorf("builds = %+v, want base built again before its internalapi restarts", *environment.builds)
 	}
 }
 
 func TestStartStartsAgainADependencyTheSupervisorDoesNotKnow(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-	environment.supervisor.forgetProcess("internalapi.master")
+	environment.supervisor.forgetProcess("internalapi.base")
 	environment.supervisor.restarted = nil
 	environment.supervisor.startedInOrder = nil
 	*environment.builds = nil
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.master") {
-		t.Errorf("started %v, want internalapi.master given back to the supervisor", environment.supervisor.startedInOrder)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base") {
+		t.Errorf("started %v, want internalapi.base given back to the supervisor", environment.supervisor.startedInOrder)
 	}
-	if slices.Contains(environment.supervisor.restarted, "internalapi.master") {
+	if slices.Contains(environment.supervisor.restarted, "internalapi.base") {
 		t.Errorf("restarted %v, want no restart of a process the supervisor does not know", environment.supervisor.restarted)
 	}
 	if !slices.ContainsFunc(*environment.builds, func(build recordedBuild) bool { return build.workingDir == "/src/platform" }) {
-		t.Errorf("builds = %+v, want master built again", *environment.builds)
+		t.Errorf("builds = %+v, want base built again", *environment.builds)
 	}
 }
 
@@ -583,7 +583,7 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	for _, runningDependency := range []string{"internalapi.master", "temporal.devbox"} {
+	for _, runningDependency := range []string{"internalapi.base", "temporal.base"} {
 		if slices.Contains(environment.supervisor.restarted, runningDependency) {
 			t.Errorf("restarted %v, want %s left alone: it runs and was not named", environment.supervisor.restarted, runningDependency)
 		}
@@ -592,150 +592,150 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 		t.Errorf("restarted %v, want the named publicapi.proj-1234", environment.supervisor.restarted)
 	}
 	if slices.ContainsFunc(*environment.builds, func(build recordedBuild) bool { return build.workingDir == "/src/platform" }) {
-		t.Errorf("builds = %+v, want no build of master: its internalapi runs", *environment.builds)
+		t.Errorf("builds = %+v, want no build of base: its internalapi runs", *environment.builds)
 	}
 }
 
 func TestStartStopsTheAppItStartedWhenItsProcessEnds(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("publicapi.master", processEndsAtEveryStart)
-	logFile := filepath.Join(environment.controller.Store.StackDir("master"), "logs", "publicapi.log")
-	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{"publicapi.master": {logPath: logFile, message: "pull access denied"}}
+	environment.supervisor.setBehavior("publicapi.base", processEndsAtEveryStart)
+	logFile := filepath.Join(environment.controller.Store.StackDir("base"), "logs", "publicapi.log")
+	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{"publicapi.base": {logPath: logFile, message: "pull access denied"}}
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
 
 	if _, hasEnded := errors.AsType[*daemon.ExitedError](err); !hasEnded || !strings.Contains(err.Error(), "see "+logFile) {
 		t.Fatalf("Start = %v, want the ended process and its log %s", err, logFile)
 	}
-	if environment.isStoredAsRunning(t, "master", "publicapi") || environment.isApplied("publicapi.master") {
-		t.Error("publicapi.master ended but stays marked running or in the supervisor")
+	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base") {
+		t.Error("publicapi.base ended but stays marked running or in the supervisor")
 	}
-	if !environment.isStoredAsRunning(t, "master", "internalapi") || !environment.isApplied("internalapi.master") {
-		t.Error("internalapi.master started well in the same run but was stopped")
+	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isApplied("internalapi.base") {
+		t.Error("internalapi.base started well in the same run but was stopped")
 	}
 	if _, err := os.Stat(logFile); err != nil {
-		t.Errorf("the log of publicapi.master is gone after the cleanup, but the error names it: %v", err)
+		t.Errorf("the log of publicapi.base is gone after the cleanup, but the error names it: %v", err)
 	}
 }
 
 func TestStartStopsANamedRunningAppWhoseRestartEnds(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "publicapi")
-	environment.supervisor.setBehavior("publicapi.master", processEndsWhileWaitedFor)
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
+	environment.supervisor.setBehavior("publicapi.base", processEndsWhileWaitedFor)
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "publicapi.master exited with code 1") {
-		t.Fatalf("Start = %v, want the failure of publicapi.master", err)
+	if err == nil || !strings.Contains(err.Error(), "publicapi.base exited with code 1") {
+		t.Fatalf("Start = %v, want the failure of publicapi.base", err)
 	}
-	if environment.isStoredAsRunning(t, "master", "publicapi") || environment.isApplied("publicapi.master") {
-		t.Error("the named publicapi.master was restarted by this run and ended, but stays marked running or in the supervisor")
+	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base") {
+		t.Error("the named publicapi.base was restarted by this run and ended, but stays marked running or in the supervisor")
 	}
 }
 
 func TestACancelDuringTheCleanupDoesNotCutIt(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("publicapi.master", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("publicapi.base", processEndsAtEveryStart)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	hasPublicapiEnded := false
 	environment.supervisor.onWaitReady = func(processName string) {
 		switch {
-		case processName == "publicapi.master":
+		case processName == "publicapi.base":
 			hasPublicapiEnded = true
-		case processName == "gateway.master" && hasPublicapiEnded:
+		case processName == "gateway.base" && hasPublicapiEnded:
 			cancel()
 		}
 	}
 
-	err := environment.controller.Start(ctx, environment.master, []string{"publicapi"}, StartOptions{})
+	err := environment.controller.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || strings.Contains(err.Error(), "after its failure") {
-		t.Fatalf("Start = %v, want only the failure of publicapi.master", err)
+		t.Fatalf("Start = %v, want only the failure of publicapi.base", err)
 	}
-	if environment.isStoredAsRunning(t, "master", "publicapi") || environment.isApplied("publicapi.master") {
-		t.Error("a cancel while the cleanup restarted the gateway left publicapi.master half stopped")
+	if environment.isStoredAsRunning(t, "base", "publicapi") || environment.isApplied("publicapi.base") {
+		t.Error("a cancel while the cleanup restarted the gateway left publicapi.base half stopped")
 	}
 }
 
 func TestAFailedCleanupSaysSoAndARetryStillRestartsTheApp(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("standalone.master", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("standalone.base", processEndsAtEveryStart)
 	environment.supervisor.onWaitReady = func(processName string) {
-		if processName == "standalone.master" {
+		if processName == "standalone.base" {
 			environment.supervisor.applyError = errors.New("the ilot daemon does not answer")
 		}
 	}
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"standalone"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
 
 	if err == nil {
-		t.Fatal("Start = nil, want the failure of standalone.master")
+		t.Fatal("Start = nil, want the failure of standalone.base")
 	}
-	failureIndex := strings.Index(err.Error(), "standalone.master exited with code 1")
-	cleanupIndex := strings.Index(err.Error(), "stop standalone.master after its failure: the ilot daemon does not answer")
+	failureIndex := strings.Index(err.Error(), "standalone.base exited with code 1")
+	cleanupIndex := strings.Index(err.Error(), "stop standalone.base after its failure: the ilot daemon does not answer")
 	if failureIndex < 0 || cleanupIndex < failureIndex {
-		t.Fatalf("Start = %v, want the failure of standalone.master first, then the failed stop", err)
+		t.Fatalf("Start = %v, want the failure of standalone.base first, then the failed stop", err)
 	}
-	if environment.isStoredAsRunning(t, "master", "standalone") || !environment.isApplied("standalone.master") {
-		t.Fatal("want the half-done cleanup: standalone.master stored as stopped, but still held by the supervisor")
+	if environment.isStoredAsRunning(t, "base", "standalone") || !environment.isApplied("standalone.base") {
+		t.Fatal("want the half-done cleanup: standalone.base stored as stopped, but still held by the supervisor")
 	}
 
 	environment.supervisor.applyError = nil
 	environment.supervisor.onWaitReady = nil
-	environment.supervisor.setBehavior("standalone.master", processEndedAfterItWasReady)
+	environment.supervisor.setBehavior("standalone.base", processEndedAfterItWasReady)
 	environment.supervisor.restarted = nil
 
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if !slices.Contains(environment.supervisor.restarted, "standalone.master") {
-		t.Errorf("restarted %v, want standalone.master: the supervisor still holds its ended process", environment.supervisor.restarted)
+	if !slices.Contains(environment.supervisor.restarted, "standalone.base") {
+		t.Errorf("restarted %v, want standalone.base: the supervisor still holds its ended process", environment.supervisor.restarted)
 	}
-	if !environment.isStoredAsRunning(t, "master", "standalone") {
-		t.Error("standalone.master is not marked running after the retry")
+	if !environment.isStoredAsRunning(t, "base", "standalone") {
+		t.Error("standalone.base is not marked running after the retry")
 	}
 }
 
 func TestARetryStartsTheFailedAppAgain(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("publicapi.master", processEndsAtEveryStart)
-	if err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{}); err == nil {
-		t.Fatal("Start = nil, want the failure of publicapi.master")
+	environment.supervisor.setBehavior("publicapi.base", processEndsAtEveryStart)
+	if err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{}); err == nil {
+		t.Fatal("Start = nil, want the failure of publicapi.base")
 	}
-	delete(environment.supervisor.behaviorByProcess, "publicapi.master")
+	delete(environment.supervisor.behaviorByProcess, "publicapi.base")
 	environment.supervisor.startedInOrder = nil
 	environment.supervisor.restarted = nil
 	environment.supervisor.waitedReady = nil
 
-	environment.start(t, environment.master, StartOptions{}, "publicapi")
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
 
-	if want := []string{"publicapi.master"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
+	if want := []string{"publicapi.base"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
 		t.Errorf("started %v, want only %v", environment.supervisor.startedInOrder, want)
 	}
-	if !slices.Contains(environment.supervisor.waitedReady, "publicapi.master") || !environment.isStoredAsRunning(t, "master", "publicapi") {
-		t.Error("publicapi.master is not started and ready after the retry")
+	if !slices.Contains(environment.supervisor.waitedReady, "publicapi.base") || !environment.isStoredAsRunning(t, "base", "publicapi") {
+		t.Error("publicapi.base is not started and ready after the retry")
 	}
-	if slices.Contains(environment.supervisor.restarted, "internalapi.master") {
-		t.Errorf("restarted %v, want internalapi.master left alone", environment.supervisor.restarted)
+	if slices.Contains(environment.supervisor.restarted, "internalapi.base") {
+		t.Errorf("restarted %v, want internalapi.base left alone", environment.supervisor.restarted)
 	}
 }
 
 func TestARetryStartsAFailedDependencyWithoutNamingIt(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("internalapi.master", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("internalapi.base", processEndsAtEveryStart)
 	if err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{}); err == nil {
-		t.Fatal("Start = nil, want the failure of internalapi.master")
+		t.Fatal("Start = nil, want the failure of internalapi.base")
 	}
-	if environment.isStoredAsRunning(t, "master", "internalapi") || environment.isApplied("internalapi.master") {
-		t.Fatal("internalapi.master ended but stays marked running or in the supervisor")
+	if environment.isStoredAsRunning(t, "base", "internalapi") || environment.isApplied("internalapi.base") {
+		t.Fatal("internalapi.base ended but stays marked running or in the supervisor")
 	}
-	delete(environment.supervisor.behaviorByProcess, "internalapi.master")
+	delete(environment.supervisor.behaviorByProcess, "internalapi.base")
 	environment.supervisor.startedInOrder = nil
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.master") || !environment.isApplied("publicapi.proj-1234") {
-		t.Errorf("started %v, want internalapi.master and publicapi.proj-1234", environment.supervisor.startedInOrder)
+	if !slices.Contains(environment.supervisor.startedInOrder, "internalapi.base") || !environment.isApplied("publicapi.proj-1234") {
+		t.Errorf("started %v, want internalapi.base and publicapi.proj-1234", environment.supervisor.startedInOrder)
 	}
 	if environment.isApplied("internalapi.proj-1234") {
 		t.Error("the retry moved internalapi into the ticket stack")
@@ -757,14 +757,14 @@ func TestAFailedTicketStackDependencyNamesTheCommandThatStartsItThereAgain(t *te
 	}
 }
 
-func TestAFailedNamedAppOrMasterDependencyNeedsNoCommandToStartItAgain(t *testing.T) {
+func TestAFailedNamedAppOrBaseDependencyNeedsNoCommandToStartItAgain(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
 		failedProcess string
 		appNames      []string
 	}{
 		{name: "named app in the ticket stack", failedProcess: "internalapi.proj-1234", appNames: []string{"internalapi", "publicapi"}},
-		{name: "dependency in master", failedProcess: "internalapi.master", appNames: []string{"publicapi"}},
+		{name: "dependency in base", failedProcess: "internalapi.base", appNames: []string{"publicapi"}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			environment := newTestEnvironment(t)
@@ -785,29 +785,29 @@ func TestAFailedNamedAppOrMasterDependencyNeedsNoCommandToStartItAgain(t *testin
 func TestStartNeverStopsADependencyItOnlyWaitsFor(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
-	environment.supervisor.setBehavior("internalapi.master", processEndsWhileWaitedFor)
+	environment.supervisor.setBehavior("internalapi.base", processEndsWhileWaitedFor)
 
 	err := environment.controller.Start(t.Context(), environment.featureStack, []string{"publicapi"}, StartOptions{})
 
-	if err == nil || !strings.Contains(err.Error(), "internalapi.master") {
-		t.Fatalf("Start = %v, want the failure of internalapi.master", err)
+	if err == nil || !strings.Contains(err.Error(), "internalapi.base") {
+		t.Fatalf("Start = %v, want the failure of internalapi.base", err)
 	}
-	if !environment.isStoredAsRunning(t, "master", "internalapi") || !environment.isApplied("internalapi.master") {
-		t.Error("internalapi.master ran before this start, which only waited for it, but it was stopped")
+	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isApplied("internalapi.base") {
+		t.Error("internalapi.base ran before this start, which only waited for it, but it was stopped")
 	}
 }
 
 func TestStartKeepsAnAppThatTimesOut(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.supervisor.setBehavior("publicapi.master", processStaysNotReady)
+	environment.supervisor.setBehavior("publicapi.base", processStaysNotReady)
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
 
 	if err == nil || !strings.HasSuffix(err.Error(), "it still starts: ilot keeps it") {
 		t.Fatalf("Start = %v, want it to say that the app still starts", err)
 	}
-	if !environment.isStoredAsRunning(t, "master", "publicapi") || !environment.isApplied("publicapi.master") {
-		t.Error("publicapi.master still starts but was stopped")
+	if !environment.isStoredAsRunning(t, "base", "publicapi") || !environment.isApplied("publicapi.base") {
+		t.Error("publicapi.base still starts but was stopped")
 	}
 }
 
@@ -822,23 +822,23 @@ func TestStartKeepsTheAppWhenTheContextIsCancelled(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			environment := newTestEnvironment(t)
 			if testCase.hasEndedProcess {
-				environment.supervisor.setBehavior("publicapi.master", processEndsAtEveryStart)
+				environment.supervisor.setBehavior("publicapi.base", processEndsAtEveryStart)
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			environment.supervisor.onWaitReady = func(processName string) {
-				if processName == "publicapi.master" {
+				if processName == "publicapi.base" {
 					cancel()
 				}
 			}
 
-			err := environment.controller.Start(ctx, environment.master, []string{"publicapi"}, StartOptions{})
+			err := environment.controller.Start(ctx, environment.base, []string{"publicapi"}, StartOptions{})
 
 			if err == nil {
 				t.Fatal("Start = nil, want the cancelled wait")
 			}
-			if !environment.isStoredAsRunning(t, "master", "publicapi") || !environment.isApplied("publicapi.master") {
-				t.Error("publicapi.master was stopped after a cancel")
+			if !environment.isStoredAsRunning(t, "base", "publicapi") || !environment.isApplied("publicapi.base") {
+				t.Error("publicapi.base was stopped after a cancel")
 			}
 		})
 	}
@@ -846,15 +846,15 @@ func TestStartKeepsTheAppWhenTheContextIsCancelled(t *testing.T) {
 
 func TestPortsStayTheSameAcrossStopAndStart(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	portBefore := environment.appPort(t, "master", "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	portBefore := environment.appPort(t, "base", "standalone")
 
-	if err := environment.controller.Stop(t.Context(), environment.master, []string{"standalone"}); err != nil {
+	if err := environment.controller.Stop(t.Context(), environment.base, []string{"standalone"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if portAfter := environment.appPort(t, "master", "standalone"); portAfter != portBefore {
+	if portAfter := environment.appPort(t, "base", "standalone"); portAfter != portBefore {
 		t.Errorf("port moved from %d to %d", portBefore, portAfter)
 	}
 }
@@ -862,13 +862,13 @@ func TestPortsStayTheSameAcrossStopAndStart(t *testing.T) {
 func TestAllocationSkipsPortsOfOtherStacksAndBusyPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != config.DefaultFirstPort }
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	masterPort := environment.appPort(t, "master", "standalone")
+	masterPort := environment.appPort(t, "base", "standalone")
 	worktreePort := environment.appPort(t, "proj-1234", "standalone")
 	if masterPort == config.DefaultFirstPort || masterPort == worktreePort {
-		t.Errorf("master got %d and the worktree got %d", masterPort, worktreePort)
+		t.Errorf("base got %d and the worktree got %d", masterPort, worktreePort)
 	}
 }
 
@@ -876,12 +876,12 @@ func TestStopRemovesTheProcessAndWarnsAboutDependentsInOtherStacks(t *testing.T)
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if err := environment.controller.Stop(t.Context(), environment.master, []string{"internalapi"}); err != nil {
+	if err := environment.controller.Stop(t.Context(), environment.base, []string{"internalapi"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
 
-	if _, isRunning := environment.supervisor.runningSpecs["internalapi.master"]; isRunning {
-		t.Error("internalapi.master still runs")
+	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base"]; isRunning {
+		t.Error("internalapi.base still runs")
 	}
 	if !strings.Contains(environment.output.String(), "publicapi.proj-1234") {
 		t.Errorf("output %q does not warn about publicapi.proj-1234", environment.output.String())
@@ -899,8 +899,8 @@ func TestTheProxyGetsARouteForEveryRoutedApp(t *testing.T) {
 	if want := "cd '/worktrees/proj-1234' && ilot start publicapi"; route.StartHint != want {
 		t.Errorf("start hint = %q, want %q", route.StartHint, want)
 	}
-	if _, isRouted := environment.supervisor.routeOf("gateway.master.platform.dev.example.net"); isRouted {
-		t.Error("gateway.master has a route, but the app declares none")
+	if _, isRouted := environment.supervisor.routeOf("gateway.base.platform.dev.example.net"); isRouted {
+		t.Error("gateway.base has a route, but the app declares none")
 	}
 }
 
@@ -933,7 +933,7 @@ func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 	if publicapiRow.Ports["http"] != environment.appPort(t, "proj-1234", "publicapi") {
 		t.Errorf("publicapi ports = %v, want the http port of its state", publicapiRow.Ports)
 	}
-	if temporalRow := rowFor(listing.Apps, "devbox", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.devbox.platform.dev.example.net:18080" {
+	if temporalRow := rowFor(listing.Apps, "base", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.base.platform.dev.example.net:18080" {
 		t.Errorf("temporal row = %+v", temporalRow)
 	}
 	wantExternalServices := []ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}, {Name: "legacyapi", Status: "up", Port: 10004}}
@@ -961,27 +961,27 @@ func rowFor(rows []AppRow, stackName, appName string) AppRow {
 	return AppRow{}
 }
 
-func TestSharedAppRunsOnceInTheDevboxStackWithItsFixedPorts(t *testing.T) {
+func TestAnAppWithTheScopeBaseRunsOnceInTheBaseStackWithItsFixedPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
 
 	environment.start(t, environment.featureStack, StartOptions{}, "doc")
-	environment.start(t, environment.master, StartOptions{}, "doc")
+	environment.start(t, environment.base, StartOptions{}, "doc")
 
-	if want := []string{"doc.devbox"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
+	if want := []string{"doc.base"}; !slices.Equal(environment.supervisor.startedInOrder, want) {
 		t.Errorf("started %v, want %v", environment.supervisor.startedInOrder, want)
 	}
-	if port := environment.appPort(t, "devbox", "doc"); port != 10007 {
+	if port := environment.appPort(t, "base", "doc"); port != 10007 {
 		t.Errorf("doc port = %d, want its fixed 10007", port)
 	}
 }
 
-func TestMasterGatewayUsesItsFixedPortAndWorktreeGatewaysDoNot(t *testing.T) {
+func TestBaseGatewayUsesItsFixedPortAndWorktreeGatewaysDoNot(t *testing.T) {
 	environment := newTestEnvironment(t)
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if port := environment.appPort(t, "master", "gateway"); port != 9090 {
-		t.Errorf("master gateway port = %d, want 9090", port)
+	if port := environment.appPort(t, "base", "gateway"); port != 9090 {
+		t.Errorf("base gateway port = %d, want 9090", port)
 	}
 	if port := environment.appPort(t, "proj-1234", "gateway"); port < config.DefaultFirstPort || port > config.DefaultLastPort {
 		t.Errorf("worktree gateway port = %d, want one from the reserved range", port)
@@ -992,7 +992,7 @@ func TestStartRefusesAFixedPortHeldByAnotherProcess(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.controller.IsPortFreeOnHost = func(port int) bool { return port != 9090 }
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"gateway"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"gateway"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "9090") {
 		t.Fatalf("err = %v, want an error naming port 9090", err)
@@ -1007,7 +1007,7 @@ func TestAppDirIsItsWorkingDirectory(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "restapi", "standalone")
 
-	if got := environment.supervisor.runningSpecs["restapi.devbox"].Dir; got != "/legacy/restapi" {
+	if got := environment.supervisor.runningSpecs["restapi.base"].Dir; got != "/legacy/restapi" {
 		t.Errorf("restapi WorkingDir = %q", got)
 	}
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Dir; got != "/worktrees/proj-1234" {
@@ -1020,13 +1020,13 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	environment.controller.ShellEnv = fixedShellEnv(map[string]string{"PATH": "/usr/bin", "HOME": "/home/jdoe"})
 	environment.controller.IlotEnv = map[string]string{"XDG_STATE_HOME": "/scratch/state"}
 
-	environment.start(t, environment.master, StartOptions{}, "restapi")
+	environment.start(t, environment.base, StartOptions{}, "restapi")
 
-	watcher, isRunning := environment.supervisor.runningSpecs["restapi-watch.devbox"]
+	watcher, isRunning := environment.supervisor.runningSpecs["restapi-watch.base"]
 	if !isRunning {
 		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
-	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- 'cd '"'"'/src/platform'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'devbox'"'"' '"'"'restapi'"'"''`} {
+	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- 'cd '"'"'/src/platform'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'base'"'"' '"'"'restapi'"'"''`} {
 		if !strings.Contains(watcher.Command, wantPart) {
 			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
 		}
@@ -1038,10 +1038,10 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 		t.Errorf("watcher environment = %v, want %v: the shell, and what makes ilot find the same state", watcher.Env, want)
 	}
 
-	if err := environment.controller.Stop(t.Context(), environment.master, []string{"restapi"}); err != nil {
+	if err := environment.controller.Stop(t.Context(), environment.base, []string{"restapi"}); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if _, isRunning := environment.supervisor.runningSpecs["restapi-watch.devbox"]; isRunning {
+	if _, isRunning := environment.supervisor.runningSpecs["restapi-watch.base"]; isRunning {
 		t.Error("the watcher outlives its app")
 	}
 }
@@ -1121,11 +1121,11 @@ func TestRestartAppsStartsOneTimeAProcessThatTheDaemonLost(t *testing.T) {
 	}
 }
 
-func TestASharedAppHasItsRouteInTheDevboxStack(t *testing.T) {
+func TestAnAppWithTheScopeBaseHasItsRouteInTheBaseStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "temporal")
+	environment.start(t, environment.base, StartOptions{}, "temporal")
 
-	if route, isRouted := environment.supervisor.routeOf("temporal.devbox.platform.dev.example.net"); !isRouted || route.Port != 10012 {
+	if route, isRouted := environment.supervisor.routeOf("temporal.base.platform.dev.example.net"); !isRouted || route.Port != 10012 {
 		t.Errorf("route of temporal = %+v, routed %t; want the temporal UI on port 10012", route, isRouted)
 	}
 }
@@ -1135,26 +1135,26 @@ func TestBootStartsAutostartAppsAndTheAppsThatWereRunning(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.controller.Boot(t.Context(), environment.master); err != nil {
+	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	want := []string{"gateway.master", "internalapi.master", "restapi-watch.devbox", "restapi.devbox", "standalone.proj-1234", "temporal.devbox"}
+	want := []string{"gateway.base", "internalapi.base", "restapi-watch.base", "restapi.base", "standalone.proj-1234", "temporal.base"}
 	if !slices.Equal(running, want) {
 		t.Errorf("running after boot %v, want %v", running, want)
 	}
-	if temporalIndex, apiIndex := slices.Index(environment.supervisor.startedInOrder, "temporal.devbox"), slices.Index(environment.supervisor.startedInOrder, "internalapi.master"); temporalIndex > apiIndex {
+	if temporalIndex, apiIndex := slices.Index(environment.supervisor.startedInOrder, "temporal.base"), slices.Index(environment.supervisor.startedInOrder, "internalapi.base"); temporalIndex > apiIndex {
 		t.Errorf("started %v: want temporal before internalapi", environment.supervisor.startedInOrder)
 	}
 }
 
 func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 	environment.supervisor.startedInOrder = nil
 
-	if err := environment.controller.Boot(t.Context(), environment.master); err != nil {
+	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
@@ -1165,7 +1165,7 @@ func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
 
 func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 	environment := newTestEnvironment(t)
-	masterBinDir := filepath.Join(environment.controller.Store.StackDir("master"), "bin")
+	masterBinDir := filepath.Join(environment.controller.Store.StackDir("base"), "bin")
 	if err := os.MkdirAll(masterBinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1173,46 +1173,46 @@ func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := environment.controller.Boot(t.Context(), environment.master); err != nil {
+	if err := environment.controller.Boot(t.Context(), environment.base); err != nil {
 		t.Fatalf("Boot: %v", err)
 	}
 
 	if len(*environment.builds) != 0 {
-		t.Errorf("Boot rebuilt %v although master has its binary", *environment.builds)
+		t.Errorf("Boot rebuilt %v although base has its binary", *environment.builds)
 	}
 }
 
 func TestBootStopsAFailedAppAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "publicapi")
+	environment.start(t, environment.base, StartOptions{}, "publicapi")
 	environment.supervisor.simulateDaemonRestart()
-	environment.supervisor.setBehavior("internalapi.master", processEndsAtEveryStart)
+	environment.supervisor.setBehavior("internalapi.base", processEndsAtEveryStart)
 
-	err := environment.controller.Boot(t.Context(), environment.master)
+	err := environment.controller.Boot(t.Context(), environment.base)
 
-	if err == nil || !strings.Contains(err.Error(), "internalapi.master") {
-		t.Fatalf("Boot = %v, want an error naming internalapi.master", err)
+	if err == nil || !strings.Contains(err.Error(), "internalapi.base") {
+		t.Fatalf("Boot = %v, want an error naming internalapi.base", err)
 	}
-	if !strings.Contains(err.Error(), "publicapi.master") {
-		t.Errorf("Boot = %v, want it to name publicapi.master as skipped", err)
+	if !strings.Contains(err.Error(), "publicapi.base") {
+		t.Errorf("Boot = %v, want it to name publicapi.base as skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	for _, wantStarted := range []string{"temporal.devbox", "restapi.devbox", "gateway.master"} {
+	for _, wantStarted := range []string{"temporal.base", "restapi.base", "gateway.base"} {
 		if !slices.Contains(started, wantStarted) {
 			t.Errorf("started %v, want %s despite the failure", started, wantStarted)
 		}
 	}
-	if slices.Contains(started, "publicapi.master") {
-		t.Errorf("started %v, want publicapi.master skipped because internalapi.master failed", started)
+	if slices.Contains(started, "publicapi.base") {
+		t.Errorf("started %v, want publicapi.base skipped because internalapi.base failed", started)
 	}
-	if environment.isStoredAsRunning(t, "master", "internalapi") || environment.isApplied("internalapi.master") {
-		t.Error("internalapi.master failed at boot but stays marked running or in the supervisor")
+	if environment.isStoredAsRunning(t, "base", "internalapi") || environment.isApplied("internalapi.base") {
+		t.Error("internalapi.base failed at boot but stays marked running or in the supervisor")
 	}
-	if environment.isStoredAsRunning(t, "master", "publicapi") {
-		t.Error("publicapi.master was skipped at boot but is marked running")
+	if environment.isStoredAsRunning(t, "base", "publicapi") {
+		t.Error("publicapi.base was skipped at boot but is marked running")
 	}
-	if !environment.isStoredAsRunning(t, "devbox", "temporal") || !environment.isApplied("temporal.devbox") {
-		t.Error("temporal.devbox started well at boot but is not kept running")
+	if !environment.isStoredAsRunning(t, "base", "temporal") || !environment.isApplied("temporal.base") {
+		t.Error("temporal.base started well at boot but is not kept running")
 	}
 }
 
@@ -1222,7 +1222,7 @@ func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.proj-1234", processEndsAtEveryStart)
 
-	err := environment.controller.Boot(t.Context(), environment.master)
+	err := environment.controller.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "publicapi.proj-1234 skipped: it depends on internalapi.proj-1234") {
 		t.Fatalf("Boot = %v, want publicapi.proj-1234 skipped because internalapi.proj-1234 failed", err)
@@ -1238,7 +1238,7 @@ func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 	environment.supervisor.simulateDaemonRestart()
 	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}).ensure
 
-	err := environment.controller.Boot(t.Context(), environment.master)
+	err := environment.controller.Boot(t.Context(), environment.base)
 
 	if err == nil || !strings.Contains(err.Error(), "search.proj-1234 skipped: it depends on search-cache.proj-1234") {
 		t.Fatalf("Boot = %v, want search.proj-1234 skipped because the image of search-cache.proj-1234 failed", err)
@@ -1297,12 +1297,12 @@ func TestLogFileOfAnAppIsInTheStackThatRunsIt(t *testing.T) {
 	if want := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
 		t.Errorf("publicapi log = %q, want %q", worktreeLog, want)
 	}
-	sharedLog, err := environment.controller.LogFile(environment.featureStack, "temporal")
+	baseLog, err := environment.controller.LogFile(environment.featureStack, "temporal")
 	if err != nil {
 		t.Fatalf("LogFile(temporal): %v", err)
 	}
-	if want := filepath.Join(environment.controller.Store.StackDir("devbox"), "logs", "temporal.log"); sharedLog != want {
-		t.Errorf("temporal log = %q, want %q", sharedLog, want)
+	if want := filepath.Join(environment.controller.Store.StackDir("base"), "logs", "temporal.log"); baseLog != want {
+		t.Errorf("temporal log = %q, want %q", baseLog, want)
 	}
 	if _, err := environment.controller.LogFile(environment.featureStack, "nope"); err == nil {
 		t.Error("want an error for an unknown app")
@@ -1382,7 +1382,7 @@ func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	want := "run proj-1234 jdoe /src/portal http://temporal.devbox.platform.dev.example.net:18080 http://internalapi.master.platform.dev.example.net:18080"
+	want := "run proj-1234 jdoe /src/portal http://temporal.base.platform.dev.example.net:18080 http://internalapi.base.platform.dev.example.net:18080"
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
@@ -1498,9 +1498,9 @@ func TestAProcessReachesAContainerOnLocalhost(t *testing.T) {
 func TestTwoStacksPublishTheSameContainerOnTwoPorts(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
-	environment.start(t, environment.master, StartOptions{}, "search")
+	environment.start(t, environment.base, StartOptions{}, "search")
 
-	ticketPort, masterPort := environment.appPort(t, "proj-1234", "search"), environment.appPort(t, "master", "search")
+	ticketPort, masterPort := environment.appPort(t, "proj-1234", "search"), environment.appPort(t, "base", "search")
 	if ticketPort == masterPort {
 		t.Errorf("both stacks publish search on port %d: the second container could not start", ticketPort)
 	}
@@ -1521,15 +1521,15 @@ func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 	}
 }
 
-func TestDependencyWithoutPerStackComesFromMaster(t *testing.T) {
+func TestADependencyWithoutAScopeComesFromBase(t *testing.T) {
 	environment := newTestEnvironment(t)
 	search := environment.controller.Config.Apps["search"]
-	search.PerStack = false
+	search.Scope = ""
 	environment.controller.Config.Apps["search"] = search
 
 	environment.start(t, environment.featureStack, StartOptions{}, "front-like")
 
-	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "master", "search")) + " --gw=localhost"
+	want := "front --api=http://localhost:" + strconv.Itoa(environment.appPort(t, "base", "search")) + " --gw=localhost"
 	if environment.supervisor.runningSpecs["front-like.proj-1234"].Command != want {
 		t.Errorf("Command = %q, want %q", environment.supervisor.runningSpecs["front-like.proj-1234"].Command, want)
 	}
@@ -1645,8 +1645,8 @@ func TestRepoEnvWinsOverTheInheritedShellValue(t *testing.T) {
 	t.Setenv("LOGKIT_LOGJSON", "from-shell")
 	environment := newTestEnvironment(t)
 	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"LOGKIT_LOGJSON": "1"}}
-	environment.start(t, environment.master, StartOptions{}, "standalone")
-	if got := environment.supervisor.runningSpecs["standalone.master"].Env["LOGKIT_LOGJSON"]; got != "1" {
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	if got := environment.supervisor.runningSpecs["standalone.base"].Env["LOGKIT_LOGJSON"]; got != "1" {
 		t.Errorf("LOGKIT_LOGJSON = %q, want the repo value", got)
 	}
 }
@@ -1712,20 +1712,20 @@ func TestStartChecksNoImageForARunningContainer(t *testing.T) {
 
 func TestBootSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "front-like")
+	environment.start(t, environment.base, StartOptions{}, "front-like")
 	environment.supervisor.simulateDaemonRestart()
 	environment.controller.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search:latest": "unauthorized"}}).ensure
 
-	err := environment.controller.Boot(t.Context(), environment.master)
+	err := environment.controller.Boot(t.Context(), environment.base)
 
-	if err == nil || !strings.Contains(err.Error(), "search.master: pull registry/search:latest") || !strings.Contains(err.Error(), "front-like.master skipped") {
-		t.Fatalf("Boot = %v, want the failed image named with its app and stack, and front-like.master skipped", err)
+	if err == nil || !strings.Contains(err.Error(), "search.base: pull registry/search:latest") || !strings.Contains(err.Error(), "front-like.base skipped") {
+		t.Fatalf("Boot = %v, want the failed image named with its app and stack, and front-like.base skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	if !slices.Contains(started, "temporal.devbox") || !slices.Contains(started, "gateway.master") {
+	if !slices.Contains(started, "temporal.base") || !slices.Contains(started, "gateway.base") {
 		t.Errorf("started %v, want the other apps started", started)
 	}
-	if slices.Contains(started, "search.master") || slices.Contains(started, "front-like.master") {
+	if slices.Contains(started, "search.base") || slices.Contains(started, "front-like.base") {
 		t.Errorf("started %v, want search and front-like skipped", started)
 	}
 }

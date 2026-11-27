@@ -132,7 +132,7 @@ func (controller *Controller) startAgainInItsStackHint(stacks stackSet, failedIn
 	return fmt.Errorf("%s ran in %s: name it to start it there again: ilot start %s", failedInstance.appName, failedInstance.stackName, strings.Join(appNamesToRequest, " "))
 }
 
-func (controller *Controller) Boot(ctx context.Context, masterStackName string) (err error) {
+func (controller *Controller) Boot(ctx context.Context, baseStackName string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func (controller *Controller) Boot(ctx context.Context, masterStackName string) 
 		fmt.Fprintln(controller.Output, "ilot already runs, nothing to boot")
 		return nil
 	}
-	return controller.bootApps(ctx, masterStackName)
+	return controller.bootApps(ctx, baseStackName)
 }
 
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
@@ -187,7 +187,7 @@ func (controller *Controller) RestartApps(ctx context.Context, stackName string,
 }
 
 // The only command that replaces the daemon, for example after an upgrade of ilot.
-func (controller *Controller) Restart(ctx context.Context, masterStackName string) (err error) {
+func (controller *Controller) Restart(ctx context.Context, baseStackName string) (err error) {
 	release, err := controller.Store.Lock()
 	if err != nil {
 		return err
@@ -200,18 +200,18 @@ func (controller *Controller) Restart(ctx context.Context, masterStackName strin
 	if err := controller.Supervisor.Shutdown(ctx); err != nil {
 		return err
 	}
-	return controller.bootApps(ctx, masterStackName)
+	return controller.bootApps(ctx, baseStackName)
 }
 
-func (controller *Controller) bootApps(ctx context.Context, masterStackName string) error {
-	stacks, err := controller.loadStacks(masterStackName)
+func (controller *Controller) bootApps(ctx context.Context, baseStackName string) error {
+	stacks, err := controller.loadStacks(baseStackName)
 	if err != nil {
 		return err
 	}
 	var bootInstances []instance
 	for _, appName := range slices.Sorted(maps.Keys(controller.Config.Apps)) {
 		if controller.Config.Apps[appName].Autostart {
-			bootInstances = append(bootInstances, instance{stackName: controller.stackOf(workspace.MasterStackName, appName), appName: appName})
+			bootInstances = append(bootInstances, instance{stackName: controller.stackOf(workspace.BaseStackName, appName), appName: appName})
 		}
 	}
 	for _, instanceRunningBeforeBoot := range stacks.runningInstances() {
@@ -316,8 +316,8 @@ func (controller *Controller) repoPathKey(repoName string) string {
 }
 
 func (controller *Controller) stackOf(requestedStackName, appName string) string {
-	if controller.Config.Apps[appName].Shared {
-		return workspace.SharedStackName
+	if controller.Config.Apps[appName].Scope == config.ScopeBase {
+		return workspace.BaseStackName
 	}
 	return requestedStackName
 }

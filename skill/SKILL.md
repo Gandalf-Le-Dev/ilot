@@ -15,7 +15,7 @@ allowed-tools: Bash(ilot:*)
 Every `ilot` command is pre-approved for you. These limits still apply:
 
 - Before you run `ilot rm` or `ilot clean` on a stack that you did not start, ask the user. Both delete the stack's state, logs and containers.
-- Before you stop a shared app (for example Temporal, auth-mock, restapi) or a `master` app that you did not start, ask the user. Other stacks and the user's other sessions use them.
+- Before you stop an app of the `base` stack that you did not start, ask the user. Other stacks and the user's other sessions use them.
 - Before you run `ilot restart` with no app name, ask the user. It stops every app of every stack and the ilot daemon, the user's other sessions included, then starts again the apps that ran.
 - Never run `ilot daemon run`. `ilot` starts its daemon by itself.
 
@@ -24,12 +24,11 @@ Every `ilot` command is pre-approved for you. These limits still apply:
 A stack is the set of apps that run for one ticket.
 
 - `ilot` names the stack after the ticket key in the branch name: `PROJ-`, `OPS-` or `TASK-` and digits, in lowercase. The branch `dev/jdoe/task-2006-example` belongs to the stack `task-2006`. Without a ticket key in the branch, `ilot` looks in the folder name, then uses the folder name.
-- The main checkout of a repo is the `master` stack.
-- Shared apps (for example Temporal, auth-mock, restapi) run once, in the `devbox` stack.
-- The legacy apps do not start at boot. Start restapi with `ilot start restapi`, and the legacy web stack (apache and legacyweb) with `ilot start legacy-stack`.
+- The main checkout of every repo is the `base` stack, on any branch.
+- An app with `scope: base` in its `ilot.yaml` runs one time, in the `base` stack, for every stack.
 - A workspace is a root repo and its member repos. The `ilot.yaml` of the root lists the members under `repos`, and the `ilot.yaml` of a member names the root with `member_of`. `ilot` finds the workspace from the repo of the current folder.
 - A stack takes each repo's worktree for its ticket. If a repo has no worktree for the ticket, the stack takes that repo's main checkout.
-- If a worktree does not start an app, the app comes from the `master` stack, and `ilot` starts it there if necessary. Apps marked `per_stack` (for example portal's api, worker and catalog) always run in the stack itself.
+- If a worktree does not start an app, the app comes from the `base` stack, and `ilot` starts it there if necessary. An app with `scope: stack` is the exception: an app that depends on it always gets the copy of its own stack.
 
 Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps` and `ilot env` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
 
@@ -40,19 +39,19 @@ ilot ls                         # every app of every stack: status, ports, proxy
 ilot ls --json                  # the same as one JSON object, with the checkout of each repo per stack: use it to read the list from a script
 ilot apps                       # every app and external service that the ilot.yaml files declare for this folder's stack, with the dependencies of each app
 ilot apps --json                # the same as one JSON object
-ilot start portal-front         # build, then start the app after its dependencies, in this folder's stack
-ilot start publicapi --no-deps  # start only this app
-ilot stop publicapi             # stop the app in this folder's stack
-ilot logs publicapi             # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line
-ilot logs --json publicapi      # the app's own lines, as they are: use this to read logs
-ilot logs -f -n 20 publicapi    # the last 20 lines, then the new ones: it never ends, so run it in the background, never in a foreground command
-ilot env portal-api             # the environment of the app, with where each value comes from
+ilot start front                # build, then start the app after its dependencies, in this folder's stack
+ilot start api --no-deps        # start only this app
+ilot stop api                   # stop the app in this folder's stack
+ilot logs api                   # the last 100 lines of the app's log in this stack; a JSON line becomes one readable line
+ilot logs --json api            # the app's own lines, as they are: use this to read logs
+ilot logs -f -n 20 api          # the last 20 lines, then the new ones: it never ends, so run it in the background, never in a foreground command
+ilot env api                    # the environment of the app, with where each value comes from
 ilot check                      # check the ilot.yaml of this folder's repo, with the other repos' ilot.yaml
 ilot check path/to/ilot.yaml     # check that file
 ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
 ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
-ilot restart publicapi          # build the app again, then restart it, in this folder's stack; it must run already
+ilot restart api                # build the app again, then restart it, in this folder's stack; it must run already
 ilot restart                    # with no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
 ilot daemon run                 # the daemon itself: ilot starts it, never run it
 ilot --version                  # the version of ilot
@@ -60,7 +59,7 @@ ilot skill print                # print this skill
 ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL.md
 ```
 
-`ilot start` rebuilds an app that already runs, then restarts it. An app with `watch` in its `ilot.yaml` (the Go APIs: internalapi, publicapi, billingapi) is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot start <app>` again.
+`ilot start` rebuilds an app that already runs, then restarts it. An app with `watch` in its `ilot.yaml` is rebuilt and restarted when its files change: you do not need `ilot start` after an edit. If its build fails, the old version keeps running, and the error is in `ilot logs <app>-watch`. For other apps, after a code change, run `ilot start <app>` again.
 
 ## Where things are
 
@@ -86,7 +85,7 @@ When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too.
 
 `ilot start` checks the container images before any build. It pulls a missing image (`pulling <image>`), once for all apps that share it. A failed pull stops `ilot start` before the builds. The error is `pull <image>: <error>`, and it can end with the hint `log in to the registry, then run the command again: docker login <registry>`. The login needs the user. Tell the user, wait, then run the same `ilot start` again.
 
-When an app that this run started ends, `ilot start` stops it and marks it stopped. Its log stays. Run the same `ilot start` again. It starts that app again. It also starts again a dependency of the named apps in `master` or in the `devbox` stack, without its name. A dependency that ran in the ticket stack because an earlier `ilot start` named it is different: after `ilot` stops it, a plain retry starts it in `master`. The error then ends with `<app> ran in <stack>: name it to start it there again: ilot start <app> <apps>`. Run that command. A dependency that already ran, and that `ilot start` only waited for, is never stopped.
+When an app that this run started ends, `ilot start` stops it and marks it stopped. Its log stays. Run the same `ilot start` again. It starts that app again. It also starts again a dependency of the named apps in the `base` stack, without its name. A dependency that ran in the ticket stack because an earlier `ilot start` named it is different: after `ilot` stops it, a plain retry starts it in `base`. The error then ends with `<app> ran in <stack>: name it to start it there again: ilot start <app> <apps>`. Run that command. A dependency that already ran, and that `ilot start` only waited for, is never stopped.
 
 When the timeout passes while the app still runs, the error ends with `it still starts: ilot keeps it`. The app stays. Do not run `ilot start` again for it: that restarts a named app from zero. Follow its log with `ilot logs -f <app>` until it is ready, and check with `ilot ls` that it still runs. Next time, use a longer `--timeout`. Ctrl-C keeps the app too.
 

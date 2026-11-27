@@ -11,7 +11,7 @@ import (
 )
 
 func (controller *Controller) Remove(ctx context.Context, stackName string) (err error) {
-	if stackName == workspace.MasterStackName || stackName == workspace.SharedStackName {
+	if stackName == workspace.BaseStackName {
 		return fmt.Errorf("cannot remove stack %s: ilot needs it, stop its apps with ilot stop", stackName)
 	}
 	release, err := controller.Store.Lock()
@@ -48,7 +48,7 @@ func (controller *Controller) StacksWithoutCheckouts() ([]string, error) {
 	}
 	var stacksWithoutCheckouts []string
 	for _, stackState := range allStacks {
-		if stackState.Name == workspace.MasterStackName || stackState.Name == workspace.SharedStackName {
+		if stackState.Name == workspace.BaseStackName {
 			continue
 		}
 		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)

@@ -58,24 +58,31 @@ type ExternalService struct {
 }
 
 type App struct {
-	Build      string            `yaml:"build"`
-	Run        string            `yaml:"run"`
-	Stop       string            `yaml:"stop"`
-	Env        map[string]string `yaml:"env"`
-	Ports      []string          `yaml:"ports"`
-	Route      string            `yaml:"route"`
-	Ready      ReadyCheck        `yaml:"ready"`
-	DependsOn  []string          `yaml:"depends_on"`
-	Shared     bool              `yaml:"shared"`
-	Autostart  bool              `yaml:"autostart"`
-	FixedPorts map[string]int    `yaml:"fixed_ports"`
-	Dir        string            `yaml:"dir"`
-	Watch      Watch             `yaml:"watch"`
-	HomePath   string            `yaml:"home_path"`
-	Repo       string            `yaml:"-"`
-	Container  Container         `yaml:"container"`
-	PerStack   bool              `yaml:"per_stack"`
+	Build     string            `yaml:"build"`
+	Run       string            `yaml:"run"`
+	Stop      string            `yaml:"stop"`
+	Env       map[string]string `yaml:"env"`
+	Ports     []string          `yaml:"ports"`
+	Route     string            `yaml:"route"`
+	Ready     ReadyCheck        `yaml:"ready"`
+	DependsOn []string          `yaml:"depends_on"`
+	// Which stack serves the app to the apps that depend on it: ScopeBase, ScopeStack, or empty.
+	Scope      string         `yaml:"scope"`
+	Autostart  bool           `yaml:"autostart"`
+	FixedPorts map[string]int `yaml:"fixed_ports"`
+	Dir        string         `yaml:"dir"`
+	Watch      Watch          `yaml:"watch"`
+	HomePath   string         `yaml:"home_path"`
+	Repo       string         `yaml:"-"`
+	Container  Container      `yaml:"container"`
 }
+
+const (
+	// One copy, in the base stack, for every stack.
+	ScopeBase = "base"
+	// An app that depends on this app always gets the copy of its own stack.
+	ScopeStack = "stack"
+)
 
 type Container struct {
 	Image string `yaml:"image"`
@@ -132,6 +139,8 @@ var unknownKeyPattern = regexp.MustCompile(`field (\S+) not found in type \w+\.(
 // What replaced a key that an older ilot.yaml can still hold, by the type that held it.
 var replacementOfRemovedKey = map[string]map[string]string{
 	"App": {
+		"shared":             "write scope: base, for one copy in the base stack for every stack",
+		"per_stack":          "write scope: stack, for an app that the apps of a stack always get from their own stack",
 		"gateway":            "it is gone: the port and url templates give the address of an app",
 		"gateway_aliases":    "it is gone: the port and url templates give the address of an app",
 		"temporal_namespace": "it is gone, with no replacement",
@@ -266,14 +275,6 @@ func (config Config) validateFixedPorts(allocatedPorts PortRange) error {
 				problems = append(problems, fmt.Errorf("app %q: fixed port %q is not one of its ports %v", name, portName, app.PortNames()))
 			}
 		}
-		if !app.Shared {
-			continue
-		}
-		for _, portName := range app.PortNames() {
-			if _, isFixed := app.FixedPorts[portName]; !isFixed {
-				problems = append(problems, fmt.Errorf("shared app %q needs a fixed number for port %q", name, portName))
-			}
-		}
 	}
 	return errors.Join(problems...)
 }
@@ -295,6 +296,9 @@ func (config Config) validateApps() error {
 	var problems []error
 	for _, name := range slices.Sorted(maps.Keys(config.Apps)) {
 		app := config.Apps[name]
+		if app.Scope != "" && app.Scope != ScopeBase && app.Scope != ScopeStack {
+			problems = append(problems, fmt.Errorf("app %q: scope %q is not %s or %s", name, app.Scope, ScopeBase, ScopeStack))
+		}
 		if app.Run == "" && app.Container.IsZero() {
 			problems = append(problems, fmt.Errorf("app %q: missing run command", name))
 		}

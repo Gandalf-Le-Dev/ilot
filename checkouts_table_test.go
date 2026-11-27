@@ -9,12 +9,11 @@ import (
 
 func TestCheckoutsTableShowsOnlyTheWorktreesOfTicketStacks(t *testing.T) {
 	mainCheckouts := map[string]workspace.Worktree{
-		"portal":   {Repo: "portal", Dir: "/home/user/acme-portal", Branch: "master", IsMain: true},
-		"platform": {Repo: "platform", Dir: "/home/user/go/src/platform", Branch: "master", IsMain: true},
+		"portal":   {Repo: "portal", Dir: "/home/user/acme-portal", Branch: "main", IsMain: true},
+		"platform": {Repo: "platform", Dir: "/home/user/go/src/platform", Branch: "main", IsMain: true},
 	}
 	checkoutsByStack := map[string]map[string]workspace.Worktree{
-		"master": mainCheckouts,
-		"devbox": mainCheckouts,
+		"base": mainCheckouts,
 		"proj-0001": {
 			"portal":   {Repo: "portal", Dir: "/home/user/worktrees-portal-0001", Branch: "PROJ-0001-x", IsMain: false},
 			"platform": mainCheckouts["platform"],
@@ -35,10 +34,10 @@ func TestCheckoutsTableShowsOnlyTheWorktreesOfTicketStacks(t *testing.T) {
 }
 
 func TestCheckoutsTableIsEmptyWithoutWorktrees(t *testing.T) {
-	mainCheckout := map[string]workspace.Worktree{"platform": {Repo: "platform", Dir: "/src/platform", Branch: "master", IsMain: true}}
+	mainCheckout := map[string]workspace.Worktree{"platform": {Repo: "platform", Dir: "/src/platform", Branch: "base", IsMain: true}}
 	var output bytes.Buffer
 
-	if err := printWorktreeCheckouts(&output, map[string]map[string]workspace.Worktree{"master": mainCheckout}, "/home/user"); err != nil {
+	if err := printWorktreeCheckouts(&output, map[string]map[string]workspace.Worktree{"base": mainCheckout}, "/home/user"); err != nil {
 		t.Fatal(err)
 	}
 

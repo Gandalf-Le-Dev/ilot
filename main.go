@@ -125,11 +125,11 @@ func (command *restartCommand) Run(ctx context.Context) error {
 	case len(command.Apps) == 0 && command.Stack != "":
 		return errors.New("--stack needs the apps to restart")
 	case len(command.Apps) == 0:
-		controller, masterStackName, err := newControllerForCurrentWorktree(command.Timeout, true)
+		controller, baseStackName, err := newControllerForCurrentWorktree(command.Timeout, true)
 		if err != nil {
 			return err
 		}
-		return controller.Restart(ctx, masterStackName)
+		return controller.Restart(ctx, baseStackName)
 	case command.Stack != "":
 		currentWorkspace, _, err := findCurrentWorkspace()
 		if err != nil {
@@ -182,11 +182,11 @@ func (command *bootCommand) Run(ctx context.Context) error {
 	if !mainCheckout.IsMain {
 		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
 	}
-	controller, err := newController(currentWorkspace, workspace.MasterStackName, command.Timeout)
+	controller, err := newController(currentWorkspace, workspace.BaseStackName, command.Timeout)
 	if err != nil {
 		return err
 	}
-	return controller.Boot(ctx, workspace.MasterStackName)
+	return controller.Boot(ctx, workspace.BaseStackName)
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
@@ -303,7 +303,7 @@ func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bo
 	if err != nil {
 		return nil, "", err
 	}
-	stackName := workspace.MasterStackName
+	stackName := workspace.BaseStackName
 	if !isCrossStack {
 		if stackName, err = workspace.StackName(worktree); err != nil {
 			return nil, "", err

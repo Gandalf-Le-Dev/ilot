@@ -155,11 +155,11 @@ func TestAMemberWithNoFileDeclaresNoApp(t *testing.T) {
 	schemasDir := newRepoAt(t, filepath.Join(codeDir, "schemas"), map[string]string{"README.md": "no apps here\n"})
 	workspace, _ := find(t, shopDir)
 
-	config, err := workspace.ConfigForStack("master")
+	config, err := workspace.ConfigForStack("base")
 	if err != nil || len(config.Apps) != 1 {
 		t.Errorf("ConfigForStack = %+v, %v; want the app of shop only", config.Apps, err)
 	}
-	checkoutByRepo, err := workspace.CheckoutsForStack("master")
+	checkoutByRepo, err := workspace.CheckoutsForStack("base")
 	if err != nil || len(checkoutByRepo) != 2 || checkoutByRepo["schemas"].Dir != schemasDir {
 		t.Errorf("CheckoutsForStack = %+v, %v; want shop and schemas", checkoutByRepo, err)
 	}
@@ -269,9 +269,9 @@ func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testin
 	if err != nil || ticketConfig.Apps["api"].Run != "api --retry" || ticketConfig.Apps["jobs"].Repo != "shop" || ticketConfig.Apps["front"].Repo != "web" {
 		t.Errorf("config of proj-1 = %+v, %v; want the apps of the shop worktree, and front from the main checkout of web", ticketConfig.Apps, err)
 	}
-	masterConfig, err := workspace.ConfigForStack("master")
-	if err != nil || masterConfig.Apps["api"].Run != "api" || len(masterConfig.Apps) != 2 {
-		t.Errorf("config of master = %+v, %v; want the apps of the main checkouts", masterConfig.Apps, err)
+	baseConfig, err := workspace.ConfigForStack("base")
+	if err != nil || baseConfig.Apps["api"].Run != "api" || len(baseConfig.Apps) != 2 {
+		t.Errorf("config of base = %+v, %v; want the apps of the main checkouts", baseConfig.Apps, err)
 	}
 }
 
@@ -294,17 +294,14 @@ func TestCheckoutsForStackPicksTheStackWorktreeElseTheMainCheckout(t *testing.T)
 	}
 }
 
-func TestCheckoutsForStackGivesMainCheckoutsToMasterAndDevbox(t *testing.T) {
+func TestCheckoutsForStackGivesTheMainCheckoutsToTheBaseStack(t *testing.T) {
 	platformDir := newRepo(t, "platform")
-	addWorktree(t, platformDir, "master", "PROJ-1-x")
-	for _, stackName := range []string{"master", "devbox"} {
-		checkoutByRepo, err := workspaceOfRepos(map[string]string{"platform": platformDir}).CheckoutsForStack(stackName)
-		if err != nil {
-			t.Fatalf("CheckoutsForStack(%s): %v", stackName, err)
-		}
-		if got := checkoutByRepo["platform"]; got.Dir != platformDir {
-			t.Errorf("CheckoutsForStack(%s) platform = %+v, want the main checkout", stackName, got)
-		}
+	addWorktree(t, platformDir, "elsewhere", "PROJ-1-x")
+
+	checkoutByRepo, err := workspaceOfRepos(map[string]string{"platform": platformDir}).CheckoutsForStack("base")
+
+	if got := checkoutByRepo["platform"]; err != nil || got.Dir != platformDir {
+		t.Errorf("CheckoutsForStack(base) platform = %+v, %v; want the main checkout", got, err)
 	}
 }
 
@@ -324,7 +321,7 @@ func TestCheckoutsForStackSkipsARepoThatIsNotCloned(t *testing.T) {
 	platformDir := newRepo(t, "platform")
 	workspace := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": filepath.Join(t.TempDir(), "missing")})
 
-	checkoutByRepo, err := workspace.CheckoutsForStack("master")
+	checkoutByRepo, err := workspace.CheckoutsForStack("base")
 
 	if err != nil {
 		t.Fatalf("CheckoutsForStack: %v", err)

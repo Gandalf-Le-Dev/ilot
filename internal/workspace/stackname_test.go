@@ -8,7 +8,7 @@ func TestStackNameOfAFolder(t *testing.T) {
 		isMain      bool
 		wantName    string
 	}{
-		{worktreeDir: "/home/user/go/src/platform", isMain: true, wantName: "master"},
+		{worktreeDir: "/home/user/go/src/platform", isMain: true, wantName: "base"},
 		{worktreeDir: "/home/user/worktrees/platform/proj-2002", wantName: "proj-2002"},
 		{worktreeDir: "/home/user/worktrees-Dev_CLI.v2", wantName: "worktrees-dev-cli-v2"},
 		{worktreeDir: "/home/user/--weird--", wantName: "weird"},
@@ -29,7 +29,7 @@ func TestStackNameRefusesANameWithNoUsableCharacter(t *testing.T) {
 }
 
 func TestStackNameRefusesTheReservedStackNames(t *testing.T) {
-	for _, reservedName := range []string{"master", "devbox"} {
+	for _, reservedName := range []string{"base"} {
 		if _, err := StackName(Worktree{Dir: "/home/user/worktrees/" + reservedName}); err == nil {
 			t.Errorf("StackName(%q) gave no error: the worktree would share a reserved stack", reservedName)
 		}
@@ -48,7 +48,7 @@ func TestStackNameUsesTheTicketKey(t *testing.T) {
 		{worktreeDir: "/w/anything", branch: "OPS-123-fix", wantName: "ops-123"},
 		{worktreeDir: "/w/hotfix", branch: "HOTFIX", wantName: "hotfix"},
 		{worktreeDir: "/w/proj-2005-example-feature", branch: "feature/example", wantName: "proj-2005"},
-		{worktreeDir: "/w/schemas", branch: "dev/jdoe/some-change", isMain: true, wantName: "master"},
+		{worktreeDir: "/w/schemas", branch: "dev/jdoe/some-change", isMain: true, wantName: "base"},
 		{worktreeDir: "/w/reproj-12", branch: "sproj-12", wantName: "reproj-12"},
 	}
 	for _, testCase := range testCases {

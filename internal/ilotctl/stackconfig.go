@@ -39,15 +39,19 @@ func (controller *Controller) configOf(stackName string) config.Config {
 	return controller.Config
 }
 
-// A shared app runs in the devbox stack, but the checkout of any stack can declare it.
+// An app with the scope base runs in the base stack, but the checkout of any stack can declare it.
 func (controller *Controller) declaringConfig(appInstance instance) (config.Config, bool) {
 	if _, isDeclared := controller.configOf(appInstance.stackName).Apps[appInstance.appName]; isDeclared {
 		return controller.configOf(appInstance.stackName), true
 	}
-	if appInstance.stackName != workspace.SharedStackName {
+	if appInstance.stackName != workspace.BaseStackName {
 		return config.Config{}, false
 	}
-	return controller.anyDeclaringConfig(appInstance.stackName, appInstance.appName)
+	declaringConfig, isDeclared := controller.anyDeclaringConfig(appInstance.stackName, appInstance.appName)
+	if !isDeclared || declaringConfig.Apps[appInstance.appName].Scope != config.ScopeBase {
+		return config.Config{}, false
+	}
+	return declaringConfig, true
 }
 
 // For an app that a stack calls: its own config first, then the config of the command, then the other stacks.
@@ -77,17 +81,6 @@ func (controller *Controller) lookupApp(appInstance instance) (config.App, bool)
 func (controller *Controller) app(appInstance instance) config.App {
 	app, _ := controller.lookupApp(appInstance)
 	return app
-}
-
-func (controller *Controller) appNamesOf(stacks stackSet, stackName string) []string {
-	appNames := slices.Collect(maps.Keys(controller.configOf(stackName).Apps))
-	for _, sharedInstance := range stacks.runningInstances() {
-		if sharedInstance.stackName == workspace.SharedStackName && !slices.Contains(appNames, sharedInstance.appName) {
-			appNames = append(appNames, sharedInstance.appName)
-		}
-	}
-	slices.Sort(appNames)
-	return appNames
 }
 
 func (controller *Controller) prepareStacks(stacks stackSet) error {

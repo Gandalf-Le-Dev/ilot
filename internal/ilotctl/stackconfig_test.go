@@ -4,6 +4,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ var ticketOnlyApps = map[string]config.App{
 		Container: config.Container{Image: "registry/ticket-search:latest", Ports: map[string]int{"http": 16271}},
 	},
 	"ticket-iam": {
-		Shared:     true,
+		Scope:      "base",
 		FixedPorts: map[string]int{"http": 8080},
 		Route:      "http",
 		Container:  config.Container{Image: "registry/iam:latest", Ports: map[string]int{"http": 8080}},
@@ -36,28 +37,28 @@ func useConfigPerStack(environment testEnvironment, configByStack map[string]con
 		if config, isKnown := configByStack[stackName]; isKnown {
 			return config, nil
 		}
-		return configByStack[workspace.MasterStackName], nil
+		return configByStack[workspace.BaseStackName], nil
 	}
 }
 
-func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
+func TestACommandFromBaseKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	environment := newTestEnvironment(t)
-	masterConfig := testConfig()
-	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	useConfigPerStack(environment, map[string]config.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig})
+	baseConfig := testConfig()
+	ticketConfig := configWithApps(baseConfig, ticketOnlyApps)
+	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": ticketConfig})
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search", "ticket-iam")
 	searchSpecBefore := environment.supervisor.runningSpecs["ticket-search.proj-1234"]
-	iamSpecBefore := environment.supervisor.runningSpecs["ticket-iam.devbox"]
+	iamSpecBefore := environment.supervisor.runningSpecs["ticket-iam.base"]
 
-	environment.controller.Config = masterConfig
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	environment.controller.Config = baseConfig
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
 	if got := environment.supervisor.runningSpecs["ticket-search.proj-1234"]; got.Command != searchSpecBefore.Command || got.Stop == "" {
-		t.Errorf("ticket-search spec after a master command = %+v, want %+v", got, searchSpecBefore)
+		t.Errorf("ticket-search spec after a base command = %+v, want %+v", got, searchSpecBefore)
 	}
-	if got := environment.supervisor.runningSpecs["ticket-iam.devbox"]; got.Command != iamSpecBefore.Command {
-		t.Errorf("shared ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
+	if got := environment.supervisor.runningSpecs["ticket-iam.base"]; got.Command != iamSpecBefore.Command {
+		t.Errorf("ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
 	}
 	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.platform.dev.example.net"); !isRouted {
 		t.Errorf("routes = %+v, want the ticket-search route kept", environment.supervisor.routes)
@@ -66,16 +67,16 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 
 func TestARunningAppThatNoConfigDeclaresAnyMoreIsStopped(t *testing.T) {
 	environment := newTestEnvironment(t)
-	masterConfig := testConfig()
-	ticketConfig := configWithApps(masterConfig, ticketOnlyApps)
-	configByStack := map[string]config.Config{workspace.MasterStackName: masterConfig, "proj-1234": ticketConfig}
+	baseConfig := testConfig()
+	ticketConfig := configWithApps(baseConfig, ticketOnlyApps)
+	configByStack := map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": ticketConfig}
 	useConfigPerStack(environment, configByStack)
 	environment.controller.Config = ticketConfig
 	environment.start(t, environment.featureStack, StartOptions{}, "ticket-search")
 
-	configByStack["proj-1234"] = masterConfig
-	environment.controller.Config = masterConfig
-	environment.start(t, environment.master, StartOptions{}, "standalone")
+	configByStack["proj-1234"] = baseConfig
+	environment.controller.Config = baseConfig
+	environment.start(t, environment.base, StartOptions{}, "standalone")
 
 	if _, isRunning := environment.supervisor.runningSpecs["ticket-search.proj-1234"]; isRunning {
 		t.Error("ticket-search.proj-1234 still runs, but no config declares it")
@@ -95,7 +96,7 @@ func TestAStackWhoseConfigCannotBeReadStopsTheCommand(t *testing.T) {
 		return testConfig(), nil
 	}
 
-	err := environment.controller.Start(t.Context(), environment.master, []string{"standalone"}, StartOptions{})
+	err := environment.controller.Start(t.Context(), environment.base, []string{"standalone"}, StartOptions{})
 
 	if err == nil || !strings.Contains(err.Error(), "proj-1234") || !strings.Contains(err.Error(), "bad indentation") {
 		t.Fatalf("Start = %v, want the config error of proj-1234", err)
@@ -122,5 +123,46 @@ func TestListKeepsGoingWhenTheConfigOfAStackCannotBeRead(t *testing.T) {
 	}
 	if !strings.Contains(environment.output.String(), "several worktrees") {
 		t.Errorf("output %q does not warn about the stack whose config failed", environment.output.String())
+	}
+}
+
+func TestOnlyAnAppWithTheScopeBaseIsAnAppOfTheBaseStackWhenATicketAloneDeclaresIt(t *testing.T) {
+	environment := newTestEnvironment(t)
+	baseConfig := testConfig()
+	useConfigPerStack(environment, map[string]config.Config{workspace.BaseStackName: baseConfig, "proj-1234": configWithApps(baseConfig, ticketOnlyApps)})
+	if err := environment.controller.loadStackConfigs([]string{workspace.BaseStackName, "proj-1234"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, isDeclared := environment.controller.lookupApp(instance{stackName: workspace.BaseStackName, appName: "ticket-iam"}); !isDeclared {
+		t.Error("ticket-iam has the scope base, so the base stack runs it, even when only the ticket declares it")
+	}
+	if _, isDeclared := environment.controller.lookupApp(instance{stackName: workspace.BaseStackName, appName: "ticket-search"}); isDeclared {
+		t.Error("ticket-search has no scope, so the base stack does not know it when only the ticket declares it")
+	}
+}
+
+func TestAnAppWithTheScopeBaseAndNoFixedPortGetsOnePortForEveryStack(t *testing.T) {
+	environment := newTestEnvironment(t)
+	doc := environment.controller.Config.Apps["doc"]
+	doc.FixedPorts = nil
+	environment.controller.Config.Apps["doc"] = doc
+	reader := config.App{Run: `reader --doc={{port "doc"}}`, DependsOn: []string{"doc"}}
+	environment.controller.Config.Apps["reader"] = reader
+
+	environment.start(t, environment.featureStack, StartOptions{}, "reader")
+	environment.start(t, environment.base, StartOptions{}, "reader")
+
+	docPort := environment.appPort(t, "base", "doc")
+	if docPort < config.DefaultFirstPort || docPort > config.DefaultLastPort {
+		t.Errorf("doc port = %d, want a port of the range", docPort)
+	}
+	for _, processName := range []string{"reader.proj-1234", "reader.base"} {
+		if want := "reader --doc=" + strconv.Itoa(docPort); environment.supervisor.runningSpecs[processName].Command != want {
+			t.Errorf("%s command = %q, want %q", processName, environment.supervisor.runningSpecs[processName].Command, want)
+		}
+	}
+	if slices.Contains(environment.supervisor.startedInOrder, "doc.proj-1234") {
+		t.Errorf("started %v, want doc in the base stack only", environment.supervisor.startedInOrder)
 	}
 }

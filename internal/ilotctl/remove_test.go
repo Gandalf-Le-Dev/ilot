@@ -40,18 +40,18 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 	}
 }
 
-func TestRemoveRefusesMasterAndDevbox(t *testing.T) {
+func TestRemoveRefusesTheBaseStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	environment.start(t, environment.master, StartOptions{}, "internalapi")
+	environment.start(t, environment.base, StartOptions{}, "internalapi")
 
-	for _, stackName := range []string{workspace.MasterStackName, workspace.SharedStackName} {
+	for _, stackName := range []string{workspace.BaseStackName} {
 		err := environment.controller.Remove(t.Context(), stackName)
 		if err == nil || !strings.Contains(err.Error(), "cannot remove") {
 			t.Errorf("Remove(%s) = %v, want a refusal", stackName, err)
 		}
 	}
-	if _, isRunning := environment.supervisor.runningSpecs["internalapi.master"]; !isRunning {
-		t.Error("internalapi.master stopped after a refused remove")
+	if _, isRunning := environment.supervisor.runningSpecs["internalapi.base"]; !isRunning {
+		t.Error("internalapi.base stopped after a refused remove")
 	}
 }
 
@@ -76,7 +76,7 @@ func saveEmptyStacks(t *testing.T, store state.Store, stackNames ...string) {
 
 func TestStacksWithoutCheckoutsListsOnlyGoneOnes(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "master", "devbox", "proj-1234", "proj-9999", "task-1")
+	saveEmptyStacks(t, environment.controller.Store, "base", "proj-1234", "proj-9999", "task-1")
 
 	gone, err := environment.controller.StacksWithoutCheckouts()
 
@@ -116,7 +116,7 @@ func TestStacksWithoutCheckoutsFailsWhenGitFails(t *testing.T) {
 
 func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "master", "proj-1234")
+	saveEmptyStacks(t, environment.controller.Store, "base", "proj-1234")
 
 	checkoutsByStack, err := environment.controller.StackCheckouts()
 
@@ -129,7 +129,7 @@ func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	if dir := checkoutsByStack["proj-1234"]["portal"].Dir; dir != "/src/portal" {
 		t.Errorf("portal checkout of proj-1234 = %q", dir)
 	}
-	if _, isListed := checkoutsByStack["master"]; !isListed {
-		t.Error("master missing")
+	if _, isListed := checkoutsByStack["base"]; !isListed {
+		t.Error("base missing")
 	}
 }

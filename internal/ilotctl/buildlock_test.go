@@ -36,18 +36,18 @@ func TestASecondBuildOfAStackWaitsForTheBuildLock(t *testing.T) {
 		buildStarted <- struct{}{}
 		return nil
 	}
-	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "master")
+	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "base")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
 
 	started := make(chan error, 1)
 	go func() {
-		started <- environment.controller.Start(t.Context(), environment.master, []string{"publicapi"}, StartOptions{SkipDependencies: true})
+		started <- environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{SkipDependencies: true})
 	}()
 
 	deadline := time.Now().Add(5 * time.Second)
-	for !strings.Contains(output.String(), "waiting for another build of stack master") {
+	for !strings.Contains(output.String(), "waiting for another build of stack base") {
 		if time.Now().After(deadline) {
 			t.Fatalf("output = %q, want a line that says that the build waits", output.String())
 		}
@@ -80,7 +80,7 @@ func TestABuildInAnotherStackDoesNotWait(t *testing.T) {
 	}
 	defer releaseOtherStack()
 
-	environment.start(t, environment.master, StartOptions{SkipDependencies: true}, "publicapi")
+	environment.start(t, environment.base, StartOptions{SkipDependencies: true}, "publicapi")
 
 	if len(*environment.builds) != 1 || strings.Contains(environment.output.String(), "waiting for another build") {
 		t.Errorf("builds = %+v, output = %q; want one build with no wait", *environment.builds, environment.output.String())
@@ -89,7 +89,7 @@ func TestABuildInAnotherStackDoesNotWait(t *testing.T) {
 
 func TestACancelEndsTheWaitForTheBuildLock(t *testing.T) {
 	environment := newTestEnvironment(t)
-	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "master")
+	releaseFirstBuild, err := environment.controller.lockBuilds(t.Context(), "base")
 	if err != nil {
 		t.Fatalf("lockBuilds: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestACancelEndsTheWaitForTheBuildLock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*buildLockPollInterval)
 	defer cancel()
 
-	if _, err := environment.controller.lockBuilds(ctx, "master"); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := environment.controller.lockBuilds(ctx, "base"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("lockBuilds = %v, want the end of the context", err)
 	}
 }
