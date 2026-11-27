@@ -27,10 +27,11 @@ A stack is the set of apps that run for one ticket.
 - The main checkout of a repo is the `master` stack.
 - Shared apps (for example Temporal, auth-mock, restapi) run once, in the `devbox` stack.
 - The legacy apps do not start at boot. Start restapi with `ilot start restapi`, and the legacy web stack (apache and legacyweb) with `ilot start legacy-stack`.
+- A workspace is a root repo and its member repos. The `ilot.yaml` of the root lists the members under `repos`, and the `ilot.yaml` of a member names the root with `member_of`. `ilot` finds the workspace from the repo of the current folder.
 - A stack takes each repo's worktree for its ticket. If a repo has no worktree for the ticket, the stack takes that repo's main checkout.
 - If a worktree does not start an app, the app comes from the `master` stack, and `ilot` starts it there if necessary. Apps marked `per_stack` (for example portal's api, worker and catalog) always run in the stack itself.
 
-`ilot start`, `ilot stop`, `ilot logs`, `ilot apps` and `ilot env` act on the stack of the folder that you are in. Outside any checkout, they act on `master` and say so. A home folder that is itself a git checkout, for example a dotfiles repo, counts as outside any checkout. `ilot ls`, `ilot rm` and `ilot clean` work from any folder.
+Run every `ilot` command inside a repo of the workspace: outside one, `ilot` does not find the workspace and says so. `ilot start`, `ilot stop`, `ilot logs`, `ilot apps` and `ilot env` act on the stack of the folder that you are in. `ilot ls`, `ilot rm` and `ilot clean` act on every stack.
 
 ## Commands
 
@@ -50,7 +51,7 @@ ilot check                      # check the ilot.yaml of this folder's repo, wit
 ilot check path/to/ilot.yaml     # check that file
 ilot rm task-2006               # stop a stack and delete its state, its logs and its routes (ask first)
 ilot clean                      # ilot rm on every stack whose worktrees are deleted (ask first)
-ilot boot --checkout <main checkout>  # starts again the apps that ran before a restart of the machine; you do not need it
+ilot boot --checkout <main checkout of a repo of the workspace>  # starts again the apps that ran before a restart of the machine; you do not need it
 ilot restart publicapi          # build the app again, then restart it, in this folder's stack; it must run already
 ilot restart                    # with no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran (ask first)
 ilot daemon run                 # the daemon itself: ilot starts it, never run it
@@ -63,18 +64,18 @@ ilot skill install              # copy this skill to ~/.claude/skills/ilot/SKILL
 
 ## Where things are
 
-- Proxy URLs: `http://<app>.<stack>.localhost:4580`. `ilot ls` prints them. The page `http://localhost:4580` lists them all. The URL of an app that does not run answers 503 with the command that starts it.
+- Proxy URLs: `http://<app>.<stack>.<workspace>.localhost:4580`. `ilot ls` prints them. The page `http://localhost:4580` lists them all. The URL of an app that does not run answers 503 with the command that starts it.
 - State and logs: `~/.local/state/ilot/stacks/<stack>/`, logs in `logs/<app>.log`.
-- Apps: the `ilot.yaml` of each repo. `ilot apps` lists their names, their repo and their dependencies. In platform, `devbox/ilot.yaml`, which also holds the `repos:` list. In portal, `ilot.yaml` at the root.
-- The personal file: `~/.config/ilot/env.yaml`. It holds repo paths for clones in other places, and personal values (`env`, and `apps.<app>` for one app). A `repos` entry with a `path` and a `config` adds a personal repo: its `ilot.yaml` adds apps on this machine only. Do not put secrets in a repo file: put them there.
+- Apps: the `ilot.yaml` at the root of each repo. `ilot apps` lists their names, their repo and their dependencies. A checkout with no `ilot.yaml` reads the file of the main checkout of its repo.
+- The personal file: `~/.config/ilot/env.yaml`. It holds the path of a member repo that is cloned at another place (`repos.<name>.path`), and personal values (`env`, and `apps.<app>` for one app). Do not put secrets in a repo file: put them there.
 - An app gets a fixed environment. The values of the shell files come first: `ilot` reads the whole environment of a login shell (`$SHELL -l`), and `ilot env` marks these values `(shell)`. A login shell reads the profile files, for example `~/.zprofile`, and not `~/.zshrc`: if an app does not find a tool, compare the `PATH` of `ilot env <app>` with the `PATH` of the terminal. The `ilot.yaml` and personal values come on top. An `export`, an `unset` or a `.envrc` in a shell never reaches an app: put the value in the personal file. An app gets its environment when it starts: after a change, run `ilot start <app>` again. If a command prints `warning: the ilot daemon has the version`, the daemon is older than `ilot`. Ask the user before you run `ilot restart`.
-- The README of the platform repo describes every field and template of `ilot.yaml`.
+- The README of ilot describes every key and template of `ilot.yaml`.
 
 ## When you edit an ilot.yaml
 
 Run `ilot check` after every change to a `ilot.yaml`. It merges the file with the other repos' `ilot.yaml`, runs the config checks, and renders every app's command, env and mounts. It finds typos in fields and templates, and duplicate app names.
 
-When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too: CI checks only platform's file.
+When you review a PR that changes a `ilot.yaml`, run `ilot check` on it too.
 
 ## When a start fails
 

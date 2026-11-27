@@ -33,11 +33,7 @@ func StackName(worktree Worktree) (string, error) {
 }
 
 func nameFromFolder(worktreeDir string) (string, error) {
-	name := runsOfCharactersOutsideDNSLabels.ReplaceAllString(strings.ToLower(filepath.Base(worktreeDir)), "-")
-	name = strings.Trim(name, "-")
-	if len(name) > dnsLabelMaxLength {
-		name = strings.TrimRight(name[:dnsLabelMaxLength], "-")
-	}
+	name := slug(filepath.Base(worktreeDir))
 	if name == "" {
 		return "", fmt.Errorf("worktree directory %q gives no usable stack name: rename it with letters or digits", worktreeDir)
 	}
@@ -45,4 +41,13 @@ func nameFromFolder(worktreeDir string) (string, error) {
 		return "", fmt.Errorf("worktree directory %q would take the reserved stack name %q: rename it", worktreeDir, name)
 	}
 	return name, nil
+}
+
+// slug turns a text into a DNS label: lowercase letters, digits and dashes, 63 characters at most.
+func slug(text string) string {
+	label := strings.Trim(runsOfCharactersOutsideDNSLabels.ReplaceAllString(strings.ToLower(text), "-"), "-")
+	if len(label) > dnsLabelMaxLength {
+		label = strings.TrimRight(label[:dnsLabelMaxLength], "-")
+	}
+	return label
 }

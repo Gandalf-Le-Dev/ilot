@@ -14,7 +14,7 @@ type stackSet struct {
 func (stacks stackSet) ensure(stackName string) *state.StackState {
 	stackState, isKnown := stacks.byName[stackName]
 	if !isKnown {
-		stackState = &state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]state.AppState{}}
+		stackState = &state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]state.AppState{}}
 		stacks.byName[stackName] = stackState
 	}
 	return stackState
@@ -77,7 +77,7 @@ func (stacks stackSet) clone() stackSet {
 		for appName, appState := range stackState.Apps {
 			clonedApps[appName] = state.AppState{Ports: maps.Clone(appState.Ports), Running: appState.Running}
 		}
-		cloned.byName[stackName] = &state.StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), LegacyWorktreeDir: "", Apps: clonedApps}
+		cloned.byName[stackName] = &state.StackState{Name: stackState.Name, CheckoutDirs: maps.Clone(stackState.CheckoutDirs), Apps: clonedApps}
 	}
 	return cloned
 }

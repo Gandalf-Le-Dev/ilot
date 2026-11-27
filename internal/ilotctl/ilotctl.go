@@ -20,6 +20,8 @@ import (
 )
 
 type Controller struct {
+	// The name of the workspace, which is also the name of its root repo.
+	Workspace           string
 	Config              appconfig.Config
 	Store               state.Store
 	Supervisor          ProcessSupervisor

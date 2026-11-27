@@ -13,14 +13,10 @@ import (
 )
 
 type StackState struct {
-	Name              string              `json:"name"`
-	CheckoutDirs      map[string]string   `json:"checkout_dirs"`
-	LegacyWorktreeDir string              `json:"worktree_dir,omitempty"`
-	Apps              map[string]AppState `json:"apps"`
+	Name         string              `json:"name"`
+	CheckoutDirs map[string]string   `json:"checkout_dirs"`
+	Apps         map[string]AppState `json:"apps"`
 }
-
-// State files written before ilot knew several repos hold platform's checkout as worktree_dir.
-const legacyWorktreeRepo = "platform"
 
 type AppState struct {
 	Ports   map[string]int `json:"ports"`
@@ -42,7 +38,7 @@ func (store Store) stateFile(stackName string) string {
 func (store Store) Load(stackName string) (StackState, error) {
 	content, err := os.ReadFile(store.stateFile(stackName))
 	if errors.Is(err, fs.ErrNotExist) {
-		return StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]AppState{}}, nil
+		return StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]AppState{}}, nil
 	}
 	if err != nil {
 		return StackState{}, err
@@ -56,10 +52,6 @@ func (store Store) Load(stackName string) (StackState, error) {
 	}
 	if stackState.CheckoutDirs == nil {
 		stackState.CheckoutDirs = map[string]string{}
-	}
-	if stackState.LegacyWorktreeDir != "" {
-		stackState.CheckoutDirs[legacyWorktreeRepo] = stackState.LegacyWorktreeDir
-		stackState.LegacyWorktreeDir = ""
 	}
 	return stackState, nil
 }
@@ -120,4 +112,47 @@ func (store Store) Lock() (release func() error, err error) {
 		return nil, errors.Join(fmt.Errorf("lock %s: %w", lockFile.Name(), err), lockFile.Close())
 	}
 	return lockFile.Close, nil
+}
+
+type workspaceRecord struct {
+	Name string `json:"name"`
+	Root string `json:"root"`
+}
+
+func (store Store) workspaceFile() string {
+	return filepath.Join(store.RootDir, "workspace.json")
+}
+
+// Claim records the workspace that the state belongs to, and refuses another one.
+// The stacks and the processes do not carry the name of their workspace yet, so the base stacks of two workspaces would be one stack.
+func (store Store) Claim(workspaceName, rootDir string) error {
+	var owner workspaceRecord
+	content, err := os.ReadFile(store.workspaceFile())
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err == nil {
+		if err := json.Unmarshal(content, &owner); err != nil {
+			return fmt.Errorf("read %s: %w", store.workspaceFile(), err)
+		}
+	}
+	_, ownerRootErr := os.Stat(owner.Root)
+	isOwnerGone := owner.Root == "" || errors.Is(ownerRootErr, fs.ErrNotExist)
+	switch {
+	case owner.Name == workspaceName && owner.Root == rootDir:
+		return nil
+	case isOwnerGone || owner.Root == rootDir:
+	case owner.Name == workspaceName:
+		return fmt.Errorf("two workspaces have the name %q: %s and %s. Set name in the ilot.yaml of one of them", workspaceName, owner.Root, rootDir)
+	default:
+		return fmt.Errorf("the state in %s belongs to the workspace %q of %s, and this version of ilot keeps one workspace there: run the workspace %q with another XDG_STATE_HOME, or remove the stacks of %q and delete %s", store.RootDir, owner.Name, owner.Root, workspaceName, owner.Name, store.workspaceFile())
+	}
+	if err := os.MkdirAll(store.RootDir, 0o700); err != nil {
+		return err
+	}
+	content, err = json.Marshal(workspaceRecord{Name: workspaceName, Root: rootDir})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(store.workspaceFile(), append(content, '\n'), 0o600)
 }

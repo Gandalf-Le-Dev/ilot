@@ -14,12 +14,12 @@ import (
 
 // A supervisor that calls every process ready, for a test of what a command does before it reaches the daemon.
 type readySupervisor struct {
-	started []string
+	started map[string]bool
 }
 
 func (supervisor *readySupervisor) Apply(_ context.Context, specs []ilotctl.ProcessSpec) error {
 	for _, spec := range specs {
-		supervisor.started = append(supervisor.started, spec.Name)
+		supervisor.started[spec.Name] = true
 	}
 	return nil
 }
@@ -42,33 +42,27 @@ func (supervisor *readySupervisor) Shutdown(context.Context) error { return nil 
 
 func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 	codeDir := canonicalTempDir(t)
-	platformDir := gitRepoAt(t, filepath.Join(codeDir, "platform"), map[string]string{
-		"devbox/ilot.yaml": "repos:\n" +
-			"  web: {path: " + filepath.Join(codeDir, "web") + ", config: ilot.yaml}\n" +
-			"  jobs: {path: " + filepath.Join(codeDir, "jobs") + ", config: ilot.yaml}\n" +
-			"apps:\n  api: {run: api, ports: [http], depends_on: [worker]}\n",
-	})
-	gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "apps:\n  front: {run: front, depends_on: [api]}\n"})
-	gitRepoAt(t, filepath.Join(codeDir, "jobs"), map[string]string{"ilot.yaml": "apps:\n  worker: {run: worker}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n  jobs: ../jobs\napps:\n  api: {run: api, ports: [http], depends_on: [worker]}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  front: {run: front, depends_on: [api]}\n"})
+	gitRepoAt(t, filepath.Join(codeDir, "jobs"), map[string]string{"ilot.yaml": "member_of: ../shop\napps:\n  worker: {run: worker}\n"})
 	webWorktreeDir := filepath.Join(codeDir, "web-retry")
 	runGitInTest(t, filepath.Join(codeDir, "web"), "worktree", "add", "-q", "-b", "PROJ-1-retry", webWorktreeDir)
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	git, gitProcessCount := countingGit()
 
-	currentWorkspace, err := workspace.Load(homeDir, git)
+	currentWorkspace, worktree, err := workspace.Find(webWorktreeDir, t.TempDir(), git)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stackName, _, err := currentWorkspace.StackOf(webWorktreeDir, false, io.Discard)
+	stackName, err := workspace.StackName(worktree)
 	if err != nil || stackName != "proj-1" {
-		t.Fatalf("StackOf = %q, %v; want proj-1", stackName, err)
+		t.Fatalf("StackName = %q, %v; want proj-1", stackName, err)
 	}
 	controller, err := newController(currentWorkspace, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	supervisor := &readySupervisor{}
+	supervisor := &readySupervisor{started: map[string]bool{}}
 	controller.Supervisor = supervisor
 	controller.ShellEnv = func() (map[string]string, error) { return map[string]string{}, nil }
 	controller.Output = io.Discard
@@ -76,8 +70,8 @@ func TestStartInAWorkspaceOfThreeReposRunsFiveGitProcessesAtMost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(supervisor.started) == 0 {
-		t.Fatal("the start reached no process")
+	if len(supervisor.started) != 3 {
+		t.Fatalf("the start reached %v, want front in proj-1, with api and worker in master", supervisor.started)
 	}
 	if *gitProcessCount > 5 {
 		t.Errorf("ilot start ran %d git processes in a workspace of 3 repos, want 5 at most", *gitProcessCount)

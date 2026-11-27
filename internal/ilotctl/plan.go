@@ -238,7 +238,7 @@ func (controller *Controller) loadStacks(stackName string) (stackSet, error) {
 }
 
 func (controller *Controller) checkoutDir(stacks stackSet, appInstance instance) (string, error) {
-	repoName := cmp.Or(controller.app(appInstance).Repo, appconfig.DefaultRepo)
+	repoName := cmp.Or(controller.app(appInstance).Repo, controller.Workspace)
 	checkoutDir := stacks.byName[appInstance.stackName].CheckoutDirs[repoName]
 	if checkoutDir == "" {
 		return "", fmt.Errorf("%s needs repo %s, which is not cloned: clone it, or set repos.%s.path in ~/.config/ilot/env.yaml", appInstance.processName(), repoName, repoName)

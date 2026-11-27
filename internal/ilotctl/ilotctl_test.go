@@ -311,6 +311,7 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 	buildEnvirons := &[][]string{}
 	output := &bytes.Buffer{}
 	controller := &Controller{
+		Workspace:  "platform",
 		Config:     testConfig(),
 		Store:      state.Store{RootDir: t.TempDir()},
 		Supervisor: supervisor,
@@ -890,14 +891,14 @@ func TestTheProxyGetsARouteForEveryRoutedApp(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	route, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net")
+	route, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.platform.dev.example.net")
 	if !isRouted || route.Port != environment.appPort(t, "proj-1234", "publicapi") {
 		t.Errorf("route of publicapi = %+v, routed %t; want its http port. Routes: %+v", route, isRouted, environment.supervisor.routes)
 	}
 	if want := "cd '/worktrees/proj-1234' && ilot start publicapi"; route.StartHint != want {
 		t.Errorf("start hint = %q, want %q", route.StartHint, want)
 	}
-	if _, isRouted := environment.supervisor.routeOf("gateway.master.dev.example.net"); isRouted {
+	if _, isRouted := environment.supervisor.routeOf("gateway.master.platform.dev.example.net"); isRouted {
 		t.Error("gateway.master has a route, but the app declares none")
 	}
 }
@@ -910,7 +911,7 @@ func TestAStoppedAppKeepsItsRoute(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 
-	if _, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net"); !isRouted {
+	if _, isRouted := environment.supervisor.routeOf("publicapi.proj-1234.platform.dev.example.net"); !isRouted {
 		t.Errorf("routes after the stop = %+v, want the route of publicapi kept: its URL then says how to start it", environment.supervisor.routes)
 	}
 }
@@ -925,13 +926,13 @@ func TestListShowsAppsWithLiveStatusAndURL(t *testing.T) {
 		t.Fatalf("List: %v", err)
 	}
 	publicapiRow := rowFor(listing.Apps, "proj-1234", "publicapi")
-	if publicapiRow.Status != "ready" || publicapiRow.URL != "http://publicapi.proj-1234.dev.example.net:18080" {
+	if publicapiRow.Status != "ready" || publicapiRow.URL != "http://publicapi.proj-1234.platform.dev.example.net:18080" {
 		t.Errorf("publicapi row = %+v", publicapiRow)
 	}
 	if publicapiRow.Ports["http"] != environment.appPort(t, "proj-1234", "publicapi") {
 		t.Errorf("publicapi ports = %v, want the http port of its state", publicapiRow.Ports)
 	}
-	if temporalRow := rowFor(listing.Apps, "devbox", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.devbox.dev.example.net:18080" {
+	if temporalRow := rowFor(listing.Apps, "devbox", "temporal"); temporalRow.Status != "ready" || temporalRow.URL != "http://temporal.devbox.platform.dev.example.net:18080" {
 		t.Errorf("temporal row = %+v", temporalRow)
 	}
 	wantExternalServices := []ExternalServiceRow{{Name: "keyring", Status: "up", Port: 8200}, {Name: "legacyapi", Status: "up", Port: 10004}}
@@ -1024,7 +1025,7 @@ func TestWatchedAppRunsWithAWatcherThatRunsIlotRestart(t *testing.T) {
 	if !isRunning {
 		t.Fatalf("no watcher among %v", slices.Sorted(maps.Keys(environment.supervisor.runningSpecs)))
 	}
-	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- ''"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'devbox'"'"' '"'"'restapi'"'"''`} {
+	for _, wantPart := range []string{"watchexec --postpone", "--watch '/legacy/restapi'", "--exts pl,pm", `-- 'cd '"'"'/src/platform'"'"' && '"'"'/opt/ilot/bin/ilot'"'"' restart --stack '"'"'devbox'"'"' '"'"'restapi'"'"''`} {
 		if !strings.Contains(watcher.Command, wantPart) {
 			t.Errorf("watcher command %q lacks %q", watcher.Command, wantPart)
 		}
@@ -1123,7 +1124,7 @@ func TestASharedAppHasItsRouteInTheDevboxStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.master, StartOptions{}, "temporal")
 
-	if route, isRouted := environment.supervisor.routeOf("temporal.devbox.dev.example.net"); !isRouted || route.Port != 10012 {
+	if route, isRouted := environment.supervisor.routeOf("temporal.devbox.platform.dev.example.net"); !isRouted || route.Port != 10012 {
 		t.Errorf("route of temporal = %+v, routed %t; want the temporal UI on port 10012", route, isRouted)
 	}
 }
@@ -1263,7 +1264,7 @@ func TestTheRouteOfAnAppCarriesItsHomePath(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	if route, _ := environment.supervisor.routeOf("publicapi.proj-1234.dev.example.net"); route.HomePath != "/swagger/" {
+	if route, _ := environment.supervisor.routeOf("publicapi.proj-1234.platform.dev.example.net"); route.HomePath != "/swagger/" {
 		t.Errorf("route of publicapi = %+v, want the home path /swagger/", route)
 	}
 }
@@ -1280,7 +1281,7 @@ func TestListShowsTheHomePathInTheURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if url := rowFor(listing.Apps, "proj-1234", "publicapi").URL; url != "http://publicapi.proj-1234.dev.example.net:18080/swagger/" {
+	if url := rowFor(listing.Apps, "proj-1234", "publicapi").URL; url != "http://publicapi.proj-1234.platform.dev.example.net:18080/swagger/" {
 		t.Errorf("publicapi URL = %q", url)
 	}
 }
@@ -1380,7 +1381,7 @@ func TestTemplatesKnowTheStackTheUserRepoAndURL(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 
-	want := "run proj-1234 jdoe /src/portal http://temporal.devbox.dev.example.net:18080 http://internalapi.master.dev.example.net:18080"
+	want := "run proj-1234 jdoe /src/portal http://temporal.devbox.platform.dev.example.net:18080 http://internalapi.master.platform.dev.example.net:18080"
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234"].Command; got != want {
 		t.Errorf("Command = %q, want %q", got, want)
 	}
@@ -1391,7 +1392,7 @@ func TestContainerCommandRemovesALeftoverContainerFirst(t *testing.T) {
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
 	command := environment.supervisor.runningSpecs["search.proj-1234"].Command
-	if !strings.HasPrefix(command, "docker rm -f 'ilot-search-proj-1234' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot-search-proj-1234' ") {
+	if !strings.HasPrefix(command, "docker rm -f 'ilot-search-proj-1234-platform' >/dev/null 2>&1 || true && exec docker run --rm --name 'ilot-search-proj-1234-platform' ") {
 		t.Errorf("command = %q", command)
 	}
 }
@@ -1475,10 +1476,10 @@ func TestAContainerIsProbedAndRoutedOnItsLoopbackPort(t *testing.T) {
 	if probe := environment.supervisor.runningSpecs["search.proj-1234"].Ready; probe == nil || probe.Host != "" || probe.Port != searchPort {
 		t.Errorf("search probe = %+v, want the published port %d on the loopback address", probe, searchPort)
 	}
-	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe == nil || probe.Command != "docker exec 'ilot-search-cache-proj-1234' sh -c 'pg_isready -U postgres'" {
+	if probe := environment.supervisor.runningSpecs["search-cache.proj-1234"].Ready; probe == nil || probe.Command != "docker exec 'ilot-search-cache-proj-1234-platform' sh -c 'pg_isready -U postgres'" {
 		t.Errorf("cache probe = %+v", probe)
 	}
-	if route, isRouted := environment.supervisor.routeOf("search.proj-1234.dev.example.net"); !isRouted || route.Port != searchPort {
+	if route, isRouted := environment.supervisor.routeOf("search.proj-1234.platform.dev.example.net"); !isRouted || route.Port != searchPort {
 		t.Errorf("route of search = %+v, routed %t; want the published port %d", route, isRouted, searchPort)
 	}
 }
@@ -1579,7 +1580,7 @@ func TestAContainerStopsWithDockerStopAndAProcessWithItsSignal(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 
-	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].Stop; got != "docker stop --time 10 'ilot-search-cache-proj-1234'" {
+	if got := environment.supervisor.runningSpecs["search-cache.proj-1234"].Stop; got != "docker stop --time 10 'ilot-search-cache-proj-1234-platform'" {
 		t.Errorf("search-cache Stop = %q", got)
 	}
 	if got := environment.supervisor.runningSpecs["gateway.proj-1234"].Stop; got != "" {
@@ -1620,7 +1621,7 @@ func TestPersonalEnvReachesAContainerOnlyThroughItsAppSettings(t *testing.T) {
 func TestRepoEnvWinsOverTheInheritedShellValue(t *testing.T) {
 	t.Setenv("LOGKIT_LOGJSON", "from-shell")
 	environment := newTestEnvironment(t)
-	environment.controller.Config.RepoEnv = map[string]map[string]string{appconfig.DefaultRepo: {"LOGKIT_LOGJSON": "1"}}
+	environment.controller.Config.RepoEnv = map[string]map[string]string{"platform": {"LOGKIT_LOGJSON": "1"}}
 	environment.start(t, environment.master, StartOptions{}, "standalone")
 	if got := environment.supervisor.runningSpecs["standalone.master"].Env["LOGKIT_LOGJSON"]; got != "1" {
 		t.Errorf("LOGKIT_LOGJSON = %q, want the repo value", got)

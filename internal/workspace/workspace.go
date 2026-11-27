@@ -1,11 +1,10 @@
-// Package workspace finds the repos of the workspace, their worktrees and the stack of a folder.
+// Package workspace finds the workspace of a folder: its repos, their worktrees and the stack of each worktree.
 package workspace
 
 import (
 	"cmp"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -19,64 +18,180 @@ import (
 
 const (
 	PersonalSettingsPath = ".config/ilot/env.yaml"
-	PlatformConfigPath   = "devbox/ilot.yaml"
-	defaultPlatformPath  = "~/src/platform"
+	// Where the file of the root repo was before a repo file had one fixed place.
+	oldRootFilePath = "devbox/ilot.yaml"
 )
 
+// Workspace is the set of repos that share stacks, ports and one name.
 type Workspace struct {
-	HomeDir     string
-	Settings    personal.Settings
-	RepoPaths   map[string]string
-	RepoConfigs map[string]appconfig.RepoConfig
+	Name string
+	// The main checkout of the root repo, whose file names the workspace and lists the other repos.
+	RootDir  string
+	HomeDir  string
+	Settings personal.Settings
+	// The path of each repo. The root repo has the name of the workspace.
+	RepoPaths map[string]string
 
 	git *Git
 }
 
-// The repo list is read from platform's main checkout: the stack, and so its checkouts, are not known yet.
-func Load(homeDir string, git *Git) (Workspace, error) {
+// Find gives the workspace of a folder and the worktree that holds the folder.
+// It reads the ilot.yaml of the main checkout of the repo of the folder, and follows member_of to the root repo.
+func Find(dir, homeDir string, git *Git) (Workspace, Worktree, error) {
 	settings, err := personal.Load(filepath.Join(homeDir, PersonalSettingsPath))
 	if err != nil {
-		return Workspace{}, err
+		return Workspace{}, Worktree{}, err
 	}
-	platformPath, err := Canonical(expandHome(cmp.Or(settings.Repos[appconfig.DefaultRepo].Path, defaultPlatformPath), homeDir))
+	current, err := git.Locate(dir)
 	if err != nil {
-		return Workspace{}, err
+		return Workspace{}, Worktree{}, fmt.Errorf("%w: ilot finds the workspace from the %s of the repo of the current folder", err, appconfig.FileName)
 	}
-	rootConfig, err := appconfig.Parse(filepath.Join(platformPath, PlatformConfigPath))
+	ownFile := filepath.Join(current.MainDir, appconfig.FileName)
+	ownConfig, err := appconfig.Parse(ownFile)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Workspace{}, fmt.Errorf("%w: if platform is cloned elsewhere, set repos.platform.path in ~/%s", err, PersonalSettingsPath)
+		return Workspace{}, Worktree{}, errors.Join(fmt.Errorf("the repo at %s has no %s: ilot reads the %s of the main checkout to find the workspace", current.MainDir, appconfig.FileName, appconfig.FileName), oldLayoutHint(current.MainDir))
 	}
 	if err != nil {
-		return Workspace{}, err
+		return Workspace{}, Worktree{}, err
 	}
-	repoConfigs := maps.Clone(rootConfig.Repos)
-	if repoConfigs == nil {
-		repoConfigs = map[string]appconfig.RepoConfig{}
-	}
-	repoConfigs[appconfig.DefaultRepo] = appconfig.RepoConfig{Path: platformPath, Config: PlatformConfigPath}
-	for repoName, personalRepo := range settings.Repos {
-		if _, isShared := repoConfigs[repoName]; isShared || personalRepo.Path == "" || personalRepo.Config == "" {
-			continue
+	rootDir, rootFile, rootConfig := current.MainDir, ownFile, ownConfig
+	if ownConfig.MemberOf != "" {
+		if ownConfig.Name != "" || len(ownConfig.Repos) > 0 {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s has member_of, so it is the file of a member repo: name and repos belong to the file of the root repo", ownFile)
 		}
-		repoConfigs[repoName] = personalRepo
-	}
-	repoPaths := map[string]string{}
-	for repoName, repoConfig := range repoConfigs {
-		repoPaths[repoName], err = Canonical(expandHome(cmp.Or(settings.Repos[repoName].Path, repoConfig.Path), homeDir))
+		rootDir, err = git.rootDirOf(ownFile, ownConfig.MemberOf, homeDir)
 		if err != nil {
-			return Workspace{}, err
+			return Workspace{}, Worktree{}, err
+		}
+		rootFile = filepath.Join(rootDir, appconfig.FileName)
+		rootConfig, err = appconfig.Parse(rootFile)
+		if errors.Is(err, fs.ErrNotExist) {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s names its root repo with member_of: %s, but %s does not exist", ownFile, ownConfig.MemberOf, rootFile)
+		}
+		if err != nil {
+			return Workspace{}, Worktree{}, err
+		}
+		if rootConfig.MemberOf != "" {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s names its root repo with member_of: %s, but %s has a member_of too: a root repo has none", ownFile, ownConfig.MemberOf, rootFile)
 		}
 	}
-	return Workspace{HomeDir: homeDir, Settings: settings, RepoPaths: repoPaths, RepoConfigs: repoConfigs, git: git}, nil
+	name, err := workspaceName(rootConfig.Name, rootDir, rootFile)
+	if err != nil {
+		return Workspace{}, Worktree{}, err
+	}
+	repoPaths := map[string]string{name: rootDir}
+	for repoName, declaredPath := range rootConfig.Repos {
+		if repoName == name {
+			return Workspace{}, Worktree{}, fmt.Errorf("%s: the repo %q has the name of the workspace, which is the name of the root repo: rename it, or set name", rootFile, repoName)
+		}
+		repoPaths[repoName], err = Canonical(pathFrom(rootDir, cmp.Or(settings.Repos[repoName].Path, declaredPath), homeDir))
+		if err != nil {
+			return Workspace{}, Worktree{}, err
+		}
+	}
+	workspace := Workspace{Name: name, RootDir: rootDir, HomeDir: homeDir, Settings: settings, RepoPaths: repoPaths, git: git}
+	current.Repo, err = workspace.repoOf(current)
+	if err != nil && ownConfig.MemberOf == "" {
+		return Workspace{}, Worktree{}, err
+	}
+	if err != nil {
+		suggestedPath, relErr := filepath.Rel(rootDir, current.MainDir)
+		if relErr != nil {
+			suggestedPath = current.MainDir
+		}
+		return Workspace{}, Worktree{}, fmt.Errorf("%s names its root repo with member_of: %s, but %s does not list this repo: add it there under repos, for example %s: %s", ownFile, ownConfig.MemberOf, rootFile, filepath.Base(current.MainDir), suggestedPath)
+	}
+	if err := workspace.checkEveryMemberNamesTheRoot(rootFile); err != nil {
+		return Workspace{}, Worktree{}, err
+	}
+	return workspace, current, nil
 }
 
-func expandHome(path, homeDir string) string {
+func oldLayoutHint(mainCheckoutDir string) error {
+	if _, err := os.Stat(filepath.Join(mainCheckoutDir, oldRootFilePath)); err != nil {
+		return nil
+	}
+	return fmt.Errorf("%s is the old place of the file: move it to %s at the root of the repo", oldRootFilePath, appconfig.FileName)
+}
+
+// rootDirOf follows the member_of of a member file to the main checkout of the root repo.
+func (git *Git) rootDirOf(memberFile, memberOf, homeDir string) (string, error) {
+	declaredRootDir, err := Canonical(pathFrom(filepath.Dir(memberFile), memberOf, homeDir))
+	if err != nil {
+		return "", err
+	}
+	rootWorktrees, err := git.Worktrees("", declaredRootDir)
+	if err != nil {
+		return "", fmt.Errorf("%s names its root repo with member_of: %s, but %s is not a git checkout: %w", memberFile, memberOf, declaredRootDir, err)
+	}
+	return rootWorktrees[0].Dir, nil
+}
+
+func workspaceName(declaredName, rootDir, rootFile string) (string, error) {
+	if declaredName != "" {
+		if slug(declaredName) != declaredName {
+			return "", fmt.Errorf("%s: the name %q goes in the URL of every app, so it takes lowercase letters, digits and dashes only, %d characters at most", rootFile, declaredName, dnsLabelMaxLength)
+		}
+		return declaredName, nil
+	}
+	name := slug(filepath.Base(rootDir))
+	if name == "" {
+		return "", fmt.Errorf("the folder name of %s gives no name for the workspace: set name in %s", rootDir, rootFile)
+	}
+	return name, nil
+}
+
+// The link goes both ways: a member that does not name the root would be a workspace of its own when a command runs in it.
+func (workspace Workspace) checkEveryMemberNamesTheRoot(rootFile string) error {
+	var problems []error
+	for _, repoName := range slices.Sorted(maps.Keys(workspace.RepoPaths)) {
+		if repoName == workspace.Name || isDeleted(workspace.RepoPaths[repoName]) {
+			continue
+		}
+		worktrees, err := workspace.git.Worktrees(repoName, workspace.RepoPaths[repoName])
+		if err != nil {
+			problems = append(problems, fmt.Errorf("%s lists the repo %s: %w", rootFile, repoName, err))
+			continue
+		}
+		memberFile := filepath.Join(worktrees[0].Dir, appconfig.FileName)
+		// A member with no file declares no app. A file that does not parse is the problem of the stack that reads it.
+		memberConfig, err := appconfig.Parse(memberFile)
+		if err != nil {
+			continue
+		}
+		suggestedPath, relErr := filepath.Rel(worktrees[0].Dir, workspace.RootDir)
+		if relErr != nil {
+			suggestedPath = workspace.RootDir
+		}
+		if memberConfig.MemberOf == "" {
+			problems = append(problems, fmt.Errorf("%s lists the repo %s, but %s has no member_of: add member_of: %s there", rootFile, repoName, memberFile, suggestedPath))
+			continue
+		}
+		namedRootDir, err := workspace.git.rootDirOf(memberFile, memberConfig.MemberOf, workspace.HomeDir)
+		if err != nil {
+			problems = append(problems, err)
+			continue
+		}
+		if namedRootDir != workspace.RootDir {
+			problems = append(problems, fmt.Errorf("%s lists the repo %s, but %s names another root repo, %s: a repo is in one workspace", rootFile, repoName, memberFile, namedRootDir))
+		}
+	}
+	return errors.Join(problems...)
+}
+
+// pathFrom reads a path of a configuration file: under the home folder with ~/, absolute, or relative to the folder of the file.
+func pathFrom(baseDir, path, homeDir string) string {
 	if rest, isUnderHome := strings.CutPrefix(path, "~/"); isUnderHome {
 		return filepath.Join(homeDir, rest)
 	}
-	return path
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(baseDir, path)
 }
 
+// ConfigForStack merges the files of the checkouts of a stack.
+// A checkout with no ilot.yaml uses the file of the main checkout, so an untracked file there serves every worktree of a repo where you cannot commit one.
 func (workspace Workspace) ConfigForStack(stackName string) (appconfig.Config, error) {
 	checkoutByRepo, err := workspace.CheckoutsForStack(stackName)
 	if err != nil {
@@ -84,20 +199,28 @@ func (workspace Workspace) ConfigForStack(stackName string) (appconfig.Config, e
 	}
 	configByRepo := map[string]appconfig.Config{}
 	for _, repoName := range slices.Sorted(maps.Keys(checkoutByRepo)) {
-		configFile := workspace.RepoConfigs[repoName].Config
-		if configFile == "" {
+		configFile, hasFile := ConfigFileOf(checkoutByRepo[repoName])
+		if !hasFile {
 			continue
 		}
-		repoConfig, err := appconfig.Parse(filepath.Join(checkoutByRepo[repoName].Dir, configFile))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
+		repoConfig, err := appconfig.Parse(configFile)
 		if err != nil {
 			return appconfig.Config{}, err
 		}
 		configByRepo[repoName] = repoConfig
 	}
-	return appconfig.Merge(configByRepo)
+	return appconfig.Merge(workspace.Name, configByRepo)
+}
+
+// ConfigFileOf gives the ilot.yaml that a checkout reads: its own, else the one of the main checkout.
+func ConfigFileOf(checkout Worktree) (configFile string, hasFile bool) {
+	for _, dir := range []string{checkout.Dir, checkout.MainDir} {
+		configFile = filepath.Join(dir, appconfig.FileName)
+		if _, err := os.Stat(configFile); err == nil {
+			return configFile, true
+		}
+	}
+	return "", false
 }
 
 func (workspace Workspace) ReposNotCloned() map[string]string {
@@ -172,8 +295,8 @@ func IsSeveralWorktrees(err error) bool {
 	return isSeveralWorktrees
 }
 
-// RepoOf names the repo of a worktree that Locate found. The main checkout tells the repo, so a repo path that is itself a linked worktree works too.
-func (workspace Workspace) RepoOf(worktree Worktree) (string, error) {
+// The main checkout tells the repo, so a repo path that is itself a linked worktree works too.
+func (workspace Workspace) repoOf(worktree Worktree) (string, error) {
 	for _, repoName := range slices.Sorted(maps.Keys(workspace.RepoPaths)) {
 		if isDeleted(workspace.RepoPaths[repoName]) {
 			continue
@@ -183,54 +306,5 @@ func (workspace Workspace) RepoOf(worktree Worktree) (string, error) {
 			return repoName, nil
 		}
 	}
-	return "", fmt.Errorf("%s is in no repo that ilot knows: if it is one of %v cloned elsewhere, set repos.<name>.path in ~/%s; for a personal repo, set repos.<name>.path and repos.<name>.config there", worktree.Dir, slices.Sorted(maps.Keys(workspace.RepoPaths)), PersonalSettingsPath)
-}
-
-func (workspace Workspace) Locate(dirInsideWorktree string) (Worktree, error) {
-	return workspace.git.Locate(dirInsideWorktree)
-}
-
-// MainCheckout gives the main checkout of platform, which is the master stack.
-func (workspace Workspace) MainCheckout() (Worktree, error) {
-	worktrees, err := workspace.git.Worktrees(appconfig.DefaultRepo, workspace.RepoPaths[appconfig.DefaultRepo])
-	if err != nil {
-		return Worktree{}, err
-	}
-	return worktrees[0], nil
-}
-
-// StackOf gives the stack of a folder and the worktree that holds it.
-// A command that works across stacks, and a folder that is in no repo of the workspace, get the master stack.
-func (workspace Workspace) StackOf(dir string, isCrossStack bool, notes io.Writer) (string, Worktree, error) {
-	if isCrossStack {
-		return workspace.masterStack()
-	}
-	worktree, err := workspace.git.Locate(dir)
-	if err != nil {
-		fmt.Fprintln(notes, "not in a checkout: using the master stack")
-		return workspace.masterStack()
-	}
-	if isSameFolder(worktree.Dir, workspace.HomeDir) {
-		fmt.Fprintln(notes, "the home folder is a checkout, not a known repo: using the master stack")
-		return workspace.masterStack()
-	}
-	if worktree.Repo, err = workspace.RepoOf(worktree); err != nil {
-		return "", Worktree{}, err
-	}
-	stackName, err := StackName(worktree)
-	return stackName, worktree, err
-}
-
-func (workspace Workspace) masterStack() (string, Worktree, error) {
-	mainCheckout, err := workspace.MainCheckout()
-	return MasterStackName, mainCheckout, err
-}
-
-func isSameFolder(firstDir, secondDir string) bool {
-	firstInfo, err := os.Stat(firstDir)
-	if err != nil {
-		return false
-	}
-	secondInfo, err := os.Stat(secondDir)
-	return err == nil && os.SameFile(firstInfo, secondInfo)
+	return "", fmt.Errorf("%s is in no repo of the workspace %s", worktree.Dir, workspace.Name)
 }

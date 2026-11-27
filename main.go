@@ -92,7 +92,7 @@ func (command *envCommand) Run() error {
 }
 
 type logsCommand struct {
-	App    string `arg:"" help:"App declared in devbox/ilot.yaml."`
+	App    string `arg:"" help:"App declared in an ilot.yaml."`
 	Follow bool   `short:"f" help:"Keep printing new lines."`
 	Lines  int    `short:"n" default:"100" help:"How many of the last lines to print first."`
 	JSON   bool   `help:"Print each line as the app wrote it. Without it, ilot turns a JSON line into one readable line."`
@@ -115,7 +115,7 @@ func (command *logsCommand) Run(ctx context.Context) error {
 }
 
 type bootCommand struct {
-	Checkout string        `required:"" type:"existingdir" help:"Main checkout of the platform repo, whose devbox/ilot.yaml is read."`
+	Checkout string        `required:"" type:"existingdir" help:"Main checkout of a repo of the workspace."`
 	Timeout  time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
 }
 
@@ -136,7 +136,7 @@ func (command *restartCommand) Run(ctx context.Context) error {
 		}
 		return controller.Restart(ctx, masterStackName)
 	case command.Stack != "":
-		currentWorkspace, err := loadCurrentWorkspace()
+		currentWorkspace, _, err := findCurrentWorkspace()
 		if err != nil {
 			return err
 		}
@@ -170,21 +170,17 @@ type rmCommand struct {
 type cleanCommand struct{}
 
 type startCommand struct {
-	Apps    []string      `arg:"" help:"Apps declared in devbox/ilot.yaml."`
+	Apps    []string      `arg:"" help:"Apps declared in an ilot.yaml."`
 	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
 	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
 }
 
 type stopCommand struct {
-	Apps []string `arg:"" help:"Apps declared in devbox/ilot.yaml."`
+	Apps []string `arg:"" help:"Apps declared in an ilot.yaml."`
 }
 
 func (command *bootCommand) Run(ctx context.Context) error {
-	currentWorkspace, err := loadCurrentWorkspace()
-	if err != nil {
-		return err
-	}
-	mainCheckout, err := currentWorkspace.Locate(command.Checkout)
+	currentWorkspace, mainCheckout, err := findWorkspaceOf(command.Checkout)
 	if err != nil {
 		return err
 	}
@@ -308,28 +304,34 @@ func (command *stopCommand) Run(ctx context.Context) error {
 }
 
 func newControllerForCurrentWorktree(readyTimeout time.Duration, isCrossStack bool) (*ilotctl.Controller, string, error) {
-	currentDir, err := os.Getwd()
+	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return nil, "", err
 	}
-	currentWorkspace, err := loadCurrentWorkspace()
-	if err != nil {
-		return nil, "", err
-	}
-	stackName, _, err := currentWorkspace.StackOf(currentDir, isCrossStack, os.Stderr)
-	if err != nil {
-		return nil, "", err
+	stackName := workspace.MasterStackName
+	if !isCrossStack {
+		if stackName, err = workspace.StackName(worktree); err != nil {
+			return nil, "", err
+		}
 	}
 	controller, err := newController(currentWorkspace, stackName, readyTimeout)
 	return controller, stackName, err
 }
 
-func loadCurrentWorkspace() (workspace.Workspace, error) {
+func findCurrentWorkspace() (workspace.Workspace, workspace.Worktree, error) {
+	currentDir, err := os.Getwd()
+	if err != nil {
+		return workspace.Workspace{}, workspace.Worktree{}, err
+	}
+	return findWorkspaceOf(currentDir)
+}
+
+func findWorkspaceOf(dir string) (workspace.Workspace, workspace.Worktree, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return workspace.Workspace{}, err
+		return workspace.Workspace{}, workspace.Worktree{}, err
 	}
-	return workspace.Load(homeDir, workspace.NewGit())
+	return workspace.Find(dir, homeDir, workspace.NewGit())
 }
 
 func newController(currentWorkspace workspace.Workspace, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
@@ -358,14 +360,19 @@ func newController(currentWorkspace workspace.Workspace, stackName string, ready
 			ilotEnv[name] = value
 		}
 	}
+	store := state.Store{RootDir: stateDir}
+	if err := store.Claim(currentWorkspace.Name, currentWorkspace.RootDir); err != nil {
+		return nil, err
+	}
 	daemonPaths := daemon.Paths{StateDir: stateDir}
 	startDaemon := func() error {
 		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
 		return err
 	}
 	controller := &ilotctl.Controller{
+		Workspace:           currentWorkspace.Name,
 		Config:              config,
-		Store:               state.Store{RootDir: stateDir},
+		Store:               store,
 		Supervisor:          &ilotctl.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,

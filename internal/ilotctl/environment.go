@@ -5,8 +5,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-
-	"github.com/Gandalf-Le-Dev/ilot/internal/appconfig"
 )
 
 type EnvEntry struct {
@@ -65,7 +63,7 @@ func (controller *Controller) environmentOf(stacks stackSet, appInstance instanc
 		}
 	}
 	setAll(sourceShell, shellEnv)
-	literalRepoEnv, templatedRepoEnv := splitByTemplate(controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, appconfig.DefaultRepo)])
+	literalRepoEnv, templatedRepoEnv := splitByTemplate(controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, controller.Workspace)])
 	literalAppEnv, templatedAppEnv := splitByTemplate(app.Env)
 	setAll(sourceRepo, literalRepoEnv)
 	setAll(sourceApp, literalAppEnv)

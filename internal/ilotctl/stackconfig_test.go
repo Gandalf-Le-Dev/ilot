@@ -59,7 +59,7 @@ func TestACommandFromMasterKeepsTheAppsThatOnlyATicketDeclares(t *testing.T) {
 	if got := environment.supervisor.runningSpecs["ticket-iam.devbox"]; got.Command != iamSpecBefore.Command {
 		t.Errorf("shared ticket-iam command = %q, want %q", got.Command, iamSpecBefore.Command)
 	}
-	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.dev.example.net"); !isRouted {
+	if _, isRouted := environment.supervisor.routeOf("ticket-search.proj-1234.platform.dev.example.net"); !isRouted {
 		t.Errorf("routes = %+v, want the ticket-search route kept", environment.supervisor.routes)
 	}
 }

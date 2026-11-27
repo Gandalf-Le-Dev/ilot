@@ -68,7 +68,7 @@ func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 func saveEmptyStacks(t *testing.T, store state.Store, stackNames ...string) {
 	t.Helper()
 	for _, stackName := range stackNames {
-		if err := store.Save(state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, LegacyWorktreeDir: "", Apps: map[string]state.AppState{}}); err != nil {
+		if err := store.Save(state.StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]state.AppState{}}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1,37 +1,258 @@
 package workspace
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func homeWithPersonalFile(t *testing.T, content string) string {
+const webFile = "member_of: ../shop\napps:\n  front: {run: front}\n"
+
+// shopAndWeb makes a workspace of two repos in one folder: shop, the root, and web, a member.
+func shopAndWeb(t *testing.T, shopFile, webFile string) (shopDir, webDir string) {
 	t.Helper()
-	homeDir := t.TempDir()
+	codeDir := canonicalTempDir(t)
+	shopDir = newRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": shopFile})
+	webDir = newRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": webFile})
+	return shopDir, webDir
+}
+
+func find(t *testing.T, dir string) (Workspace, Worktree) {
+	t.Helper()
+	workspace, worktree, err := Find(dir, t.TempDir(), NewGit())
+	if err != nil {
+		t.Fatalf("Find(%s): %v", dir, err)
+	}
+	return workspace, worktree
+}
+
+func TestFindFromTheRootRepo(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\napps:\n  api: {run: api}\n", webFile)
+
+	workspace, worktree := find(t, shopDir)
+
+	if workspace.Name != "shop" || workspace.RootDir != shopDir || len(workspace.RepoPaths) != 2 || workspace.RepoPaths["shop"] != shopDir || workspace.RepoPaths["web"] != webDir {
+		t.Errorf("workspace = %+v, want shop with the repos shop and web", workspace)
+	}
+	if want := (Worktree{Repo: "shop", Dir: shopDir, Branch: "main", IsMain: true, MainDir: shopDir}); worktree != want {
+		t.Errorf("worktree = %+v, want %+v", worktree, want)
+	}
+}
+
+func TestFindFromAMemberRepoFollowsMemberOf(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "name: store\nrepos:\n  web: ../web\n", webFile)
+	if err := os.MkdirAll(filepath.Join(webDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace, worktree := find(t, filepath.Join(webDir, "src"))
+
+	if workspace.Name != "store" || workspace.RootDir != shopDir || workspace.RepoPaths["store"] != shopDir || workspace.RepoPaths["web"] != webDir {
+		t.Errorf("workspace = %+v, want store with the root %s", workspace, shopDir)
+	}
+	if worktree.Repo != "web" || worktree.Dir != webDir || !worktree.IsMain {
+		t.Errorf("worktree = %+v, want the main checkout of web", worktree)
+	}
+}
+
+func TestFindFromAWorktreeOfAMemberReadsTheFileOfTheMainCheckout(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\n", webFile)
+	webWorktreeDir := addWorktree(t, webDir, "web-retry", "retry-jobs")
+	gitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
+
+	workspace, worktree := find(t, webWorktreeDir)
+
+	if workspace.Name != "shop" || workspace.RootDir != shopDir {
+		t.Errorf("workspace = %+v, want shop", workspace)
+	}
+	if want := (Worktree{Repo: "web", Dir: webWorktreeDir, Branch: "retry-jobs", IsMain: false, MainDir: webDir}); worktree != want {
+		t.Errorf("worktree = %+v, want %+v", worktree, want)
+	}
+}
+
+func TestAMemberThatTheRootDoesNotListIsAnError(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "apps:\n  api: {run: api}\n", webFile)
+
+	_, _, err := Find(webDir, t.TempDir(), NewGit())
+
+	for _, wantPart := range []string{filepath.Join(webDir, "ilot.yaml"), filepath.Join(shopDir, "ilot.yaml"), "member_of: ../shop", "web: ../web"} {
+		if err == nil || !strings.Contains(err.Error(), wantPart) {
+			t.Errorf("Find = %v, want an error with %q", err, wantPart)
+		}
+	}
+}
+
+func TestAWrongMemberOfIsAnError(t *testing.T) {
+	testCases := []struct {
+		name            string
+		memberOf        string
+		rootFile        string
+		wantErrorSubstr string
+	}{
+		{name: "no folder", memberOf: "../nowhere", wantErrorSubstr: "is not a git checkout"},
+		{name: "a root with no file", memberOf: "../shop", wantErrorSubstr: "does not exist"},
+		{name: "a root that is a member", memberOf: "../shop", rootFile: "member_of: ../elsewhere\n", wantErrorSubstr: "a root repo has none"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			codeDir := canonicalTempDir(t)
+			rootFiles := map[string]string{}
+			if testCase.rootFile != "" {
+				rootFiles["ilot.yaml"] = testCase.rootFile
+			}
+			newRepoAt(t, filepath.Join(codeDir, "shop"), rootFiles)
+			webDir := newRepoAt(t, filepath.Join(codeDir, "web"), map[string]string{"ilot.yaml": "member_of: " + testCase.memberOf + "\n"})
+
+			_, _, err := Find(webDir, t.TempDir(), NewGit())
+
+			if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) || !strings.Contains(err.Error(), filepath.Join(webDir, "ilot.yaml")) {
+				t.Errorf("Find = %v, want an error with %q that names the file of the member", err, testCase.wantErrorSubstr)
+			}
+		})
+	}
+}
+
+func TestARootThatListsARepoWhichDoesNotNameItIsAnError(t *testing.T) {
+	testCases := []struct {
+		name            string
+		webFile         string
+		wantErrorSubstr string
+	}{
+		{name: "no member_of", webFile: "apps:\n  front: {run: front}\n", wantErrorSubstr: "add member_of: ../shop"},
+		{name: "another root", webFile: "member_of: ../blog\n", wantErrorSubstr: "names another root repo"},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\n", testCase.webFile)
+			newRepoAt(t, filepath.Join(filepath.Dir(shopDir), "blog"), map[string]string{"ilot.yaml": "apps: {}\n"})
+
+			_, _, err := Find(shopDir, t.TempDir(), NewGit())
+
+			for _, wantPart := range []string{testCase.wantErrorSubstr, filepath.Join(shopDir, "ilot.yaml"), filepath.Join(webDir, "ilot.yaml")} {
+				if err == nil || !strings.Contains(err.Error(), wantPart) {
+					t.Errorf("Find = %v, want an error with %q", err, wantPart)
+				}
+			}
+		})
+	}
+}
+
+func TestAMemberWithNoFileDeclaresNoApp(t *testing.T) {
+	codeDir := canonicalTempDir(t)
+	shopDir := newRepoAt(t, filepath.Join(codeDir, "shop"), map[string]string{"ilot.yaml": "repos:\n  schemas: ../schemas\n  later: ../not-cloned\napps:\n  api: {run: api}\n"})
+	schemasDir := newRepoAt(t, filepath.Join(codeDir, "schemas"), map[string]string{"README.md": "no apps here\n"})
+	workspace, _ := find(t, shopDir)
+
+	config, err := workspace.ConfigForStack("master")
+	if err != nil || len(config.Apps) != 1 {
+		t.Errorf("ConfigForStack = %+v, %v; want the app of shop only", config.Apps, err)
+	}
+	checkoutByRepo, err := workspace.CheckoutsForStack("master")
+	if err != nil || len(checkoutByRepo) != 2 || checkoutByRepo["schemas"].Dir != schemasDir {
+		t.Errorf("CheckoutsForStack = %+v, %v; want shop and schemas", checkoutByRepo, err)
+	}
+	if notCloned := workspace.ReposNotCloned(); len(notCloned) != 1 || notCloned["later"] != filepath.Join(codeDir, "not-cloned") {
+		t.Errorf("ReposNotCloned = %v, want later", notCloned)
+	}
+}
+
+func TestFindOutsideAWorkspaceSaysWhatItLooksFor(t *testing.T) {
+	_, _, err := Find(t.TempDir(), t.TempDir(), NewGit())
+	if err == nil || !strings.Contains(err.Error(), "not inside a git checkout") || !strings.Contains(err.Error(), "ilot.yaml") {
+		t.Errorf("Find outside a repo = %v, want an error that names the git checkout and ilot.yaml", err)
+	}
+
+	repoDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "platform"), map[string]string{"devbox/ilot.yaml": "apps: {}\n"})
+	_, _, err = Find(repoDir, t.TempDir(), NewGit())
+	if err == nil || !strings.Contains(err.Error(), "has no ilot.yaml") || !strings.Contains(err.Error(), "devbox/ilot.yaml is the old place") {
+		t.Errorf("Find in a repo with the old layout = %v, want an error that says where the file goes", err)
+	}
+}
+
+func TestTheNameOfTheWorkspace(t *testing.T) {
+	testCases := []struct {
+		folder          string
+		rootFile        string
+		wantName        string
+		wantErrorSubstr string
+	}{
+		{folder: "shop", rootFile: "apps: {}\n", wantName: "shop"},
+		{folder: "My_Shop.v2", rootFile: "apps: {}\n", wantName: "my-shop-v2"},
+		{folder: "shop", rootFile: "name: store\n", wantName: "store"},
+		{folder: "shop", rootFile: "name: My Store\n", wantErrorSubstr: "lowercase letters, digits and dashes"},
+		{folder: "___", rootFile: "apps: {}\n", wantErrorSubstr: "set name"},
+		{folder: "shop", rootFile: "repos:\n  shop: ../other\n", wantErrorSubstr: "has the name of the workspace"},
+	}
+	for _, testCase := range testCases {
+		rootDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), testCase.folder), map[string]string{"ilot.yaml": testCase.rootFile})
+
+		workspace, _, err := Find(rootDir, t.TempDir(), NewGit())
+
+		switch {
+		case testCase.wantErrorSubstr != "":
+			if err == nil || !strings.Contains(err.Error(), testCase.wantErrorSubstr) {
+				t.Errorf("Find in %s with %q = %v, want an error with %q", testCase.folder, testCase.rootFile, err, testCase.wantErrorSubstr)
+			}
+		case err != nil || workspace.Name != testCase.wantName:
+			t.Errorf("Find in %s with %q = %q, %v; want the name %q", testCase.folder, testCase.rootFile, workspace.Name, err, testCase.wantName)
+		}
+	}
+}
+
+func TestThePersonalFileGivesAnotherPathToARepo(t *testing.T) {
+	shopDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "shop"), map[string]string{"ilot.yaml": "repos:\n  web: ../web\n"})
+	homeDir := canonicalTempDir(t)
+	webDir := newRepoAt(t, filepath.Join(homeDir, "elsewhere", "web"), map[string]string{"ilot.yaml": "member_of: " + shopDir + "\n"})
 	if err := os.MkdirAll(filepath.Join(homeDir, ".config", "ilot"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(homeDir, PersonalSettingsPath), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(homeDir, PersonalSettingsPath), []byte("repos:\n  web: {path: ~/elsewhere/web}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return homeDir
+
+	for _, dir := range []string{shopDir, webDir} {
+		workspace, _, err := Find(dir, homeDir, NewGit())
+		if err != nil || workspace.RepoPaths["web"] != webDir {
+			t.Errorf("Find(%s) = %+v, %v; want web at %s", dir, workspace.RepoPaths, err, webDir)
+		}
+	}
 }
 
-func platformRepo(t *testing.T) string {
-	t.Helper()
-	return newRepoAt(t, filepath.Join(canonicalTempDir(t), "platform"), map[string]string{PlatformConfigPath: "domain: dev.example.net\napps:\n  standalone: {run: standalone}\n"})
+func TestARepoReachedThroughALinkIsTheSameRepo(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web-link\n", "member_of: ../shop-link\n")
+	for linkName, target := range map[string]string{"shop-link": shopDir, "web-link": webDir} {
+		if err := os.Symlink(target, filepath.Join(filepath.Dir(shopDir), linkName)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, dir := range []string{shopDir, webDir, filepath.Join(filepath.Dir(shopDir), "shop-link"), filepath.Join(filepath.Dir(shopDir), "web-link")} {
+		workspace, _, err := Find(dir, t.TempDir(), NewGit())
+		if err != nil || workspace.RootDir != shopDir || workspace.RepoPaths["web"] != webDir {
+			t.Errorf("Find(%s) = %+v, %v; want the root %s and web at %s", dir, workspace, err, shopDir, webDir)
+		}
+	}
 }
 
-func workspaceWithPlatform(t *testing.T, platformPath string) Workspace {
-	t.Helper()
-	workspace, err := Load(homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformPath+"}\n"), NewGit())
-	if err != nil {
+func TestAStackReadsTheFileOfItsOwnCheckoutElseTheOneOfTheMainCheckout(t *testing.T) {
+	shopDir, webDir := shopAndWeb(t, "repos:\n  web: ../web\napps:\n  api: {run: api}\n", webFile)
+	shopWorktreeDir := addWorktree(t, shopDir, "shop-retry", "PROJ-1-retry")
+	if err := os.WriteFile(filepath.Join(shopWorktreeDir, "ilot.yaml"), []byte("apps:\n  api: {run: api --retry}\n  jobs: {run: jobs}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return workspace
+	webWorktreeDir := addWorktree(t, webDir, "web-retry", "PROJ-1-retry")
+	gitInTest(t, webWorktreeDir, "rm", "-q", "ilot.yaml")
+	workspace, _ := find(t, shopWorktreeDir)
+
+	ticketConfig, err := workspace.ConfigForStack("proj-1")
+	if err != nil || ticketConfig.Apps["api"].Run != "api --retry" || ticketConfig.Apps["jobs"].Repo != "shop" || ticketConfig.Apps["front"].Repo != "web" {
+		t.Errorf("config of proj-1 = %+v, %v; want the apps of the shop worktree, and front from the main checkout of web", ticketConfig.Apps, err)
+	}
+	masterConfig, err := workspace.ConfigForStack("master")
+	if err != nil || masterConfig.Apps["api"].Run != "api" || len(masterConfig.Apps) != 2 {
+		t.Errorf("config of master = %+v, %v; want the apps of the main checkouts", masterConfig.Apps, err)
+	}
 }
 
 func TestCheckoutsForStackPicksTheStackWorktreeElseTheMainCheckout(t *testing.T) {
@@ -93,197 +314,5 @@ func TestCheckoutsForStackSkipsARepoThatIsNotCloned(t *testing.T) {
 	}
 	if notCloned := workspace.ReposNotCloned(); len(notCloned) != 1 || notCloned["portal"] == "" {
 		t.Errorf("ReposNotCloned = %v, want portal", notCloned)
-	}
-}
-
-func TestRepoOfFindsTheRepoOfAWorktree(t *testing.T) {
-	platformDir := newRepo(t, "platform")
-	portalDir := newRepo(t, "portal")
-	portalWorktreeDir := addWorktree(t, portalDir, "task-1", "TASK-1-x")
-	workspace := workspaceOfRepos(map[string]string{"platform": platformDir, "portal": portalDir})
-	located, err := workspace.Locate(portalWorktreeDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	repoName, err := workspace.RepoOf(located)
-
-	if err != nil || repoName != "portal" {
-		t.Errorf("RepoOf = %q, %v; want portal", repoName, err)
-	}
-}
-
-func TestRepoOfNamesThePersonalFileKeyForAnUnknownCheckout(t *testing.T) {
-	workspace := workspaceOfRepos(map[string]string{"platform": newRepo(t, "platform")})
-	located, err := workspace.Locate(newRepo(t, "acme-portal"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = workspace.RepoOf(located)
-
-	if err == nil || !strings.Contains(err.Error(), "repos.") || !strings.Contains(err.Error(), "env.yaml") {
-		t.Fatalf("err = %v, want an error naming repos.<name>.path in env.yaml", err)
-	}
-}
-
-func TestARepoCheckoutWithoutItsConfigFileDeclaresNoApps(t *testing.T) {
-	portalDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "portal"), map[string]string{"README.md": "no ilot.yaml on this branch\n"})
-	platformDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "platform"), map[string]string{
-		PlatformConfigPath: "domain: dev.example.net\nrepos:\n  portal: {path: /nowhere, config: ilot.yaml}\napps:\n  standalone: {run: standalone}\n",
-	})
-	workspace, err := Load(homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  portal: {path: "+portalDir+"}\n"), NewGit())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	config, err := workspace.ConfigForStack("master")
-
-	if err != nil {
-		t.Fatalf("ConfigForStack: %v", err)
-	}
-	if _, isKnown := config.Apps["standalone"]; !isKnown {
-		t.Errorf("apps = %v, want platform's apps", config.Apps)
-	}
-}
-
-func TestPlatformWithoutItsConfigNamesThePersonalSetting(t *testing.T) {
-	_, err := Load(homeWithPersonalFile(t, "repos:\n  platform: {path: "+t.TempDir()+"}\n"), NewGit())
-
-	if err == nil || !strings.Contains(err.Error(), "repos.platform.path") {
-		t.Fatalf("Load = %v, want an error naming repos.platform.path", err)
-	}
-}
-
-func TestAPersonalRepoWithPathAndConfigJoinsTheWorkspace(t *testing.T) {
-	toolDir := newRepoAt(t, filepath.Join(canonicalTempDir(t), "mytool"), map[string]string{"ilot.yaml": "apps:\n  mytool-daemon: {run: mytool daemon}\n"})
-	platformDir := platformRepo(t)
-	workspace, err := Load(homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n  mytool: {path: "+toolDir+", config: ilot.yaml}\n  pathonly: {path: "+t.TempDir()+"}\n"), NewGit())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if _, isKnown := workspace.RepoPaths["pathonly"]; isKnown {
-		t.Errorf("a personal repo without a config must stay unknown: %v", workspace.RepoPaths)
-	}
-
-	config, err := workspace.ConfigForStack("master")
-
-	if err != nil {
-		t.Fatalf("ConfigForStack: %v", err)
-	}
-	for _, appName := range []string{"mytool-daemon", "standalone"} {
-		if _, isKnown := config.Apps[appName]; !isKnown {
-			t.Errorf("apps = %v, want %s", config.Apps, appName)
-		}
-	}
-}
-
-func TestCrossStackCommandsUseTheMasterStackFromAnyFolder(t *testing.T) {
-	platformDir := platformRepo(t)
-	var notes bytes.Buffer
-
-	stackName, worktree, err := workspaceWithPlatform(t, platformDir).StackOf(t.TempDir(), true, &notes)
-
-	if err != nil || stackName != "master" || worktree.Dir != platformDir {
-		t.Fatalf("StackOf = %q, %+v, %v; want the master stack of %s", stackName, worktree, err, platformDir)
-	}
-	if notes.Len() != 0 {
-		t.Errorf("notes = %q, want none for a command that works across stacks", notes.String())
-	}
-}
-
-func TestAFolderOutsideACheckoutUsesMasterAndSaysSo(t *testing.T) {
-	var notes bytes.Buffer
-
-	stackName, _, err := workspaceWithPlatform(t, platformRepo(t)).StackOf(t.TempDir(), false, &notes)
-
-	if err != nil || stackName != "master" {
-		t.Fatalf("StackOf = %q, %v; want the master stack", stackName, err)
-	}
-	if !strings.Contains(notes.String(), "not in a checkout") {
-		t.Errorf("notes = %q, want the master stack note", notes.String())
-	}
-}
-
-func TestAFolderInAnUnknownRepoKeepsTheHint(t *testing.T) {
-	var notes bytes.Buffer
-
-	_, _, err := workspaceWithPlatform(t, platformRepo(t)).StackOf(newRepo(t, "not-listed"), false, &notes)
-
-	if err == nil || !strings.Contains(err.Error(), "repos.") {
-		t.Fatalf("StackOf = %v, want the error that names repos.<name>.path", err)
-	}
-}
-
-func TestALinkedWorktreeGetsTheStackOfItsTicket(t *testing.T) {
-	platformDir := platformRepo(t)
-	linkedWorktreeDir := addWorktree(t, platformDir, "retry", "PROJ-1234-retry")
-	var notes bytes.Buffer
-
-	stackName, worktree, err := workspaceWithPlatform(t, platformDir).StackOf(linkedWorktreeDir, false, &notes)
-
-	if want := (Worktree{Repo: "platform", Dir: linkedWorktreeDir, Branch: "PROJ-1234-retry", IsMain: false, MainDir: platformDir}); err != nil || stackName != "proj-1234" || worktree != want {
-		t.Fatalf("StackOf = %q, %+v, %v; want proj-1234 and %+v", stackName, worktree, err, want)
-	}
-}
-
-func TestCrossStackCommandsIgnoreALinkedPlatformPath(t *testing.T) {
-	platformDir := platformRepo(t)
-	linkedWorktreeDir := addWorktree(t, platformDir, "proj-1234-work", "PROJ-1234-work")
-	var notes bytes.Buffer
-
-	stackName, worktree, err := workspaceWithPlatform(t, linkedWorktreeDir).StackOf(t.TempDir(), true, &notes)
-
-	if err != nil || stackName != "master" || worktree.Dir != platformDir {
-		t.Fatalf("StackOf = %q, %+v, %v; want master from the main checkout %s", stackName, worktree, err, platformDir)
-	}
-}
-
-func TestAHomeFolderThatIsACheckoutUsesMasterAndSaysSo(t *testing.T) {
-	platformDir := platformRepo(t)
-	homeDir := homeWithPersonalFile(t, "repos:\n  platform: {path: "+platformDir+"}\n")
-	gitInTest(t, homeDir, "init", "-q", "-b", "main")
-	gitInTest(t, homeDir, "commit", "-q", "--allow-empty", "-m", "dotfiles")
-	linkedHomeDir := filepath.Join(t.TempDir(), "home")
-	if err := os.Symlink(homeDir, linkedHomeDir); err != nil {
-		t.Fatal(err)
-	}
-	for _, reachedHomeDir := range []string{homeDir, linkedHomeDir} {
-		workspace, err := Load(reachedHomeDir, NewGit())
-		if err != nil {
-			t.Fatal(err)
-		}
-		var notes bytes.Buffer
-
-		stackName, worktree, err := workspace.StackOf(reachedHomeDir, false, &notes)
-
-		if err != nil || stackName != "master" || worktree.Dir != platformDir {
-			t.Fatalf("StackOf(%s) = %q, %+v, %v; want the master stack of %s", reachedHomeDir, stackName, worktree, err, platformDir)
-		}
-		if !strings.Contains(notes.String(), "home folder") {
-			t.Errorf("notes = %q, want the home folder note", notes.String())
-		}
-	}
-}
-
-func TestARepoPathThroughASymbolicLinkIsTheSameRepo(t *testing.T) {
-	platformDir := platformRepo(t)
-	linkedPlatformDir := filepath.Join(canonicalTempDir(t), "platform-link")
-	if err := os.Symlink(platformDir, linkedPlatformDir); err != nil {
-		t.Fatal(err)
-	}
-	workspace := workspaceWithPlatform(t, linkedPlatformDir)
-	var notes bytes.Buffer
-
-	if got := workspace.RepoPaths["platform"]; got != platformDir {
-		t.Errorf("RepoPaths[platform] = %q, want the canonical %q", got, platformDir)
-	}
-	stackName, worktree, err := workspace.StackOf(linkedPlatformDir, false, &notes)
-
-	if err != nil || stackName != "master" || worktree.Dir != platformDir || worktree.MainDir != platformDir {
-		t.Fatalf("StackOf through a link = %q, %+v, %v; want the master stack of %s", stackName, worktree, err, platformDir)
-	}
-	if notes.Len() != 0 {
-		t.Errorf("notes = %q, want none inside a known repo", notes.String())
 	}
 }
