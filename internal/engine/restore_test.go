@@ -130,3 +130,33 @@ func TestBootStartsTheOtherAppsWhenATemplateDoesNotRender(t *testing.T) {
 
 	checkOnlyTheBrokenStackStaysDown(t, environment, environment.executor.Boot(t.Context(), environment.base))
 }
+
+func TestStartAllSkipsABaseAppThatNoConfigDeclaresAnyMore(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.executor.Config.Apps["envdump"] = config.App{Run: "env"}
+	environment.start(t, environment.base, StartOptions{}, "envdump", "standalone")
+	delete(environment.executor.Config.Apps, "envdump")
+	environment.supervisor.simulateDaemonRestart()
+
+	listing, err := environment.executor.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := rowFor(listing.Apps, "base", "envdump"); !row.Undeclared || listing.Restore != "ilot start --all" {
+		t.Errorf("envdump = %+v, restore = %q; want envdump undeclared, and ilot start --all for standalone", row, listing.Restore)
+	}
+	environment.supervisor.calls = nil
+
+	err = environment.executor.StartAll(t.Context())
+
+	if err == nil || !strings.Contains(err.Error(), "envdump.base.platform does not start: no ilot.yaml declares it any more") || !strings.Contains(err.Error(), "ilot stop envdump") {
+		t.Errorf("StartAll = %v, want envdump named with the command that removes it", err)
+	}
+	if slices.Contains(environment.supervisor.calls, "put envdump.base.platform") || !slices.Contains(environment.supervisor.startedInOrder, "standalone.base.platform") {
+		t.Errorf("calls = %v, want standalone back and no call for envdump", environment.supervisor.calls)
+	}
+	listing, err = environment.executor.List(t.Context())
+	if err != nil || listing.Restore != "" {
+		t.Errorf("restore = %q, %v; want nothing: ilot start --all does not start envdump", listing.Restore, err)
+	}
+}
