@@ -5,6 +5,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 )
 
 type EnvEntry struct {
@@ -24,15 +26,15 @@ const (
 )
 
 func (controller *Controller) Environment(stackName string, appName string) ([]EnvEntry, error) {
-	stacks, err := controller.loadStacks(stackName)
+	snapshot, err := controller.loadStacks(stackName)
 	if err != nil {
 		return nil, err
 	}
-	appInstances, err := controller.instancesOf(stackName, []string{appName})
+	appInstances, err := snapshot.Instances(stackName, []string{appName})
 	if err != nil {
 		return nil, err
 	}
-	return controller.environmentOf(stacks, appInstances[0])
+	return controller.environmentOf(snapshot, appInstances[0])
 }
 
 func (controller *Controller) shellEnvironment() (map[string]string, error) {
@@ -52,8 +54,8 @@ func (controller *Controller) shellEnviron() ([]string, error) {
 
 // The layers, and the last one wins: the login shell, the env of the root repo, the env of the repo of the app, the env of the app, the global file.
 // A value written with a template is computed by ilot (ports, addresses, the stack), so a value of the global file cannot override it.
-func (controller *Controller) environmentOf(stacks stackSet, appInstance instance) ([]EnvEntry, error) {
-	app := controller.app(appInstance)
+func (controller *Controller) environmentOf(snapshot plan.Snapshot, appInstance plan.Instance) ([]EnvEntry, error) {
+	app := snapshot.App(appInstance)
 	shellEnv, err := controller.shellEnvironment()
 	if err != nil {
 		return nil, err
@@ -65,17 +67,17 @@ func (controller *Controller) environmentOf(stacks stackSet, appInstance instanc
 		}
 	}
 	setAll(sourceShell, shellEnv)
-	literalRootEnv, templatedRootEnv := splitByTemplate(controller.repoEnvOf(appInstance)[controller.Workspace])
-	literalRepoEnv, templatedRepoEnv := splitByTemplate(controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, controller.Workspace)])
+	literalRootEnv, templatedRootEnv := splitByTemplate(repoEnvOf(snapshot, appInstance)[controller.Workspace])
+	literalRepoEnv, templatedRepoEnv := splitByTemplate(repoEnvOf(snapshot, appInstance)[cmp.Or(app.Repo, controller.Workspace)])
 	literalAppEnv, templatedAppEnv := splitByTemplate(app.Env)
 	setAll(sourceRoot, literalRootEnv)
 	setAll(sourceRepo, literalRepoEnv)
 	setAll(sourceApp, literalAppEnv)
 	setAll(sourceGlobal, controller.Settings.Env)
-	setAll(sourceGlobalApp, controller.Settings.Apps[appInstance.appName])
+	setAll(sourceGlobalApp, controller.Settings.Apps[appInstance.App])
 	for _, templatedEnv := range []map[string]string{templatedRootEnv, templatedRepoEnv, templatedAppEnv} {
 		for _, key := range slices.Sorted(maps.Keys(templatedEnv)) {
-			value, err := controller.renderTemplate(stacks, appInstance, templatedEnv[key])
+			value, err := controller.renderTemplate(snapshot, appInstance, templatedEnv[key])
 			if err != nil {
 				return nil, err
 			}

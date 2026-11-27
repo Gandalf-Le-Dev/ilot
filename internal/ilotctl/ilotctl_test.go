@@ -314,7 +314,8 @@ func newTestEnvironment(t *testing.T) testEnvironment {
 		Domain:     "dev.example.net",
 		PortRange:  ports.Range{First: 20000, Last: 29999},
 		Config:     testConfig(),
-		Store:      StackStore{Files: state.Store{RootDir: t.TempDir()}, Workspace: "platform", Root: "/src/platform"},
+		Root:       "/src/platform",
+		Store:      state.Store{RootDir: t.TempDir(), LockTimeout: 0, OnLockWait: nil},
 		Supervisor: supervisor,
 		RunBuild: func(_ context.Context, workingDir, shellCommand string, environ []string) error {
 			*builds = append(*builds, recordedBuild{workingDir: workingDir, command: shellCommand})
@@ -348,13 +349,18 @@ func (environment testEnvironment) start(t *testing.T, stackName string, options
 	}
 }
 
-func (environment testEnvironment) isStoredAsRunning(t *testing.T, stackName, appName string) bool {
+func (environment testEnvironment) storedApp(t *testing.T, stackName, appName string) state.App {
 	t.Helper()
-	stackState, err := environment.controller.Store.Load(stackName)
+	current, err := environment.controller.Store.Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return stackState.Apps[appName].Running
+	return current.App(environment.controller.Workspace, stackName, appName)
+}
+
+func (environment testEnvironment) isStoredAsRunning(t *testing.T, stackName, appName string) bool {
+	t.Helper()
+	return environment.storedApp(t, stackName, appName).Wanted
 }
 
 func (environment testEnvironment) isApplied(processName string) bool {
@@ -364,11 +370,7 @@ func (environment testEnvironment) isApplied(processName string) bool {
 
 func (environment testEnvironment) appPort(t *testing.T, stackName, appName string) int {
 	t.Helper()
-	stackState, err := environment.controller.Store.Load(stackName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := stackState.Apps[appName].Ports["http"]
+	port := environment.storedApp(t, stackName, appName).Ports["http"]
 	if port == 0 {
 		t.Fatalf("%s has no http port in stack %s", appName, stackName)
 	}
@@ -418,7 +420,7 @@ func TestEnvironmentTemplatesUseTheGatewayOfTheStackAndThePortsOfTheBaseStack(t 
 	if worktreePublicapi.Dir != "/worktrees/proj-1234" {
 		t.Errorf("WorkingDir = %q", worktreePublicapi.Dir)
 	}
-	wantBinDir := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "bin")
+	wantBinDir := filepath.Join(environment.controller.StackDir("proj-1234"), "bin")
 	if !strings.HasPrefix(worktreePublicapi.Command, wantBinDir+"/platform api publicapi --port=") {
 		t.Errorf("Command = %q", worktreePublicapi.Command)
 	}
@@ -474,7 +476,7 @@ func TestStartOfARunningAppRebuildsAndRestartsIt(t *testing.T) {
 func TestStartShowsTheLogOfAnAppWhileItWaitsForIt(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{
-		"standalone.base.platform": {logPath: filepath.Join(environment.controller.Store.StackDir("base"), "logs", "standalone.log"), message: "listening"},
+		"standalone.base.platform": {logPath: filepath.Join(environment.controller.StackDir("base"), "logs", "standalone.log"), message: "listening"},
 	}
 
 	environment.start(t, environment.base, StartOptions{}, "standalone")
@@ -599,7 +601,7 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 func TestStartStopsTheAppItStartedWhenItsProcessEnds(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.supervisor.setBehavior("publicapi.base.platform", processEndsAtEveryStart)
-	logFile := filepath.Join(environment.controller.Store.StackDir("base"), "logs", "publicapi.log")
+	logFile := filepath.Join(environment.controller.StackDir("base"), "logs", "publicapi.log")
 	environment.supervisor.logBeforeReady = map[string]logLineBeforeReady{"publicapi.base.platform": {logPath: logFile, message: "pull access denied"}}
 
 	err := environment.controller.Start(t.Context(), environment.base, []string{"publicapi"}, StartOptions{})
@@ -1165,7 +1167,7 @@ func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
 
 func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
 	environment := newTestEnvironment(t)
-	masterBinDir := filepath.Join(environment.controller.Store.StackDir("base"), "bin")
+	masterBinDir := filepath.Join(environment.controller.StackDir("base"), "bin")
 	if err := os.MkdirAll(masterBinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1294,14 +1296,14 @@ func TestLogFileOfAnAppIsInTheStackThatRunsIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LogFile(publicapi): %v", err)
 	}
-	if want := filepath.Join(environment.controller.Store.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
+	if want := filepath.Join(environment.controller.StackDir("proj-1234"), "logs", "publicapi.log"); worktreeLog != want {
 		t.Errorf("publicapi log = %q, want %q", worktreeLog, want)
 	}
 	baseLog, err := environment.controller.LogFile(environment.featureStack, "temporal")
 	if err != nil {
 		t.Fatalf("LogFile(temporal): %v", err)
 	}
-	if want := filepath.Join(environment.controller.Store.StackDir("base"), "logs", "temporal.log"); baseLog != want {
+	if want := filepath.Join(environment.controller.StackDir("base"), "logs", "temporal.log"); baseLog != want {
 		t.Errorf("temporal log = %q, want %q", baseLog, want)
 	}
 	if _, err := environment.controller.LogFile(environment.featureStack, "nope"); err == nil {
@@ -1459,11 +1461,7 @@ func TestAContainerReachesTheOtherAppsThroughTheNameOfTheMachine(t *testing.T) {
 
 	searchEnv := environment.supervisor.runningSpecs["search.proj-1234.platform"].Env
 	wantGateway := "http://host.docker.internal:" + strconv.Itoa(environment.appPort(t, "proj-1234", "gateway"))
-	cacheState, err := environment.controller.Store.Load("proj-1234")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantCache := "postgres://host.docker.internal:" + strconv.Itoa(cacheState.Apps["search-cache"].Ports["postgres"]) + "/cache"
+	wantCache := "postgres://host.docker.internal:" + strconv.Itoa(environment.storedApp(t, "proj-1234", "search-cache").Ports["postgres"]) + "/cache"
 	if searchEnv["REGION"] != "DEV1" || searchEnv["GATEWAY_URL"] != wantGateway || searchEnv["CACHE_URL"] != wantCache {
 		t.Errorf("search env = %v, want %s for a process and %s for another container", searchEnv, wantGateway, wantCache)
 	}
@@ -1512,11 +1510,7 @@ func TestAContainerPortThatAnotherProgramHoldsIsNotGiven(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{SkipDependencies: true}, "search-cache")
 
-	cacheState, err := environment.controller.Store.Load("proj-1234")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if port := cacheState.Apps["search-cache"].Ports["postgres"]; port == config.DefaultFirstPort || port == 0 {
+	if port := environment.storedApp(t, "proj-1234", "search-cache").Ports["postgres"]; port == config.DefaultFirstPort || port == 0 {
 		t.Errorf("search-cache is published on port %d, want a free port", port)
 	}
 }

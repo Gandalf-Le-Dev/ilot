@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/config"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/ports"
 	"github.com/Gandalf-Le-Dev/ilot/internal/state"
-	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
 const (
@@ -38,7 +38,8 @@ func CheckRendering(workspaceName string, repoNames []string, merged config.Conf
 	controller := Controller{
 		Workspace:           workspaceName,
 		Config:              merged,
-		Store:               StackStore{Files: state.Store{RootDir: madeUpCheckoutsRoot + "state"}, Workspace: workspaceName, Root: ""},
+		Root:                "",
+		Store:               state.Store{RootDir: madeUpCheckoutsRoot + "state", LockTimeout: 0, OnLockWait: nil},
 		Supervisor:          nil,
 		RunBuild:            nil,
 		EnsureImage:         nil,
@@ -58,40 +59,46 @@ func CheckRendering(workspaceName string, repoNames []string, merged config.Conf
 		ReadyTimeout:        0,
 		ProgressInterval:    0,
 		Output:              io.Discard,
-		configByStack:       nil,
 	}
 
-	stacks := stacksWithEveryAppRunning(append([]string{workspaceName}, repoNames...), merged)
+	snapshot := snapshotWithEveryAppRunning(workspaceName, append([]string{workspaceName}, repoNames...), merged)
 	var problems []error
 	for _, appName := range slices.Sorted(maps.Keys(merged.Apps)) {
-		appInstance := instance{stackName: controller.stackOf(checkStackName, appName), appName: appName}
+		appInstance := plan.Instance{Stack: snapshot.StackOf(checkStackName, appName), App: appName}
 		repoName := cmp.Or(merged.Apps[appName].Repo, workspaceName)
-		for _, err := range controller.renderEveryTemplateOf(stacks, appInstance) {
+		for _, err := range controller.renderEveryTemplateOf(snapshot, appInstance) {
 			problems = append(problems, RenderProblem{App: appName, Repo: repoName, Err: err})
 		}
 	}
 	return problems
 }
 
-func stacksWithEveryAppRunning(repoNames []string, merged config.Config) stackSet {
+func snapshotWithEveryAppRunning(workspaceName string, repoNames []string, merged config.Config) plan.Snapshot {
 	for _, app := range merged.Apps {
 		if app.Repo != "" {
 			repoNames = append(repoNames, app.Repo)
 		}
 	}
-	stacks := stackSet{byName: map[string]*StackState{}}
-	for _, stackName := range []string{workspace.BaseStackName, checkStackName} {
-		stackState := stacks.ensure(stackName)
+	snapshot := plan.Snapshot{
+		Workspace:      workspaceName,
+		Own:            checkStackName,
+		State:          state.New(),
+		Configs:        map[string]config.Config{checkStackName: merged},
+		Checkouts:      map[string]map[string]string{},
+		ReposNotCloned: nil,
+	}
+	for _, stackName := range []string{plan.BaseStack, checkStackName} {
+		snapshot.Checkouts[stackName] = map[string]string{}
 		for _, repoName := range repoNames {
-			stackState.CheckoutDirs[repoName] = madeUpCheckoutsRoot + repoName
+			snapshot.Checkouts[stackName][repoName] = madeUpCheckoutsRoot + repoName
 		}
 	}
 	nextMadeUpPort := firstMadeUpPort
 	for _, appName := range slices.Sorted(maps.Keys(merged.Apps)) {
 		app := merged.Apps[appName]
-		stackNames := []string{checkStackName, workspace.BaseStackName}
+		stackNames := []string{checkStackName, plan.BaseStack}
 		if app.Scope == config.ScopeBase {
-			stackNames = []string{workspace.BaseStackName}
+			stackNames = []string{plan.BaseStack}
 		}
 		for _, stackName := range stackNames {
 			portByName := map[string]int{}
@@ -103,26 +110,26 @@ func stacksWithEveryAppRunning(repoNames []string, merged config.Config) stackSe
 				portByName[portName] = nextMadeUpPort
 				nextMadeUpPort++
 			}
-			stacks.setApp(instance{stackName: stackName, appName: appName}, AppState{Ports: portByName, Running: true})
+			snapshot.State.Stack(workspaceName, stackName).Apps[appName] = state.App{Wanted: true, Ports: portByName, Route: nil, Container: ""}
 		}
 	}
-	return stacks
+	return snapshot
 }
 
 // Each template renders on its own, so one broken value does not hide the next one.
-func (controller *Controller) renderEveryTemplateOf(stacks stackSet, appInstance instance) []error {
-	app := controller.app(appInstance)
+func (controller *Controller) renderEveryTemplateOf(snapshot plan.Snapshot, appInstance plan.Instance) []error {
+	app := snapshot.App(appInstance)
 	var templates []string
 	if app.Build != "" {
 		templates = append(templates, app.Build)
 	}
-	if !controller.isContainer(appInstance) {
+	if !controller.isContainer(snapshot, appInstance) {
 		templates = append(templates, app.Run)
 	}
 	if app.Stop != "" {
 		templates = append(templates, app.Stop)
 	}
-	repoEnv := controller.repoEnvOf(appInstance)[cmp.Or(app.Repo, controller.Workspace)]
+	repoEnv := repoEnvOf(snapshot, appInstance)[cmp.Or(app.Repo, controller.Workspace)]
 	for _, valueByKey := range []map[string]string{repoEnv, app.Env} {
 		for _, key := range slices.Sorted(maps.Keys(valueByKey)) {
 			if strings.Contains(valueByKey[key], "{{") {
@@ -134,7 +141,7 @@ func (controller *Controller) renderEveryTemplateOf(stacks stackSet, appInstance
 	templates = append(templates, app.Container.Args...)
 	var problems []error
 	for _, templateText := range templates {
-		if _, err := controller.renderTemplate(stacks, appInstance, templateText); err != nil {
+		if _, err := controller.renderTemplate(snapshot, appInstance, templateText); err != nil {
 			problems = append(problems, err)
 		}
 	}

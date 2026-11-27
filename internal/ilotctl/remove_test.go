@@ -30,7 +30,7 @@ func TestRemoveStopsAppsAndForgetsTheStack(t *testing.T) {
 			t.Errorf("the removed stack keeps the route %s", route.Host)
 		}
 	}
-	if _, err := os.Stat(environment.controller.Store.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(environment.controller.StackDir("proj-1234")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("folder of the removed stack: stat err = %v, want not exist", err)
 	}
 	otherStack := "proj-5678"
@@ -65,12 +65,17 @@ func TestRemoveRefusesAnUnknownStack(t *testing.T) {
 	}
 }
 
-func saveEmptyStacks(t *testing.T, store StackStore, stackNames ...string) {
+func saveStacks(t *testing.T, controller *Controller, bindingByStack map[string]map[string]string) {
 	t.Helper()
-	for _, stackName := range stackNames {
-		if err := store.Save(StackState{Name: stackName, CheckoutDirs: map[string]string{}, Apps: map[string]AppState{}}); err != nil {
-			t.Fatal(err)
-		}
+	current, err := controller.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for stackName, binding := range bindingByStack {
+		current.Stack(controller.Workspace, stackName).Checkouts = binding
+	}
+	if err := controller.Store.Save(current); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -85,12 +90,7 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 		"none-deleted": {"platform": otherExistingWorktreeDir},
 		"moved-away":   nil,
 	}
-	for stackName, boundWorktrees := range boundWorktreesByStack {
-		stackState := StackState{Name: stackName, CheckoutDirs: map[string]string{}, BoundWorktrees: boundWorktrees, Apps: map[string]AppState{}}
-		if err := environment.controller.Store.Save(stackState); err != nil {
-			t.Fatal(err)
-		}
-	}
+	saveStacks(t, environment.controller, boundWorktreesByStack)
 
 	removable, err := environment.controller.StacksWithoutWorktrees()
 
@@ -101,7 +101,7 @@ func TestCleanRemovesOnlyAStackWhoseBoundWorktreesAreAllDeleted(t *testing.T) {
 
 func TestStackCheckoutsGivesTheCheckoutOfEachRepoPerStack(t *testing.T) {
 	environment := newTestEnvironment(t)
-	saveEmptyStacks(t, environment.controller.Store, "base", "proj-1234")
+	saveStacks(t, environment.controller, map[string]map[string]string{"base": nil, "proj-1234": nil})
 
 	checkoutsByStack, err := environment.controller.StackCheckouts()
 

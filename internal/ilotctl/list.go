@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/Gandalf-Le-Dev/ilot/internal/daemon"
+	"github.com/Gandalf-Le-Dev/ilot/internal/plan"
 	"github.com/Gandalf-Le-Dev/ilot/internal/workspace"
 )
 
@@ -30,15 +31,12 @@ type ExternalServiceRow struct {
 }
 
 func (controller *Controller) List(ctx context.Context) (Listing, error) {
-	allStacks, err := controller.Store.All()
+	current, err := controller.loadState()
 	if err != nil {
 		return Listing{}, err
 	}
-	var stackNames []string
-	for _, stackState := range allStacks {
-		stackNames = append(stackNames, stackState.Name)
-	}
-	for _, problem := range controller.loadEveryReadableStackConfig(stackNames) {
+	snapshot, problems := controller.snapshotOf(current, plan.BaseStack)
+	for _, problem := range problems {
 		fmt.Fprintf(controller.Output, "warning: %v\n", problem)
 	}
 	processByName, err := controller.Supervisor.Processes(ctx)
@@ -46,19 +44,20 @@ func (controller *Controller) List(ctx context.Context) (Listing, error) {
 		return Listing{}, err
 	}
 	listing := Listing{Apps: []AppRow{}, ExternalServices: []ExternalServiceRow{}}
-	for _, stackState := range allStacks {
-		for _, appName := range slices.Sorted(maps.Keys(stackState.Apps)) {
-			appInstance := instance{stackName: stackState.Name, appName: appName}
+	stacks := current.Stacks(controller.Workspace)
+	for _, stackName := range slices.Sorted(maps.Keys(stacks)) {
+		for _, appName := range slices.Sorted(maps.Keys(stacks[stackName].Apps)) {
+			appInstance := plan.Instance{Stack: stackName, App: appName}
 			status := "stopped"
 			if process, isKnown := processByName[controller.processName(appInstance)]; isKnown {
 				status = statusOf(process)
 			}
 			listing.Apps = append(listing.Apps, AppRow{
-				Stack:  stackState.Name,
+				Stack:  stackName,
 				App:    appName,
 				Status: status,
-				Ports:  stackState.Apps[appName].Ports,
-				URL:    controller.publicURL(appInstance),
+				Ports:  stacks[stackName].Apps[appName].Ports,
+				URL:    controller.publicURL(snapshot, appInstance),
 			})
 		}
 	}
@@ -81,33 +80,33 @@ func statusOf(process daemon.Process) string {
 }
 
 func (controller *Controller) StackCheckouts() (map[string]map[string]workspace.Worktree, error) {
-	allStacks, err := controller.Store.All()
+	current, err := controller.loadState()
 	if err != nil {
 		return nil, err
 	}
 	checkoutsByStack := map[string]map[string]workspace.Worktree{}
-	for _, stackState := range allStacks {
-		checkoutByRepo, err := controller.CheckoutsForStack(stackState.Name)
+	for stackName := range current.Stacks(controller.Workspace) {
+		checkoutByRepo, err := controller.CheckoutsForStack(stackName)
 		if err != nil {
 			return nil, err
 		}
-		checkoutsByStack[stackState.Name] = checkoutByRepo
+		checkoutsByStack[stackName] = checkoutByRepo
 	}
 	return checkoutsByStack, nil
 }
 
-func (controller *Controller) publicURL(appInstance instance) string {
-	if controller.app(appInstance).Route == "" {
+func (controller *Controller) publicURL(snapshot plan.Snapshot, appInstance plan.Instance) string {
+	if snapshot.App(appInstance).Route == "" {
 		return ""
 	}
-	return controller.publicBaseURL(appInstance) + controller.app(appInstance).HomePath
+	return controller.publicBaseURL(appInstance) + snapshot.App(appInstance).HomePath
 }
 
-func (controller *Controller) publicHost(appInstance instance) string {
-	return appInstance.appName + "." + appInstance.stackName + "." + controller.Workspace + "." + controller.Domain
+func (controller *Controller) publicHost(appInstance plan.Instance) string {
+	return appInstance.App + "." + appInstance.Stack + "." + controller.Workspace + "." + controller.Domain
 }
 
-func (controller *Controller) publicBaseURL(appInstance instance) string {
+func (controller *Controller) publicBaseURL(appInstance plan.Instance) string {
 	return controller.proxyURL(controller.publicHost(appInstance))
 }
 
@@ -119,9 +118,9 @@ func (controller *Controller) proxyURL(host string) string {
 	return url
 }
 
-func (controller *Controller) printURLs(stacks stackSet, requestedInstances []instance) {
+func (controller *Controller) printURLs(snapshot plan.Snapshot, requestedInstances []plan.Instance) {
 	for _, appInstance := range requestedInstances {
-		if url := controller.publicURL(appInstance); url != "" && stacks.isRunning(appInstance) {
+		if url := controller.publicURL(snapshot, appInstance); url != "" && snapshot.IsWanted(appInstance) {
 			fmt.Fprintf(controller.Output, "%s: %s\n", controller.processName(appInstance), url)
 		}
 	}
