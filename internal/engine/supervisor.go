@@ -73,22 +73,23 @@ func (supervisor *DaemonSupervisor) warnAboutDaemon(ctx context.Context, client 
 		return
 	}
 	supervisor.warnOnce.Do(func() {
-		for _, warning := range daemonWarnings(status, supervisor.Version, supervisor.ProxyListen) {
+		for _, warning := range DaemonWarnings(status, supervisor.Version, supervisor.ProxyListen) {
 			fmt.Fprintln(supervisor.Warnings, "warning: "+warning)
 		}
 	})
 }
 
-func daemonWarnings(status daemon.Status, version, proxyListen string) []string {
+// DaemonWarnings says how a daemon differs from the one that this ilot would start.
+func DaemonWarnings(status daemon.Status, version, proxyListen string) []string {
 	var warnings []string
 	if status.Version != version {
-		warnings = append(warnings, fmt.Sprintf("the ilot daemon has the version %q and this ilot has the version %q: run ilot restart to start the daemon of this version", status.Version, version))
+		warnings = append(warnings, fmt.Sprintf("the ilot daemon has the version %q and this ilot has the version %q: run ilot daemon restart to start the daemon of this version", status.Version, version))
 	}
 	switch {
 	case status.ProxyError != "":
-		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address, or set proxy.listen to another one in ~/"+config.GlobalFilePath+", then run ilot restart", status.ProxyError))
+		warnings = append(warnings, fmt.Sprintf("%s: the apps run, but their URLs do not answer. Free the address, or set proxy.listen to another one in ~/"+config.GlobalFilePath+", then run ilot daemon restart", status.ProxyError))
 	case status.ProxyAddress != proxyListen:
-		warnings = append(warnings, fmt.Sprintf("the proxy of the ilot daemon listens on %q, and this ilot expects %q: the URLs that ilot prints do not answer. Run ilot restart", status.ProxyAddress, proxyListen))
+		warnings = append(warnings, fmt.Sprintf("the proxy of the ilot daemon listens on %q, and this ilot expects %q: the URLs that ilot prints do not answer. Run ilot daemon restart", status.ProxyAddress, proxyListen))
 	}
 	return warnings
 }

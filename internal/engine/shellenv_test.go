@@ -80,7 +80,7 @@ func TestAContainerGetsNoShellVariable(t *testing.T) {
 	}
 }
 
-func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
+func TestADaemonRestartStopsTheDaemonAndStartsTheMembers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.executor.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://old"})
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
@@ -88,33 +88,32 @@ func TestRestartStopsTheDaemonAndStartsTheAppsThatRan(t *testing.T) {
 	restart.ShellEnv = fixedShellEnv(map[string]string{"GOPROXY": "https://new"})
 	environment.supervisor.events = nil
 
-	if err := restart.Restart(t.Context(), environment.base); err != nil {
-		t.Fatalf("Restart: %v", err)
+	if err := restart.RestartDaemon(t.Context()); err != nil {
+		t.Fatalf("RestartDaemon: %v", err)
 	}
 
 	if events := environment.supervisor.events; len(events) == 0 || events[0] != "shutdown" {
 		t.Errorf("events = %v, want a shutdown first", events)
 	}
 	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	want := []string{"gateway.base.shop", "internalapi.base.shop", "restapi-watch.base.shop", "restapi.base.shop", "standalone.proj-1234.shop", "temporal.base.shop"}
-	if !slices.Equal(running, want) {
-		t.Errorf("running after restart %v, want %v", running, want)
+	if want := []string{"standalone.proj-1234.shop"}; !slices.Equal(running, want) {
+		t.Errorf("running after restart %v, want %v: the members of the stacks", running, want)
 	}
 	if got := environment.supervisor.runningSpecs["standalone.proj-1234.shop"].Env["GOPROXY"]; got != "https://new" {
 		t.Errorf("GOPROXY after the restart = %q, want the shell of the restart", got)
 	}
-	if !strings.Contains(environment.output.String(), "stopping every app of every stack") {
+	if !strings.Contains(environment.output.String(), "stopping every app of every stack, and the ilot daemon") {
 		t.Errorf("output = %q, want a line about the stop", environment.output.String())
 	}
 }
 
-func TestRestartOfADownDaemonBootsIt(t *testing.T) {
+func TestADaemonRestartOfADownDaemonStartsTheMembers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
 	environment.supervisor.simulateDaemonRestart()
 
-	if err := environment.executorOfANewCommand().Restart(t.Context(), environment.base); err != nil {
-		t.Fatalf("Restart: %v", err)
+	if err := environment.executorOfANewCommand().RestartDaemon(t.Context()); err != nil {
+		t.Fatalf("RestartDaemon: %v", err)
 	}
 
 	if _, isRunning := environment.supervisor.runningSpecs["standalone.proj-1234.shop"]; !isRunning {
@@ -135,9 +134,9 @@ func TestACommandReadsTheLoginShellBeforeItTakesTheStateLock(t *testing.T) {
 			return environment.executor.RestartApps(t.Context(), environment.base, []string{"standalone"})
 		},
 		"start --all": func(environment testEnvironment) error { return environment.executor.StartAll(t.Context()) },
-		"boot": func(environment testEnvironment) error {
+		"start of a stack": func(environment testEnvironment) error {
 			environment.supervisor.simulateDaemonRestart()
-			return environment.executor.Boot(t.Context(), environment.base)
+			return environment.executor.StartStack(t.Context(), environment.base)
 		},
 	}
 	for name, command := range commands {

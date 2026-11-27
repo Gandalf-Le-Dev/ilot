@@ -225,7 +225,6 @@ func testConfig() config.Config {
 		Apps: map[string]config.App{
 			"temporal": {
 				Scope:      "base",
-				Autostart:  true,
 				Run:        "temporal server start-dev --port {{.Ports.grpc}} --ui-port {{.Ports.ui}}",
 				Ports:      []string{"grpc", "ui"},
 				FixedPorts: map[string]int{"grpc": 7233, "ui": 10012},
@@ -234,7 +233,6 @@ func testConfig() config.Config {
 			},
 			"restapi": {
 				Scope:      "base",
-				Autostart:  true,
 				Dir:        "/legacy/restapi",
 				Run:        "perl main.pl prefork",
 				Ports:      []string{"http"},
@@ -251,13 +249,11 @@ func testConfig() config.Config {
 			},
 			"gateway": {
 				Scope:      "stack",
-				Autostart:  true,
 				Run:        "gatewayd -listen-addr :{{.Ports.http}}",
 				Ports:      []string{"http"},
 				FixedPorts: map[string]int{"http": 9090},
 			},
 			"internalapi": {
-				Autostart: true,
 				Build:     buildShop,
 				Run:       "{{.BinDir}}/shop api internalapi --port={{.Ports.http}}",
 				Env:       map[string]string{"GATEWAY_URL": gatewayAddress, "TEMPORAL_ADDRESS": `localhost:{{port "temporal" "grpc"}}`},
@@ -489,15 +485,35 @@ func TestStartWithoutDependenciesFailsWhenATemplateNeedsAMissingPort(t *testing.
 	}
 }
 
-func TestStartOfARunningAppRebuildsAndRestartsIt(t *testing.T) {
+func TestASecondStartOfARunningAppSendsNoCall(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 	*environment.builds = nil
+	environment.supervisor.calls = nil
 
 	environment.start(t, environment.base, StartOptions{}, "standalone")
 
-	if !slices.Contains(environment.supervisor.restarted, "standalone.base.shop") {
-		t.Errorf("restarted %v, want standalone.base.shop", environment.supervisor.restarted)
+	if len(environment.supervisor.calls) != 0 || len(environment.supervisor.restarted) != 0 || len(*environment.builds) != 0 {
+		t.Errorf("calls = %v, restarted = %v, builds = %v; want nothing: a start converges, and the app runs", environment.supervisor.calls, environment.supervisor.restarted, *environment.builds)
+	}
+	if !strings.Contains(environment.output.String(), "standalone.base.shop already runs: ilot restart standalone builds it again") {
+		t.Errorf("output = %q, want the line that names ilot restart", environment.output.String())
+	}
+}
+
+func TestAStartReplacesANamedAppWhoseSpecificationChanged(t *testing.T) {
+	environment := newTestEnvironment(t)
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+	*environment.builds = nil
+	environment.supervisor.startedInOrder = nil
+	changed := environment.executor.Config.Apps["standalone"]
+	changed.Run += " --verbose"
+	environment.executor.Config.Apps["standalone"] = changed
+
+	environment.start(t, environment.base, StartOptions{}, "standalone")
+
+	if !slices.Contains(environment.supervisor.startedInOrder, "standalone.base.shop") || len(environment.supervisor.restarted) != 0 {
+		t.Errorf("started %v, restarted %v; want standalone.base.shop replaced with its new specification", environment.supervisor.startedInOrder, environment.supervisor.restarted)
 	}
 }
 
@@ -613,16 +629,11 @@ func TestStartDoesNotRestartARunningDependency(t *testing.T) {
 
 	environment.start(t, environment.featureStack, StartOptions{}, "publicapi")
 
-	for _, runningDependency := range []string{"internalapi.base.shop", "temporal.base.shop"} {
-		if slices.Contains(environment.supervisor.restarted, runningDependency) {
-			t.Errorf("restarted %v, want %s left alone: it runs and was not named", environment.supervisor.restarted, runningDependency)
-		}
+	if len(environment.supervisor.restarted) != 0 {
+		t.Errorf("restarted %v, want nothing: every app of the start runs", environment.supervisor.restarted)
 	}
-	if !slices.Contains(environment.supervisor.restarted, "publicapi.proj-1234.shop") {
-		t.Errorf("restarted %v, want the named publicapi.proj-1234.shop", environment.supervisor.restarted)
-	}
-	if slices.ContainsFunc(*environment.builds, func(build recordedBuild) bool { return build.workingDir == "/src/shop" }) {
-		t.Errorf("builds = %+v, want no build of base: its internalapi runs", *environment.builds)
+	if len(*environment.builds) != 0 {
+		t.Errorf("builds = %+v, want none: every app of the start runs", *environment.builds)
 	}
 }
 
@@ -1095,74 +1106,22 @@ func TestAnAppWithTheScopeBaseHasItsRouteInTheBaseStack(t *testing.T) {
 	}
 }
 
-func TestBootStartsAutostartAppsAndTheAppsThatWereRunning(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.featureStack, StartOptions{}, "standalone")
-	environment.supervisor.simulateDaemonRestart()
-
-	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
-		t.Fatalf("Boot: %v", err)
-	}
-
-	running := slices.Sorted(maps.Keys(environment.supervisor.runningSpecs))
-	want := []string{"gateway.base.shop", "internalapi.base.shop", "restapi-watch.base.shop", "restapi.base.shop", "standalone.proj-1234.shop", "temporal.base.shop"}
-	if !slices.Equal(running, want) {
-		t.Errorf("running after boot %v, want %v", running, want)
-	}
-	if temporalIndex, apiIndex := slices.Index(environment.supervisor.startedInOrder, "temporal.base.shop"), slices.Index(environment.supervisor.startedInOrder, "internalapi.base.shop"); temporalIndex > apiIndex {
-		t.Errorf("started %v: want temporal before internalapi", environment.supervisor.startedInOrder)
-	}
-}
-
-func TestBootDoesNothingWhenTheDaemonRuns(t *testing.T) {
-	environment := newTestEnvironment(t)
-	environment.start(t, environment.base, StartOptions{}, "standalone")
-	environment.supervisor.startedInOrder = nil
-
-	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
-		t.Fatalf("Boot: %v", err)
-	}
-
-	if len(environment.supervisor.startedInOrder) != 0 {
-		t.Errorf("Boot started %v although the daemon already ran", environment.supervisor.startedInOrder)
-	}
-}
-
-func TestBootBuildsOnlyStacksWithoutBinaries(t *testing.T) {
-	environment := newTestEnvironment(t)
-	masterBinDir := filepath.Join(environment.executor.StackDir("base"), "bin")
-	if err := os.MkdirAll(masterBinDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(masterBinDir, "shop"), []byte("binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := environment.executor.Boot(t.Context(), environment.base); err != nil {
-		t.Fatalf("Boot: %v", err)
-	}
-
-	if len(*environment.builds) != 0 {
-		t.Errorf("Boot rebuilt %v although base has its binary", *environment.builds)
-	}
-}
-
-func TestBootKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
+func TestStartAllKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "publicapi")
 	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.base.shop", processEndsAtEveryStart)
 
-	err := environment.executor.Boot(t.Context(), environment.base)
+	err := environment.executor.StartAll(t.Context())
 
 	if err == nil || !strings.Contains(err.Error(), "internalapi.base.shop") {
-		t.Fatalf("Boot = %v, want an error naming internalapi.base.shop", err)
+		t.Fatalf("StartAll = %v, want an error naming internalapi.base.shop", err)
 	}
 	if !strings.Contains(err.Error(), "publicapi.base.shop") {
-		t.Errorf("Boot = %v, want it to name publicapi.base.shop as skipped", err)
+		t.Errorf("StartAll = %v, want it to name publicapi.base.shop as skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	for _, wantStarted := range []string{"temporal.base.shop", "restapi.base.shop", "gateway.base.shop"} {
+	for _, wantStarted := range []string{"temporal.base.shop", "gateway.base.shop"} {
 		if !slices.Contains(started, wantStarted) {
 			t.Errorf("started %v, want %s despite the failure", started, wantStarted)
 		}
@@ -1171,39 +1130,39 @@ func TestBootKeepsAFailedAppAMemberAndStartsTheOthers(t *testing.T) {
 		t.Errorf("started %v, want publicapi.base.shop skipped because internalapi.base.shop failed", started)
 	}
 	if !environment.isStoredAsRunning(t, "base", "internalapi") || !environment.isStoredAsRunning(t, "base", "publicapi") {
-		t.Error("a failed or skipped app lost its membership at boot: the next ilot start would not start it again")
+		t.Error("a failed or skipped app lost its membership at a restore: the next ilot start would not start it again")
 	}
 	if !environment.isStoredAsRunning(t, "base", "temporal") || !environment.isApplied("temporal.base.shop") {
-		t.Error("temporal.base.shop started well at boot but is not kept running")
+		t.Error("temporal.base.shop started well at a restore but is not kept running")
 	}
 }
 
-func TestBootSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
+func TestStartAllSkipsAnAppWhoseDependencyFailedInTheTicketStack(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "internalapi", "publicapi")
 	environment.supervisor.simulateDaemonRestart()
 	environment.supervisor.setBehavior("internalapi.proj-1234.shop", processEndsAtEveryStart)
 
-	err := environment.executor.Boot(t.Context(), environment.base)
+	err := environment.executor.StartAll(t.Context())
 
 	if err == nil || !strings.Contains(err.Error(), "publicapi.proj-1234.shop skipped: it depends on internalapi.proj-1234.shop") {
-		t.Fatalf("Boot = %v, want publicapi.proj-1234.shop skipped because internalapi.proj-1234.shop failed", err)
+		t.Fatalf("StartAll = %v, want publicapi.proj-1234.shop skipped because internalapi.proj-1234.shop failed", err)
 	}
 	if slices.Contains(environment.supervisor.startedInOrder, "publicapi.proj-1234.shop") {
 		t.Errorf("started %v, want publicapi.proj-1234.shop skipped", environment.supervisor.startedInOrder)
 	}
 }
 
-func TestBootSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
+func TestStartAllSkipsAContainerWhoseDependencyImageFailed(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.featureStack, StartOptions{}, "search")
 	environment.supervisor.simulateDaemonRestart()
 	environment.executor.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search-cache:latest": "unauthorized"}}).ensure
 
-	err := environment.executor.Boot(t.Context(), environment.base)
+	err := environment.executor.StartAll(t.Context())
 
 	if err == nil || !strings.Contains(err.Error(), "search.proj-1234.shop skipped: it depends on search-cache.proj-1234.shop") {
-		t.Fatalf("Boot = %v, want search.proj-1234.shop skipped because the image of search-cache.proj-1234.shop failed", err)
+		t.Fatalf("StartAll = %v, want search.proj-1234.shop skipped because the image of search-cache.proj-1234.shop failed", err)
 	}
 	if slices.Contains(environment.supervisor.startedInOrder, "search.proj-1234.shop") {
 		t.Errorf("started %v, want search.proj-1234.shop skipped", environment.supervisor.startedInOrder)
@@ -1690,19 +1649,19 @@ func TestStartChecksNoImageForARunningContainer(t *testing.T) {
 	}
 }
 
-func TestBootSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
+func TestStartAllSkipsTheAppWhoseImageFailsAndStartsTheOthers(t *testing.T) {
 	environment := newTestEnvironment(t)
 	environment.start(t, environment.base, StartOptions{}, "front-like")
 	environment.supervisor.simulateDaemonRestart()
 	environment.executor.EnsureImage = (&imageRecorder{failing: map[string]string{"registry/search:latest": "unauthorized"}}).ensure
 
-	err := environment.executor.Boot(t.Context(), environment.base)
+	err := environment.executor.StartAll(t.Context())
 
 	if err == nil || !strings.Contains(err.Error(), "search.base.shop: pull registry/search:latest") || !strings.Contains(err.Error(), "front-like.base.shop skipped") {
-		t.Fatalf("Boot = %v, want the failed image named with its app and stack, and front-like.base.shop skipped", err)
+		t.Fatalf("StartAll = %v, want the failed image named with its app and stack, and front-like.base.shop skipped", err)
 	}
 	started := environment.supervisor.startedInOrder
-	if !slices.Contains(started, "temporal.base.shop") || !slices.Contains(started, "gateway.base.shop") {
+	if !slices.Contains(started, "search-cache.base.shop") || !slices.Contains(started, "gateway.base.shop") {
 		t.Errorf("started %v, want the other apps started", started)
 	}
 	if slices.Contains(started, "search.base.shop") || slices.Contains(started, "front-like.base.shop") {

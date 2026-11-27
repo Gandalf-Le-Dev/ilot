@@ -138,7 +138,8 @@ ilot ls                       # every app of every stack: status, ports, URL; th
 ilot ls --json                # the same as one JSON object
 ilot apps                     # every app and external service that the ilot.yaml files of this stack declare, with the dependencies of each app
 ilot apps --json              # the same as one JSON object
-ilot start api                # build, then start the app after its dependencies
+ilot start api                # build, then start the app after its dependencies; an app that runs stays as it is
+ilot start                    # start every app that this stack owns and that does not run
 ilot start api --no-deps      # start only this app
 ilot start --all              # start every app that a stack owns and that does not run, for example after the daemon crashed
 ilot stop api                 # stop the app in this stack
@@ -153,12 +154,12 @@ ilot clean                    # ilot rm on each stack whose bound worktrees are 
 ilot stack show               # the stack of this worktree, and the checkout of each repo for it
 ilot stack bind retry-jobs    # put this worktree in the stack retry-jobs
 ilot restart api              # build the app again, then restart it; its dependencies stay as they are
-ilot restart                  # with no app: stop every app and the daemon, start a new daemon, then start the apps that ran
-ilot boot --checkout <dir>    # start the autostart apps and the apps that ran before a restart of the machine: run it at login, with the main checkout of a repo of the workspace
+ilot daemon status            # the version, the process ID and the proxy address of the daemon
+ilot daemon stop              # stop every app of every stack, then the daemon; the stacks keep their apps
+ilot daemon restart           # stop every app and the daemon, start a new daemon, then start the apps that the stacks of this workspace own
 ilot --version
 ilot skill print              # print the skill for AI agents
 ilot skill install            # copy the skill to ~/.claude/skills/ilot/SKILL.md
-ilot daemon run --state-dir <dir>  # the daemon itself: ilot starts it, you do not need it
 ```
 
 `ilot ls` gives each app one of these statuses: `starting`, `ready`, `stopping`, `exited (<exit code>)`, `down` for an app that its stack owns and that the daemon does not hold, for example after a crash of the daemon, or `stopped` for an app that no stack owns.
@@ -167,7 +168,9 @@ Before it starts an app, `ilot start` tests the ports that the app already has. 
 When an app is `down`, `ilot ls` ends with the command that starts it again: `ilot start --all`. It starts each app that a stack owns and that does not run, after its dependencies, and leaves the others as they are.
 
 `ilot start` starts the missing dependencies first, and waits until each one is ready.
-`ilot start` also rebuilds an app that already runs, then restarts it.
+`ilot start` converges: it builds and starts what does not run, and an app that runs stays as it is. If the specification of a named app changed, for example after an edit of its `ilot.yaml`, `ilot start` builds it and replaces it.
+`ilot restart <app>` builds an app again and restarts it, even with the same specification. Use it after a code change.
+`ilot start` with no app starts every app that the stack of the folder owns and that does not run.
 A command calls the daemon only for the apps that it starts, restarts or stops. A dependency that runs gets no call, and an app of another stack never restarts.
 When the start changes a template of a running app of the same stack, for example because the stack now runs its own copy of a dependency, `ilot start` restarts that app and prints one line for it.
 Only one build runs in a stack at a time. A second build, from another `ilot` command or from a watcher, waits and says so.
@@ -212,7 +215,6 @@ The fields of an app:
 | `home_path` | Path that the root of the proxy URL redirects to, for example `/swagger/`. It needs a `route`. |
 | `ready` | How `ilot` knows that the app is ready: `port`, and `path` for an HTTP check. Without `path`, `ilot` waits until the port accepts a connection. The default port is the `route` port. A `command` replaces the port check: `ilot` runs it until it exits with 0. The command can use templates, and it runs behind the `wrap` of its repo. |
 | `depends_on` | Apps and external services that the app needs at startup. |
-| `autostart` | `ilot boot` starts the app in the `base` stack. |
 | `scope` | `base` or `stack`: which stack serves the app to the apps that depend on it. See "How it works". The old keys `shared: true` and `per_stack: true` are now `scope: base` and `scope: stack`. |
 | `watch` | If the files of the app change, `ilot` restarts the app. List the files with `paths`, relative to the working folder, and file extensions in `exts`. It needs `watchexec` on the `PATH` of the app. A watcher process runs `ilot restart <app>` at each change, so an app with a `build` is built again first. If the build fails, the app keeps running and the error is in `ilot logs <app>-watch`. |
 | `container` | Runs the app as a Docker container. See "Container apps". |
@@ -309,14 +311,14 @@ workspaces:
 - With another `domain`, for example `localtest.me`, every name under it must point to this machine.
 - A fixed port of an `ilot.yaml` must be outside the `ports` range.
 - A path under `repos` replaces the path that the root repo declares. The `ilot.yaml` of that clone still names the root with `member_of`.
-- After a change of `proxy`, run `ilot restart` with no app, which starts a new daemon.
+- After a change of `proxy`, run `ilot daemon restart`, which starts a new daemon.
 
 An older `ilot` read a personal file, `~/.config/ilot/env.yaml`. `ilot` now stops with an error while that file exists: move its content under `workspaces.<name>` of the global file, then delete it.
 
 `ilot` builds the environment of an app in this order, and the last value wins:
 
 1. The shell. `ilot` runs your shell, `$SHELL`, with the flags of `shell_env.args`, and takes its whole environment. The default, `-l`, makes a login shell. The shell starts with `HOME`, `USER`, `LOGNAME`, `SHELL`, a system `PATH`, `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` only, so a value that you export in a terminal never reaches an app.
-   `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` come from the terminal, unless a profile file sets them. `ilot env` shows them as `session`. An app gets them, but a change of them does not make its specification change, so a command from another terminal restarts nothing. An app that you name in `ilot start` or `ilot restart` gets the values of your terminal, for example after an SSH reconnect.
+   `LANG`, `LC_ALL`, `TMPDIR` and `SSH_AUTH_SOCK` come from the terminal, unless a profile file sets them. `ilot env` shows them as `session`. An app gets them, but a change of them does not make its specification change, so a command from another terminal restarts nothing. An app that `ilot start` starts, or that you name in `ilot restart`, gets the values of your terminal. After an SSH reconnect, run `ilot restart <app>`.
 2. The top-level `env` of the `ilot.yaml` of the root repo, for the apps of every repo.
 3. The top-level `env` of the `ilot.yaml` of the repo of the app, then the `env` of the app.
 4. The global file: the `env` of the workspace, then its entry under `apps`.
@@ -326,7 +328,7 @@ A login shell reads the profile files, for example `~/.zprofile` or `~/.profile`
 If a tool is on your `PATH` in a terminal and an app does not find it, look at the `PATH` that `ilot env <app>` prints. Then move the line that adds the tool to a profile file, or give the shell another flag with `shell_env.args`, for example `[-l, -i]`.
 
 A container app does not get the `env` of the workspace in the global file, so a third-party image does not get your tokens. It gets its entry under `apps`.
-An app gets its whole environment from `ilot` when it starts, and nothing from the daemon. To give a running app fresh values, run `ilot start <app>` again.
+An app gets its whole environment from `ilot` when it starts, and nothing from the daemon. To give a running app fresh values, run `ilot restart <app>`.
 
 ## For AI agents
 
@@ -349,8 +351,8 @@ When you add a command, add it to the skill too: a test fails otherwise.
 
 A log rotates at 10 MB, and `ilot` keeps the 2 previous files.
 If another program has port 4580, each command prints a warning, the apps run, and their URLs do not answer.
-Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot restart`.
-After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot restart` to replace it.
+Set `proxy.listen` to another address in the global file, for example `127.0.0.1:4581`, then run `ilot daemon restart`.
+After an upgrade of `ilot`, the old daemon keeps running, and each command warns about it. Run `ilot daemon restart` to replace it.
 After you delete the worktrees of a stack, run `ilot clean` to give back its ports. `ilot clean` also removes a stack that lost its last worktree to `ilot stack bind`. It names each app that it stops. A worktree that you moved with `git worktree move` keeps its stack: `ilot clean` binds the stack to the new folder when one unbound worktree of the repo has a branch that gives the name of the stack.
 
 ## Development

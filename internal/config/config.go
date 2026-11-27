@@ -76,7 +76,6 @@ type App struct {
 	DependsOn []string          `yaml:"depends_on"`
 	// Which stack serves the app to the apps that depend on it: ScopeBase, ScopeStack, or empty.
 	Scope      string         `yaml:"scope"`
-	Autostart  bool           `yaml:"autostart"`
 	FixedPorts map[string]int `yaml:"fixed_ports"`
 	Dir        string         `yaml:"dir"`
 	Watch      Watch          `yaml:"watch"`
@@ -153,6 +152,7 @@ var replacementOfRemovedKey = map[string]map[string]string{
 		"gateway":            "it is gone: the port and url templates give the address of an app",
 		"gateway_aliases":    "it is gone: the port and url templates give the address of an app",
 		"temporal_namespace": "it is gone, with no replacement",
+		"autostart":          "it is gone: ilot start with no app starts every app that the stack owns, and ilot start --all every app of every stack",
 	},
 	"Config": {
 		"gateway_base_file": "it is gone: the port and url templates give the address of an app",

@@ -43,8 +43,7 @@ type cli struct {
 	Apps    appsCommand    `cmd:"" help:"List the apps and the external services that the ilot.yaml files declare for the stack of the current worktree, with the dependencies of each app."`
 	Start   startCommand   `cmd:"" help:"Build and start apps in the stack of the current worktree, after their dependencies."`
 	Stop    stopCommand    `cmd:"" help:"Stop apps in the stack of the current worktree."`
-	Boot    bootCommand    `cmd:"" help:"Start the autostart apps and the apps that ran before this machine restarted. Does nothing when the ilot daemon already runs."`
-	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them. With no app: stop every app of every stack and the ilot daemon, start a new daemon, then start the apps that ran and the autostart apps."`
+	Restart restartCommand `cmd:"" help:"Build the named apps again and restart them, in the stack of the current worktree."`
 	Env     envCommand     `cmd:"" help:"Print the environment of an app in the stack of the current worktree, with where each value comes from."`
 	Logs    logsCommand    `cmd:"" help:"Print the log of an app in the stack of the current worktree. A shared app has one log for every stack."`
 	Rm      rmCommand      `cmd:"" help:"Stop the apps of a stack and delete its state, its logs and its routes."`
@@ -52,11 +51,14 @@ type cli struct {
 	Stack   stackCommand   `cmd:"" help:"Print the stack of the current worktree, or put the worktree in another stack."`
 	Check   checkCommand   `cmd:"" help:"Check an ilot.yaml with the ilot.yaml of the other repos: config rules and every template."`
 	Skill   skillCommand   `cmd:"" help:"Print or install the ilot skill for AI agents."`
-	Daemon  daemonCommand  `cmd:"" help:"Run the ilot daemon. ilot starts it when it needs it."`
+	Daemon  daemonCommand  `cmd:"" help:"Show, stop or restart the ilot daemon, which supervises the apps of every stack and holds the proxy. ilot starts it when it needs it."`
 }
 
 type daemonCommand struct {
-	Run daemonRunCommand `cmd:"" help:"Run the daemon that supervises the apps, until a signal or a shutdown call stops it."`
+	Status  daemonStatusCommand  `cmd:"" help:"Print the version, the process ID and the proxy address of the ilot daemon."`
+	Stop    daemonStopCommand    `cmd:"" help:"Stop every app of every stack, then the ilot daemon. The stacks keep their apps: ilot start --all starts them again."`
+	Restart daemonRestartCommand `cmd:"" help:"Stop every app of every stack and the ilot daemon, start a new daemon, then start again every app that a stack of the current workspace owns. Use it after an upgrade of ilot or a change of proxy in the global file."`
+	Run     daemonRunCommand     `cmd:"" hidden:"" help:"Run the daemon that supervises the apps, until a signal or a shutdown call stops it. ilot runs it by itself."`
 }
 
 type daemonRunCommand struct {
@@ -111,28 +113,14 @@ func (command *logsCommand) Run(ctx context.Context) error {
 	return logs.PrintMessages(ctx, logPath, command.Lines, command.Follow, format, os.Stdout)
 }
 
-type bootCommand struct {
-	Checkout string        `required:"" type:"existingdir" help:"Main checkout of a repo of the workspace."`
-	Timeout  time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
-}
-
 type restartCommand struct {
-	Apps    []string      `arg:"" optional:"" help:"Apps to build again and restart. With no app, ilot restarts its daemon and every app of every stack."`
+	Apps    []string      `arg:"" help:"Apps to build again and restart."`
 	Stack   string        `help:"Stack of the apps. The default is the stack of the current folder. The watcher of an app uses it."`
 	Timeout time.Duration `default:"5m" help:"How long to wait for each app to be ready."`
 }
 
 func (command *restartCommand) Run(ctx context.Context) error {
-	switch {
-	case len(command.Apps) == 0 && command.Stack != "":
-		return errors.New("--stack needs the apps to restart")
-	case len(command.Apps) == 0:
-		executor, baseStackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, baseStack)
-		if err != nil {
-			return err
-		}
-		return executor.Restart(ctx, baseStackName)
-	case command.Stack != "":
+	if command.Stack != "" {
 		currentWorkspace, _, err := findCurrentWorkspace()
 		if err != nil {
 			return err
@@ -171,7 +159,7 @@ type rmCommand struct {
 type cleanCommand struct{}
 
 type startCommand struct {
-	Apps    []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml."`
+	Apps    []string      `arg:"" optional:"" help:"Apps declared in an ilot.yaml. With no app, ilot starts every app that the stack owns and that does not run."`
 	All     bool          `help:"Start every app that a stack of the workspace owns and that does not run, for example after the daemon crashed."`
 	NoDeps  bool          `help:"Start only the named apps, not their dependencies."`
 	Timeout time.Duration `default:"2m" help:"How long to wait for each app to be ready."`
@@ -179,25 +167,6 @@ type startCommand struct {
 
 type stopCommand struct {
 	Apps []string `arg:"" help:"Apps declared in an ilot.yaml."`
-}
-
-func (command *bootCommand) Run(ctx context.Context) error {
-	currentWorkspace, mainCheckout, err := findWorkspaceOf(command.Checkout)
-	if err != nil {
-		return err
-	}
-	if !mainCheckout.IsMain {
-		return fmt.Errorf("%s is a linked worktree, not the main checkout", command.Checkout)
-	}
-	currentWorkspace, store, err := withBindings(currentWorkspace)
-	if err != nil {
-		return err
-	}
-	executor, err := newExecutor(ctx, currentWorkspace, store, workspace.BaseStackName, command.Timeout)
-	if err != nil {
-		return err
-	}
-	return executor.Boot(ctx, workspace.BaseStackName)
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
@@ -356,7 +325,11 @@ func (command *startCommand) Run(ctx context.Context) error {
 		}
 		return executor.StartAll(ctx)
 	case len(command.Apps) == 0:
-		return errors.New("name the apps to start, or give --all to start every app that a stack owns")
+		executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
+		if err != nil {
+			return err
+		}
+		return executor.StartStack(ctx, stackName)
 	}
 	executor, stackName, err := newExecutorForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
@@ -498,15 +471,9 @@ func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, stor
 		return nil, err
 	}
 	global := currentWorkspace.Global
-	proxyListen := global.Proxy.Listen
-	daemonPaths := daemon.Paths{StateDir: store.RootDir}
-	startDaemon := func() error {
-		_, err := daemon.Launch{Binary: source.Machine.IlotBinary, Args: []string{"daemon", "run", "--state-dir", store.RootDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
-		return err
-	}
 	return &engine.Executor{
 		Source:              source,
-		Supervisor:          &engine.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr},
+		Supervisor:          newDaemonSupervisor(source.Machine.IlotBinary, store.RootDir, global.Proxy.Listen),
 		RunBuild:            runBuild,
 		EnsureImage:         ensureImage,
 		RemoveContainer:     removeContainer,
@@ -517,6 +484,16 @@ func newExecutor(ctx context.Context, currentWorkspace workspace.Workspace, stor
 		ProgressInterval:    10 * time.Second,
 		Output:              os.Stdout,
 	}, nil
+}
+
+// newDaemonSupervisor gives the daemon of a state folder, which it starts with the proxy address of the global file.
+func newDaemonSupervisor(ilotBinary, stateDir, proxyListen string) *engine.DaemonSupervisor {
+	daemonPaths := daemon.Paths{StateDir: stateDir}
+	startDaemon := func() error {
+		_, err := daemon.Launch{Binary: ilotBinary, Args: []string{"daemon", "run", "--state-dir", stateDir, "--proxy-listen", proxyListen}, Env: nil, LogFile: daemonPaths.LogFile()}.Start()
+		return err
+	}
+	return &engine.DaemonSupervisor{Starter: daemon.Starter{Paths: daemonPaths, Spawn: startDaemon, Timeout: 0}, Version: versionOfThisBinary(), ProxyListen: proxyListen, Warnings: os.Stderr}
 }
 
 // The same shell as the daemon gives an app, so a build and a run command read the same syntax.

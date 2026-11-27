@@ -14,7 +14,6 @@ external:
 apps:
   temporal:
     scope: base
-    autostart: true
     run: temporal server start-dev --ui-port {{.Ports.ui}}
     ports: [grpc, ui]
     fixed_ports: {grpc: 7233, ui: 10012}
@@ -72,7 +71,7 @@ func TestLoadReadsAppsAndExternalServices(t *testing.T) {
 		t.Errorf("keyring port = %d", config.External["keyring"].Port)
 	}
 	temporal := config.Apps["temporal"]
-	if temporal.Scope != ScopeBase || !temporal.Autostart || temporal.FixedPorts["ui"] != 10012 {
+	if temporal.Scope != ScopeBase || temporal.FixedPorts["ui"] != 10012 {
 		t.Errorf("temporal = %+v", temporal)
 	}
 	restapi := config.Apps["restapi"]
@@ -114,6 +113,7 @@ func TestParseOfARemovedKeySaysWhatReplacedIt(t *testing.T) {
 		{yaml: "repos:\n  portal: {path: ~/portal, config: ilot.yaml}\n", wantErrorSubstr: "portal: ../portal"},
 		{yaml: "apps:\n  web: {run: x, shared: true}\n", wantErrorSubstr: "shared: write scope: base"},
 		{yaml: "apps:\n  web: {run: x, per_stack: true}\n", wantErrorSubstr: "per_stack: write scope: stack"},
+		{yaml: "apps:\n  web: {run: x, autostart: true}\n", wantErrorSubstr: "autostart: it is gone: ilot start with no app"},
 		{yaml: "domain: dev.example.net\n", wantErrorSubstr: "domain: it moved to proxy.domain in ~/.config/ilot/config.yaml"},
 	}
 	for _, testCase := range testCases {

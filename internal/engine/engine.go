@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -83,7 +82,15 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 	if failures := executor.ensureImages(after, ctx, start.Order, func(appInstance plan.Instance) bool { return !isRunning(appInstance) }, true); len(failures) > 0 {
 		return failures[0].err
 	}
-	needsBuild := func(appInstance plan.Instance) bool { return isRequested[appInstance] || !isRunning(appInstance) }
+	actionOf := func(appInstance plan.Instance) runningAction {
+		if isRequested[appInstance] {
+			return replaceIfChanged
+		}
+		return keepRunning
+	}
+	needsBuild := func(appInstance plan.Instance) bool {
+		return !isRunning(appInstance) || (actionOf(appInstance) == replaceIfChanged && executor.specChanged(after, appInstance, processByName))
+	}
 	if err := executor.buildApps(ctx, after, start.Order, needsBuild); err != nil {
 		return err
 	}
@@ -91,7 +98,7 @@ func (executor *Executor) Start(ctx context.Context, stackName string, appNames 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := executor.startInstance(ctx, after, appInstance, processByName, isRequested[appInstance]); err != nil {
+		if err := executor.startInstance(ctx, after, appInstance, processByName, actionOf(appInstance)); err != nil {
 			return err
 		}
 	}
@@ -154,14 +161,6 @@ func (executor *Executor) replaceChangedDependents(ctx context.Context, before, 
 	return nil
 }
 
-func (executor *Executor) Boot(ctx context.Context, baseStackName string) error {
-	if executor.Supervisor.IsUp(ctx) {
-		fmt.Fprintln(executor.Output, "ilot already runs, nothing to boot")
-		return nil
-	}
-	return executor.bootApps(ctx, baseStackName)
-}
-
 // RestartApps builds the named apps again, then restarts them. The watcher of an app runs it.
 // A build that fails keeps the running app.
 func (executor *Executor) RestartApps(ctx context.Context, stackName string, appNames []string) error {
@@ -198,7 +197,7 @@ func (executor *Executor) RestartApps(ctx context.Context, stackName string, app
 		return err
 	}
 	for _, appInstance := range restartedInstances {
-		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, true); err != nil {
+		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, restartAlways); err != nil {
 			return err
 		}
 	}
@@ -206,50 +205,29 @@ func (executor *Executor) RestartApps(ctx context.Context, stackName string, app
 	return nil
 }
 
-// The only command that replaces the daemon, for example after an upgrade of ilot.
-func (executor *Executor) Restart(ctx context.Context, baseStackName string) error {
+// RestartDaemon replaces the daemon, for example after an upgrade of ilot or a change of proxy, then starts again every app that a stack of the workspace owns.
+func (executor *Executor) RestartDaemon(ctx context.Context) error {
 	if executor.Supervisor.IsUp(ctx) {
-		fmt.Fprintln(executor.Output, "stopping every app of every stack")
+		fmt.Fprintln(executor.Output, "stopping every app of every stack, and the ilot daemon")
 	}
 	if err := executor.Supervisor.Shutdown(ctx); err != nil {
 		return err
 	}
-	return executor.bootApps(ctx, baseStackName)
-}
-
-func (executor *Executor) bootApps(ctx context.Context, baseStackName string) error {
-	if err := executor.Supervisor.Up(ctx); err != nil {
-		return err
-	}
-	machine, err := executor.machineWithShell()
-	if err != nil {
-		return err
-	}
-	var start plan.Start
-	var problems []error
-	err = executor.underLock(ctx, func() error {
-		snapshot, _, err := executor.loadStacks(machine, baseStackName)
-		if err != nil {
-			return err
-		}
-		start, problems, err = executor.planBoot(snapshot)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	imageFailures := executor.ensureImages(start.After, ctx, start.Order, func(plan.Instance) bool { return true }, false)
-	needsBuild := func(appInstance plan.Instance) bool { return executor.binDirIsEmpty(appInstance.Stack) }
-	if err := executor.buildApps(ctx, start.After, start.Order, needsBuild); err != nil {
-		return err
-	}
-	err = executor.startEachUnlessADependencyFailed(ctx, start.After, start.Order, problems, imageFailures, map[string]daemon.Process{})
-	return errors.Join(err, executor.sendRoutes(ctx))
+	return executor.StartAll(ctx)
 }
 
 // StartAll starts each member of each stack of the workspace that does not run, after its dependencies: what a crash of the daemon stopped comes back.
 // A member that runs gets no call.
 func (executor *Executor) StartAll(ctx context.Context) error {
+	return executor.startMembers(ctx, plan.BaseStack, false)
+}
+
+// StartStack is StartAll for the members of one stack, and the dependencies that they need from base.
+func (executor *Executor) StartStack(ctx context.Context, stackName string) error {
+	return executor.startMembers(ctx, stackName, true)
+}
+
+func (executor *Executor) startMembers(ctx context.Context, stackName string, isOnlyThisStack bool) error {
 	if err := executor.Supervisor.Up(ctx); err != nil {
 		return err
 	}
@@ -264,15 +242,25 @@ func (executor *Executor) StartAll(ctx context.Context) error {
 		if processByName, err = executor.Supervisor.Processes(ctx); err != nil {
 			return err
 		}
-		snapshot, _, err := executor.loadStacks(machine, plan.BaseStack)
+		snapshot, _, err := executor.loadStacks(machine, stackName)
 		if err != nil {
 			return err
 		}
-		start, problems, err = executor.planMembers(snapshot, nil, processByName)
+		onlyStack := ""
+		if isOnlyThisStack {
+			onlyStack = stackName
+		}
+		start, problems, err = executor.planMembers(snapshot, onlyStack, processByName)
 		return err
 	})
 	if err != nil {
 		return err
+	}
+	if len(start.Order) == 0 && len(problems) == 0 {
+		if isOnlyThisStack {
+			fmt.Fprintf(executor.Output, "the stack %s owns no app: name the apps to start\n", stackName)
+		}
+		return executor.sendRoutes(ctx)
 	}
 	isDown := func(appInstance plan.Instance) bool {
 		process, isHeld := processByName[start.After.ProcessName(appInstance)]
@@ -286,22 +274,15 @@ func (executor *Executor) StartAll(ctx context.Context) error {
 	return errors.Join(err, executor.sendRoutes(ctx))
 }
 
-func (executor *Executor) planBoot(snapshot plan.Snapshot) (plan.Start, []error, error) {
-	var bootInstances []plan.Instance
-	for _, appName := range slices.Sorted(maps.Keys(executor.Config.Apps)) {
-		if executor.Config.Apps[appName].Autostart {
-			bootInstances = append(bootInstances, plan.Instance{Stack: snapshot.StackOf(plan.BaseStack, appName), App: appName})
-		}
-	}
-	return executor.planMembers(snapshot, bootInstances, map[string]daemon.Process{})
-}
-
-// planMembers plans the start of every member of every stack, after the given instances.
+// planMembers plans the start of every member of one stack, or of every stack when onlyStack is empty.
 // It reads the file of each stack. A stack whose file is broken stays down, and so does an instance whose templates do not render, with its dependents. The others start.
-func (executor *Executor) planMembers(snapshot plan.Snapshot, bootInstances []plan.Instance, processByName map[string]daemon.Process) (plan.Start, []error, error) {
+func (executor *Executor) planMembers(snapshot plan.Snapshot, onlyStack string, processByName map[string]daemon.Process) (plan.Start, []error, error) {
 	var problems []error
 	var loadedInstances []plan.Instance
 	for _, wantedInstance := range snapshot.Wanted() {
+		if onlyStack != "" && wantedInstance.Stack != onlyStack {
+			continue
+		}
 		if err := executor.addStack(snapshot, wantedInstance.Stack); err != nil {
 			problems = append(problems, err)
 			continue
@@ -309,16 +290,18 @@ func (executor *Executor) planMembers(snapshot plan.Snapshot, bootInstances []pl
 		loadedInstances = append(loadedInstances, wantedInstance)
 	}
 	// The file of any stack can declare an app with the scope base, so this test waits until every file is loaded.
+	var memberInstances []plan.Instance
 	for _, loadedInstance := range loadedInstances {
 		if _, isDeclared := snapshot.Declaration(loadedInstance); !isDeclared {
 			problems = append(problems, fmt.Errorf("%s does not start: no ilot.yaml declares it any more. Give back its ports with ilot stop %s in stack %s", snapshot.ProcessName(loadedInstance), loadedInstance.App, loadedInstance.Stack))
 			continue
 		}
-		if !slices.Contains(bootInstances, loadedInstance) {
-			bootInstances = append(bootInstances, loadedInstance)
-		}
+		memberInstances = append(memberInstances, loadedInstance)
 	}
-	start, err := executor.planWithPorts(snapshot, bootInstances, StartOptions{SkipDependencies: false}, processByName)
+	if len(memberInstances) == 0 {
+		return plan.Start{}, problems, nil
+	}
+	start, err := executor.planWithPorts(snapshot, memberInstances, StartOptions{SkipDependencies: false}, processByName)
 	if err != nil {
 		return plan.Start{}, nil, err
 	}
@@ -362,7 +345,7 @@ func renderErrorOf(snapshot plan.Snapshot, appInstance plan.Instance) error {
 	return nil
 }
 
-// One app that fails at boot must not leave the others down: the next login finds the daemon up and boots nothing.
+// One app that fails must not leave the others of a restore down.
 // The problems of the plan come first, so that the hint at the end covers them too.
 func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, snapshot plan.Snapshot, startOrder []plan.Instance, planProblems []error, imageFailures []imageFailure, processByName map[string]daemon.Process) error {
 	problems := slices.Clone(planProblems)
@@ -383,7 +366,7 @@ func (executor *Executor) startEachUnlessADependencyFailed(ctx context.Context, 
 			problems = append(problems, fmt.Errorf("%s skipped: it depends on %s", snapshot.ProcessName(appInstance), snapshot.ProcessName(failedDependency)))
 			continue
 		}
-		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, false); err != nil {
+		if err := executor.startInstance(ctx, snapshot, appInstance, processByName, keepRunning); err != nil {
 			isFailed[appInstance] = true
 			problems = append(problems, err)
 		}
@@ -445,11 +428,20 @@ func (executor *Executor) saveStart(start plan.Start) error {
 	return executor.saveStacks(start.After)
 }
 
+// What a command does with an instance that the daemon already runs.
+type runningAction int
+
+const (
+	// A dependency that runs gets no call, so a change that a command did not ask for never replaces it.
+	keepRunning runningAction = iota
+	// ilot start converges: it replaces a named app that runs only when its specification changed.
+	replaceIfChanged
+	// ilot restart starts the app again even with the same specification, so that the app gets the session of this terminal, for example a new SSH_AUTH_SOCK.
+	restartAlways
+)
+
 // startInstance sends one instance to the daemon and waits until it is ready.
-// A requested instance starts again: with Put when its specification changed, which replaces it one time, and with Restart when it did not.
-// Both send the specification, so the app gets the session of this terminal, for example a new SSH_AUTH_SOCK.
-// A dependency that runs gets no call, so a change that a command did not ask for never replaces it.
-func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process, isRequested bool) error {
+func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process, action runningAction) error {
 	spec, err := snapshot.Spec(appInstance)
 	if err != nil {
 		return err
@@ -457,20 +449,32 @@ func (executor *Executor) startInstance(ctx context.Context, snapshot plan.Snaps
 	process, isHeld := processByName[spec.Name]
 	isRunning := isHeld && process.State != daemon.StateExited
 	switch {
-	case isRunning && !isRequested:
-		return executor.waitReady(ctx, snapshot, appInstance)
 	case !isRunning:
 		return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error { return executor.put(ctx, spec) })
+	case action == keepRunning:
+		return executor.waitReady(ctx, snapshot, appInstance)
 	case process.Hash != spec.Hash():
 		return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error {
 			fmt.Fprintf(executor.Output, "restarting %s with its new specification\n", spec.Name)
 			return executor.put(ctx, spec)
 		})
+	case action == replaceIfChanged:
+		fmt.Fprintf(executor.Output, "%s already runs: ilot restart %s builds it again and restarts it\n", spec.Name, appInstance.App)
+		return executor.waitReady(ctx, snapshot, appInstance)
 	}
 	return executor.applyAndWait(ctx, snapshot, appInstance, processByName, func() error {
 		fmt.Fprintf(executor.Output, "restarting %s\n", spec.Name)
 		return executor.Supervisor.Restart(ctx, spec)
 	})
+}
+
+// specChanged tells whether the daemon runs an instance with another specification than the one of the snapshot.
+func (executor *Executor) specChanged(snapshot plan.Snapshot, appInstance plan.Instance, processByName map[string]daemon.Process) bool {
+	spec, err := snapshot.Spec(appInstance)
+	if err != nil {
+		return true
+	}
+	return processByName[spec.Name].Hash != spec.Hash()
 }
 
 // applyAndWait sends one instance and its watcher to the daemon, then waits until the instance is ready. An instance that is no member any more gets no call.
