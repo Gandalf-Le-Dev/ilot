@@ -355,23 +355,26 @@ func (supervisor *Supervisor) stop(name string, target *entry) {
 	stopped.state = StateStopping
 	supervisor.mu.Unlock()
 
-	deadline, cancel := context.WithTimeout(context.Background(), supervisor.stopTimeout)
-	defer cancel()
 	supervisor.logger.Info("process stops", "process", name, "pid", stopped.pid)
-	if spec.Stop == "" || !supervisor.runStopCommand(deadline, name, spec) {
+	if spec.Stop == "" || !supervisor.runStopCommand(name, spec) {
 		_ = syscall.Kill(-stopped.pid, syscall.SIGTERM)
 	}
+	// This time starts after the stop command, which can use all of its own time and still fail.
+	grace := time.NewTimer(supervisor.stopTimeout)
+	defer grace.Stop()
 	select {
 	case <-stopped.exited.Done():
 		return
-	case <-deadline.Done():
+	case <-grace.C:
 	}
 	supervisor.logger.Warn("process killed, because it did not stop in time", "process", name, "pid", stopped.pid, "timeout", supervisor.stopTimeout.String())
 	_ = syscall.Kill(-stopped.pid, syscall.SIGKILL)
 	<-stopped.exited.Done()
 }
 
-func (supervisor *Supervisor) runStopCommand(deadline context.Context, name string, spec Spec) (hasSucceeded bool) {
+func (supervisor *Supervisor) runStopCommand(name string, spec Spec) (hasSucceeded bool) {
+	deadline, cancel := context.WithTimeout(context.Background(), supervisor.stopTimeout)
+	defer cancel()
 	command := shellCommand(deadline, spec, spec.Stop)
 	// Not the writer of the process: that one closes when the process exits, and a stop command often lives longer.
 	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes)

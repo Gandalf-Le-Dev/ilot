@@ -286,6 +286,36 @@ func TestAFailedStopCommandFallsBackToSIGTERM(t *testing.T) {
 	}
 }
 
+func TestSIGTERMGetsItsOwnGraceAfterAStopCommandThatFails(t *testing.T) {
+	supervisor := newTestSupervisor(t, SupervisorOptions{StopTimeout: time.Second})
+	workingDir := t.TempDir()
+	logFile := filepath.Join(workingDir, "app.log")
+
+	_, err := supervisor.Put("app", Spec{
+		Command: `trap 'sleep 0.5; echo graceful; exit 0' TERM; echo armed; sleep 300 & wait`,
+		// It uses most of the stop timeout, so a shared deadline would leave the process no time to end.
+		Stop:    "sleep 0.8; exit 1",
+		Env:     map[string]string{"PATH": "/usr/bin:/bin"},
+		LogFile: logFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the trap is set", func() bool {
+		output, _ := os.ReadFile(logFile)
+		return strings.Contains(string(output), "armed")
+	})
+
+	supervisor.Shutdown()
+	if stopped := processNamed(t, supervisor, "app"); stopped.ExitCode != 0 {
+		t.Fatalf("got exit code %d, want 0: the process must get the time to end by itself after SIGTERM", stopped.ExitCode)
+	}
+	output, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(output), "graceful") {
+		t.Errorf("the process did not end by itself: %q", output)
+	}
+}
+
 func TestPutKeepsALiveProcessWithTheSameSpecification(t *testing.T) {
 	supervisor := newTestSupervisor(t, SupervisorOptions{})
 	spec := Spec{Command: "sleep 300", Env: map[string]string{"PATH": "/usr/bin:/bin"}, LogFile: filepath.Join(t.TempDir(), "app.log")}
