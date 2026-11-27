@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -216,5 +217,77 @@ func TestSocketPathFallsBackWhenTheStateFolderIsLong(t *testing.T) {
 	other := Paths{StateDir: long.StateDir + "2"}
 	if other.Socket() == fallback {
 		t.Error("two state folders share one socket path")
+	}
+}
+
+func TestEnsureAfterAShutdownGivesANewDaemonEachTime(t *testing.T) {
+	helpers := newHelperDaemons(t)
+	lastPID := 0
+	for iteration := range 30 {
+		client, err := helpers.starter().Ensure(t.Context())
+		if err != nil {
+			t.Fatalf("iteration %d: %v", iteration, err)
+		}
+		status, err := client.Status(t.Context())
+		if err != nil {
+			t.Fatalf("iteration %d: %v", iteration, err)
+		}
+		if status.PID == lastPID {
+			t.Fatalf("iteration %d: the daemon %d answers after its shutdown", iteration, lastPID)
+		}
+		lastPID = status.PID
+		if err := client.Shutdown(t.Context()); err != nil {
+			t.Fatalf("iteration %d: %v", iteration, err)
+		}
+		if _, err := os.Stat(helpers.paths.Socket()); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("iteration %d: Shutdown returned while the socket file is still there: %v", iteration, err)
+		}
+	}
+}
+
+func TestEnsureWaitsForADaemonThatShutsDown(t *testing.T) {
+	helpers := newHelperDaemons(t)
+	workingDir := t.TempDir()
+	client, err := helpers.starter().Ensure(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dying, err := client.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	slowToStop := Spec{
+		Command: "echo $$ > app.pid; exec sleep 300",
+		Stop:    "sleep 1; kill $(cat app.pid)",
+		Dir:     workingDir,
+		Env:     map[string]string{"PATH": "/usr/bin:/bin"},
+		LogFile: filepath.Join(workingDir, "app.log"),
+	}
+	if _, err := client.Put(t.Context(), "app", slowToStop); err != nil {
+		t.Fatal(err)
+	}
+	readPIDFile(t, filepath.Join(workingDir, "app.pid"))
+
+	if err := syscall.Kill(dying.PID, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the daemon stops its process", func() bool {
+		processes, err := client.Processes(t.Context())
+		return err == nil && len(processes) == 1 && processes[0].State == StateStopping
+	})
+
+	client, err = helpers.starter().Ensure(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Put(t.Context(), "app", slowToStop); err != nil {
+		t.Fatalf("Ensure gave a daemon that refuses a start: %v", err)
+	}
+	status, err := client.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.PID == dying.PID {
+		t.Fatal("Ensure gave the daemon that shuts down")
 	}
 }

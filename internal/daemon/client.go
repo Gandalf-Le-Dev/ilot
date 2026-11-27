@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"syscall"
 	"time"
 )
@@ -17,7 +19,14 @@ import (
 // ErrDaemonDown means that nothing listens on the socket. It does not prove that no daemon lives: the lock file does.
 var ErrDaemonDown = errors.New("the ilot daemon does not answer")
 
-const readyPollInterval = 200 * time.Millisecond
+var errConnectionBroken = errors.New("the daemon closed the connection")
+
+const (
+	readyPollInterval = 200 * time.Millisecond
+	// Longer than the time that the daemon gives its API calls to end.
+	shutdownExitWait     = 2 * apiDrainTimeout
+	shutdownPollInterval = 10 * time.Millisecond
+)
 
 type APIError struct {
 	StatusCode int
@@ -102,9 +111,26 @@ func (client *Client) SetRoutes(ctx context.Context, routes []Route) error {
 	return client.call(ctx, http.MethodPut, "/v1/routes", routeList{Routes: routes}, nil)
 }
 
-// Shutdown returns after every process stopped. The daemon exits a moment later.
+// Shutdown returns after every process stopped and the daemon removed its socket file.
+// The daemon removes that file as its last act before it frees the lock, so the next start does not meet the old daemon.
 func (client *Client) Shutdown(ctx context.Context) error {
-	return client.call(ctx, http.MethodPost, "/v1/shutdown", nil, nil)
+	if err := client.call(ctx, http.MethodPost, "/v1/shutdown", nil, nil); err != nil {
+		return err
+	}
+	deadline := time.NewTimer(shutdownExitWait)
+	defer deadline.Stop()
+	for {
+		if _, err := os.Lstat(client.socketPath); errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("the ilot daemon stopped its processes, but it still holds %s after %s", client.socketPath, shutdownExitWait)
+		case <-time.After(shutdownPollInterval):
+		}
+	}
 }
 
 // WaitReady returns a NotReadyError when ctx ends first. The process then still runs.
@@ -146,6 +172,12 @@ func findProcess(processes []Process, name string) (Process, bool) {
 	return Process{}, false
 }
 
+// A daemon that exits closes its listener under the calls that just connected.
+func isBrokenConnection(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
+}
+
 func (client *Client) call(ctx context.Context, method, path string, input, output any) error {
 	var body io.Reader
 	if input != nil {
@@ -167,6 +199,9 @@ func (client *Client) call(ctx context.Context, method, path string, input, outp
 		}
 		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
 			return fmt.Errorf("%w on %s", ErrDaemonDown, client.socketPath)
+		}
+		if isBrokenConnection(err) {
+			return fmt.Errorf("call the ilot daemon: %w: %w", errConnectionBroken, err)
 		}
 		return fmt.Errorf("call the ilot daemon: %w", err)
 	}

@@ -69,12 +69,12 @@ func (starter Starter) Ensure(ctx context.Context) (*Client, error) {
 		return nil, err
 	}
 	client := NewClient(starter.Paths.Socket())
-	_, err := client.Status(ctx)
-	if err == nil {
-		return client, nil
-	}
-	if !errors.Is(err, ErrDaemonDown) {
+	waitReason, err := whyNotUsable(ctx, client)
+	if err != nil {
 		return nil, err
+	}
+	if waitReason == nil {
+		return client, nil
 	}
 	if err := starter.Spawn(); err != nil {
 		return nil, err
@@ -85,18 +85,18 @@ func (starter Starter) Ensure(ctx context.Context) (*Client, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		_, err := client.Status(ctx)
-		if err == nil {
-			return client, nil
-		}
-		if !errors.Is(err, ErrDaemonDown) {
+		waitReason, err := whyNotUsable(ctx, client)
+		if err != nil {
 			return nil, err
+		}
+		if waitReason == nil {
+			return client, nil
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return nil, fmt.Errorf("%w after %s: read %s", ErrDaemonDown, timeout, starter.Paths.LogFile())
+			return nil, fmt.Errorf("%w after %s: read %s", waitReason, timeout, starter.Paths.LogFile())
 		case <-time.After(startPollInterval):
 		}
 		if time.Since(lastSpawn) >= respawnInterval {
@@ -105,5 +105,23 @@ func (starter Starter) Ensure(ctx context.Context) (*Client, error) {
 			}
 			lastSpawn = time.Now()
 		}
+	}
+}
+
+// whyNotUsable gives waitReason when a new daemon can still come, and err when a wait cannot help.
+// A daemon that shuts down still answers for a while, then closes its socket under the callers.
+func whyNotUsable(ctx context.Context, client *Client) (waitReason, err error) {
+	status, err := client.Status(ctx)
+	switch {
+	case err == nil && status.ShuttingDown:
+		return fmt.Errorf("%w: the daemon %d still stops its processes", ErrShuttingDown, status.PID), nil
+	case err == nil:
+		return nil, nil
+	case errors.Is(err, ErrDaemonDown):
+		return err, nil
+	case errors.Is(err, errConnectionBroken):
+		return fmt.Errorf("%w: %w", ErrDaemonDown, err), nil
+	default:
+		return nil, err
 	}
 }

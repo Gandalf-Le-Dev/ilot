@@ -14,6 +14,8 @@ type Status struct {
 	PID          int       `json:"pid"`
 	StartedAt    time.Time `json:"started_at"`
 	ProxyAddress string    `json:"proxy_address"`
+	// A daemon that shuts down still answers, but it refuses every start.
+	ShuttingDown bool `json:"shutting_down,omitzero"`
 }
 
 type processList struct {
@@ -42,7 +44,9 @@ func (server *Server) Handler() http.Handler {
 	logger := cmp.Or(server.Logger, slog.New(slog.DiscardHandler))
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", func(writer http.ResponseWriter, request *http.Request) {
-		writeJSON(writer, http.StatusOK, server.Status)
+		status := server.Status
+		status.ShuttingDown = server.Supervisor.IsShuttingDown()
+		writeJSON(writer, http.StatusOK, status)
 	})
 	mux.HandleFunc("GET /v1/processes", func(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusOK, processList{Processes: server.Supervisor.List()})
