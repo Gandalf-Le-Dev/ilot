@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -194,7 +195,9 @@ func findProcess(processes []Process, name string) (Process, bool) {
 // A daemon that exits closes its listener under the calls that just connected.
 func isBrokenConnection(err error) bool {
 	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
-		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ENOTCONN) ||
+		// net/http does not export this error. It gives it when the close comes before the request is written.
+		strings.Contains(err.Error(), "server closed idle connection")
 }
 
 func (client *Client) call(ctx context.Context, method, path string, input, output any) error {
