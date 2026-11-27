@@ -26,6 +26,7 @@ const (
 	// A grandchild that left the process group can hold the output pipe open for ever.
 	outputDrainTimeout = 2 * time.Second
 	exitCodeNotStarted = -1
+	appLogPerm         = 0o644
 	// A command with a mistake exits within this time, and must not look ready to a caller that waits.
 	defaultAliveWindow = 500 * time.Millisecond
 )
@@ -281,7 +282,7 @@ func (supervisor *Supervisor) start(name string, target *entry) error {
 	spec := target.spec
 	supervisor.mu.Unlock()
 
-	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes)
+	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
 	if err != nil {
 		return fmt.Errorf("open the log file of %s: %w", name, err)
 	}
@@ -404,7 +405,7 @@ func (supervisor *Supervisor) runStopCommand(name string, spec Spec) (hasSucceed
 	defer cancel()
 	command := shellCommand(deadline, spec, spec.Stop)
 	// Not the writer of the process: that one closes when the process exits, and a stop command often lives longer.
-	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes)
+	output, err := openRotatingFile(spec.LogFile, supervisor.logMaxBytes, appLogPerm)
 	if err != nil {
 		supervisor.logger.Warn("the output of the stop command is lost", "process", name, "error", err)
 	} else {

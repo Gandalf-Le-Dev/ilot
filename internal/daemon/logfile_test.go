@@ -10,7 +10,7 @@ import (
 
 func TestRotatingFileKeepsTwoOldFiles(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs", "app.log")
-	rotating, err := openRotatingFile(path, 10)
+	rotating, err := openRotatingFile(path, 10, appLogPerm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestRotatingFileAppendsToAnExistingFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("12345678"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rotating, err := openRotatingFile(path, 10)
+	rotating, err := openRotatingFile(path, 10, appLogPerm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestRotatingFileKeepsWritingWhenARotationFails(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rotating, err := openRotatingFile(path, 10)
+	rotating, err := openRotatingFile(path, 10, appLogPerm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRotatingFileKeepsWritingWhenARotationFails(t *testing.T) {
 func TestRotatingFileOpensAgainAfterItLostItsFile(t *testing.T) {
 	folder := filepath.Join(t.TempDir(), "logs")
 	path := filepath.Join(folder, "app.log")
-	rotating, err := openRotatingFile(path, 10)
+	rotating, err := openRotatingFile(path, 10, appLogPerm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,5 +112,47 @@ func TestRotatingFileOpensAgainAfterItLostItsFile(t *testing.T) {
 	content, _ := os.ReadFile(path)
 	if string(content) != "cccccc" {
 		t.Fatalf("the file holds %q, want the write after the folder came back", content)
+	}
+}
+
+func TestRotatingFileGivesEachNewFileItsMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "daemon.log")
+	rotating, err := openRotatingFile(path, 10, daemonLogPerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chunk := range []string{"aaaaaa", "bbbbbb"} {
+		if _, err := rotating.Write([]byte(chunk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rotating.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{path, path + ".1"} {
+		info, err := os.Stat(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != daemonLogPerm {
+			t.Errorf("%s has the mode %v, want %v", filepath.Base(name), info.Mode().Perm(), os.FileMode(daemonLogPerm))
+		}
+	}
+}
+
+func TestLaunchCreatesTheLogOfTheDaemonForTheUserOnly(t *testing.T) {
+	logFile := filepath.Join(t.TempDir(), "daemon.log")
+
+	if _, err := (Launch{Binary: "/usr/bin/true", LogFile: logFile}).Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != daemonLogPerm {
+		t.Errorf("daemon.log has the mode %v, want %v", info.Mode().Perm(), os.FileMode(daemonLogPerm))
 	}
 }

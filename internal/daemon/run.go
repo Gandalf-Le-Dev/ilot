@@ -45,7 +45,7 @@ func Run(ctx context.Context, options Options) error {
 
 	logger := options.Logger
 	if logger == nil {
-		logFile, err := openRotatingFile(paths.LogFile(), defaultLogMaxBytes)
+		logFile, err := openRotatingFile(paths.LogFile(), defaultLogMaxBytes, daemonLogPerm)
 		if err != nil {
 			return err
 		}
