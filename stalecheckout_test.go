@@ -24,7 +24,7 @@ func startInFolder(t *testing.T, dir string, supervisor *readySupervisor, appNam
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller, err := newController(currentWorkspace, store, stackName, time.Second)
+	controller, err := newController(t.Context(), currentWorkspace, store, stackName, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

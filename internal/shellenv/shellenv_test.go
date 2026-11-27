@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeShell stands for a login shell: it records its flags, prints a banner as a profile file can, exports one variable, then runs the command.
@@ -103,5 +104,33 @@ func TestOfUserUsesTheShellOfTheUserWithTheGivenFlags(t *testing.T) {
 	t.Setenv("SHELL", "")
 	if shell := OfUser([]string{"-l"}); shell.Program != "/bin/sh" {
 		t.Errorf("OfUser with no SHELL = %+v, want /bin/sh", shell)
+	}
+}
+
+func TestABackgroundJobOfTheProfileDoesNotHoldTheCommand(t *testing.T) {
+	shell, _ := fakeShell(t, "sleep 30 &\nexport EDITOR=vi")
+	startedAt := time.Now()
+
+	environment, err := shell.Environment(t.Context())
+
+	if err != nil || environment["EDITOR"] != "vi" {
+		t.Fatalf("Environment = %v, %v; want the environment of the profile", environment["EDITOR"], err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > 10*time.Second {
+		t.Errorf("Environment took %s, want it to end soon after the shell exits", elapsed)
+	}
+}
+
+func TestAShellThatDoesNotExitInTimeGivesAnErrorThatNamesTheTimeout(t *testing.T) {
+	shell, _ := fakeShell(t, "sleep 30")
+	seeds, err := seedEnvironment(t.TempDir(), shell.Program)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = shell.read(t.Context(), seeds, t.TempDir(), 200*time.Millisecond)
+
+	if err == nil || !strings.Contains(err.Error(), "did not exit in 200ms") || strings.Contains(err.Error(), "signal: killed") {
+		t.Errorf("read = %v, want an error that names the timeout", err)
 	}
 }

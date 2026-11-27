@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,8 @@ import (
 
 const (
 	readTimeout = 15 * time.Second
+	// A background job of a profile file keeps the output open. The environment is complete when the shell exits.
+	outputWaitDelay = time.Second
 	// A shell file can print a banner. The environment starts after this line.
 	startMarker   = "__ilot_environment_starts_here__"
 	fallbackShell = "/bin/sh"
@@ -50,16 +53,25 @@ func (shell Shell) Environment(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, readTimeout)
+	return shell.read(ctx, seeds, homeDir, readTimeout)
+}
+
+func (shell Shell) read(ctx context.Context, seeds []string, homeDir string, timeout time.Duration) (map[string]string, error) {
+	errTimeout := fmt.Errorf("the shell did not exit in %s: a profile file waits for input or runs a long command", timeout)
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errTimeout)
 	defer cancel()
 	arguments := append(append([]string{}, shell.Args...), "-c", "echo "+startMarker+"; env -0")
 	command := exec.CommandContext(ctx, shell.Program, arguments...)
 	command.Env = seeds
 	command.Dir = homeDir
+	command.WaitDelay = outputWaitDelay
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	output, err := command.Output()
-	if err != nil {
+	if cause := context.Cause(ctx); errors.Is(cause, errTimeout) {
+		err = cause
+	}
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return nil, fmt.Errorf("read the environment of %s %s: %w: %s", shell.Program, strings.Join(shell.Args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	environment, err := parse(output)

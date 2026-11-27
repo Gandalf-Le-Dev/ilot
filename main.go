@@ -71,8 +71,8 @@ type envCommand struct {
 	App string `arg:"" help:"App declared in an ilot.yaml."`
 }
 
-func (command *envCommand) Run() error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
+func (command *envCommand) Run(ctx context.Context) error {
+	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ type logsCommand struct {
 }
 
 func (command *logsCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
+	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -126,7 +126,7 @@ func (command *restartCommand) Run(ctx context.Context) error {
 	case len(command.Apps) == 0 && command.Stack != "":
 		return errors.New("--stack needs the apps to restart")
 	case len(command.Apps) == 0:
-		controller, baseStackName, err := newControllerForCurrentWorktree(command.Timeout, baseStack)
+		controller, baseStackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, baseStack)
 		if err != nil {
 			return err
 		}
@@ -140,13 +140,13 @@ func (command *restartCommand) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		controller, err := newController(currentWorkspace, store, command.Stack, command.Timeout)
+		controller, err := newController(ctx, currentWorkspace, store, command.Stack, command.Timeout)
 		if err != nil {
 			return err
 		}
 		return controller.RestartApps(ctx, command.Stack, command.Apps)
 	}
-	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, stackOfCurrentFolder)
+	controller, stackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (command *bootCommand) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	controller, err := newController(currentWorkspace, store, workspace.BaseStackName, command.Timeout)
+	controller, err := newController(ctx, currentWorkspace, store, workspace.BaseStackName, command.Timeout)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,7 @@ func (command *bootCommand) Run(ctx context.Context) error {
 }
 
 func (command *lsCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
+	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func printWorktreeCheckouts(output io.Writer, checkoutsByStack map[string]map[st
 }
 
 func (command *rmCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
+	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -274,7 +274,7 @@ func (command *rmCommand) Run(ctx context.Context) error {
 }
 
 func (command *cleanCommand) Run(ctx context.Context) error {
-	controller, _, err := newControllerForCurrentWorktree(time.Minute, baseStack)
+	controller, _, err := newControllerForCurrentWorktree(ctx, time.Minute, baseStack)
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func (command *cleanCommand) Run(ctx context.Context) error {
 }
 
 func (command *startCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(command.Timeout, stackOfCurrentFolderWithBinding)
+	controller, stackName, err := newControllerForCurrentWorktree(ctx, command.Timeout, stackOfCurrentFolderWithBinding)
 	if err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (command *startCommand) Run(ctx context.Context) error {
 }
 
 func (command *stopCommand) Run(ctx context.Context) error {
-	controller, stackName, err := newControllerForCurrentWorktree(time.Minute, stackOfCurrentFolder)
+	controller, stackName, err := newControllerForCurrentWorktree(ctx, time.Minute, stackOfCurrentFolder)
 	if err != nil {
 		return err
 	}
@@ -318,7 +318,7 @@ const (
 	stackOfCurrentFolderWithBinding
 )
 
-func newControllerForCurrentWorktree(readyTimeout time.Duration, choice stackChoice) (*ilotctl.Controller, string, error) {
+func newControllerForCurrentWorktree(ctx context.Context, readyTimeout time.Duration, choice stackChoice) (*ilotctl.Controller, string, error) {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return nil, "", err
@@ -329,12 +329,12 @@ func newControllerForCurrentWorktree(readyTimeout time.Duration, choice stackCho
 	}
 	stackName := workspace.BaseStackName
 	if choice != baseStack {
-		currentWorkspace, stackName, err = stackOfWorktree(context.Background(), store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
+		currentWorkspace, stackName, err = stackOfWorktree(ctx, store, currentWorkspace, worktree, choice == stackOfCurrentFolderWithBinding, os.Stderr)
 		if err != nil {
 			return nil, "", err
 		}
 	}
-	controller, err := newController(currentWorkspace, store, stackName, readyTimeout)
+	controller, err := newController(ctx, currentWorkspace, store, stackName, readyTimeout)
 	return controller, stackName, err
 }
 
@@ -362,7 +362,7 @@ func stateDirOf(homeDir string) string {
 	return filepath.Join(cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(homeDir, ".local", "state")), "ilot")
 }
 
-func newController(currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
+func newController(ctx context.Context, currentWorkspace workspace.Workspace, store state.Store, stackName string, readyTimeout time.Duration) (*ilotctl.Controller, error) {
 	stackConfig, err := currentWorkspace.ConfigForStack(stackName)
 	if err != nil {
 		return nil, err
@@ -380,7 +380,7 @@ func newController(currentWorkspace workspace.Workspace, store state.Store, stac
 	stateDir := store.RootDir
 	stackStore := ilotctl.StackStore{Files: store, Workspace: currentWorkspace.Name, Root: currentWorkspace.RootDir}
 	shellEnv := sync.OnceValues(func() (map[string]string, error) {
-		return shellenv.OfUser(global.ShellEnv.Args).Environment(context.Background())
+		return shellenv.OfUser(global.ShellEnv.Args).Environment(ctx)
 	})
 	ilotBinary, err := os.Executable()
 	if err != nil {

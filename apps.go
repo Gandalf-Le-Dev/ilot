@@ -35,7 +35,7 @@ type declaredExternalService struct {
 	Port int    `json:"port"`
 }
 
-func (command *appsCommand) Run() error {
+func (command *appsCommand) Run(ctx context.Context) error {
 	currentWorkspace, worktree, err := findCurrentWorkspace()
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func (command *appsCommand) Run() error {
 	if err != nil {
 		return err
 	}
-	currentWorkspace, stackName, err := stackOfWorktree(context.Background(), store, currentWorkspace, worktree, false, os.Stderr)
+	currentWorkspace, stackName, err := stackOfWorktree(ctx, store, currentWorkspace, worktree, false, os.Stderr)
 	if err != nil {
 		return err
 	}
